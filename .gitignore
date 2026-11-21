@@ -1,0 +1,7 @@
+.npm-cache/
+.phase1-evidence/
+node_modules/
+dist/
+*.sqlite*
+.env
+.env.*
