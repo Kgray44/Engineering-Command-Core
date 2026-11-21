@@ -26,7 +26,8 @@ async function receipt(projection){
  const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
  return {generated_at:projection.generated_at,digest:'sha256:'+digest,records:projection.records.length,events:projection.events.length,authority:projection.authority,acceptance:'not-granted'};
 }
-export async function mcp(request,env,{validate,validateEvent,taskRevision,fetcher = fetch}){
+export async function mcp(request,env,{validate,validateEvent,taskRevision,fetcher = fetch,application}){
+ const repository=application?.repository;
  const reply=(body,status=200)=>Response.json(body,{status,headers:{'cache-control':'private, no-store','x-content-type-options':'nosniff'}});
  const owner=request.headers.get('oai-authenticated-user-id');
  if(!owner)return reply({error:'Authenticated caller required'},401);
@@ -66,22 +67,22 @@ export async function mcp(request,env,{validate,validateEvent,taskRevision,fetch
     access = 'worker';
    }
    const rerunJob = args.request?.op === 'ci_tick' && access === 'worker'
-     ? integrationCIRerunner({env,owner,verification:args.verification ?? null,fetcher}) : undefined;
+     ? integrationCIRerunner({env,owner,verification:args.verification ?? null,fetcher,repository}) : undefined;
    const response = integrationWorkerOps.has(args.request?.op)
      ? await integrationOperation({ db: env.DB, owner, namespace, body: args.request, worker: access === 'worker',
        access:{...integrationAccess(env,owner,namespace),ci_enabled:Boolean(rerunJob)},rerunJob,
-       github:githubIntegration(fetcher,env.GITHUB_READ_TOKEN) })
-     : await taskOperation({ db: env.DB, owner, namespace, body: args.request, validate, access, revision: taskRevision });
+       github:githubIntegration(fetcher,env.GITHUB_READ_TOKEN,undefined,undefined,repository),repository })
+     : await taskOperation({ db: env.DB, owner, namespace, body: args.request, validate, access, revision: taskRevision, repository, projectAware:Boolean(application) });
    return result({status:response.status,...response.body},response.status>=400);
   }
   if(name==='sync_task_telemetry'){
    if(typeof args.task_id!=='string'||!telemetryTaskId.test(args.task_id))return fail(-32602,'Invalid Task ID');
    if(args.change===undefined)return result({baseline:await telemetryBaseline(env.DB,owner,namespace,args.task_id)});
-   const response=await ingestTaskTelemetry({db:env.DB,owner,namespace,id:args.task_id,body:args.change,validate,validateEvent});
+   const response=await ingestTaskTelemetry({db:env.DB,owner,namespace,id:args.task_id,body:args.change,validate,validateEvent,repository});
    return result({status:response.status,...response.body});
   }
   if(name==='project_execution_snapshot'){
-   const projection=validateProjection(args.projection,validate,validateEvent);
+   const projection=validateProjection(args.projection,validate,validateEvent,Date.now(),repository);
    if(!await storeProjection(env.DB,owner,namespace,projection))return result({error:'Older/conflicting projection or verification namespace limit reached'},true);
    return result(await receipt(projection));
   }

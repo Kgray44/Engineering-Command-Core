@@ -597,7 +597,7 @@ const workerStates = new Set(['available', 'busy', 'claim_rejected', 'task_conne
   'storage_guard_timeout', 'storage_reserve_denied', 'storage_guard_unavailable']);
 const workerFreshnessMs = 60_000;
 
-export async function taskOperation({ db, owner, namespace, body, access, validate, revision, now = Date.now() }) {
+export async function taskOperation({ db, owner, namespace, body, access, validate, revision, repository, projectId, projectAware = false, now = Date.now() }) {
   if (!body || !['list', 'get', 'register', 'command', ...workerOperations].includes(body.op)) return failure(400, 'Invalid Task operation');
   if (workerOperations.has(body.op) && access !== 'worker') return failure(403, 'Executor authorization required');
   if (body.op === 'command' && access !== 'owner' && !agentCommands.has(body.action?.type)) return failure(403, 'Owner action required');
@@ -628,6 +628,16 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     return success({ seen_at: timestamp(now) });
   }
   const rows = new Map((await readTaskRows({ db, owner, namespace, now })).map(row => [row.task_id, row]));
+  const projectGate = `
+    (NOT EXISTS (SELECT 1 FROM projects p WHERE p.owner_id = proposals.owner_id AND p.namespace = proposals.namespace
+      AND p.id = proposals.project_id AND p.status IN ('paused', 'archived'))
+    AND NOT EXISTS (SELECT 1 FROM project_task_gates g LEFT JOIN milestones m
+      ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id
+      WHERE g.owner_id = proposals.owner_id AND g.namespace = proposals.namespace AND g.task_id = proposals.task_id
+        AND m.status IS NOT 'accepted'))`;
+  const blockedTasks = projectAware ? new Set((await query(
+    'SELECT task_id FROM proposals WHERE owner_id = ? AND namespace = ? AND NOT ' + projectGate,
+    owner, namespace).all()).results.map(row => row.task_id)) : new Set();
   const currentRow = rows.get(body.task_id);
   const slotsInUse = () => [...rows.values()].filter(row => details(row).attempts.at(-1)?.state === 'running').length;
   const observeDispatch = async row => {
@@ -653,7 +663,8 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
   const receipts = id => query('SELECT event FROM task_engine_events WHERE owner_id = ? AND namespace = ? AND task_id = ? ORDER BY version',
     owner, namespace, id).all();
   const view = async row => ({
-    task: record(row), version: row.version, priority: row.priority, lifecycle: publicLifecycle(row, rows, now, true),
+    ...(blockedTasks.has(row.task_id) ? { project_blocked: true } : {}),
+    task: record(row), ...(projectAware ? { project_id: row.project_id ?? null } : {}), version: row.version, priority: row.priority, lifecycle: publicLifecycle(row, rows, now, true),
     attempts: details(row).attempts.map(exposeAttempt),
     events: [...proposalControl(row).history, ...(await receipts(row.task_id)).results
       .map(({ event }) => { const { digest, ...receipt } = JSON.parse(event); return receipt; })],
@@ -667,7 +678,8 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
       attempts: attempt ? [exposeAttempt(attempt)] : [], events: [receipt] };
   };
   const summary = row => ({
-    task: record(row), version: row.version, priority: row.priority, lifecycle: publicLifecycle(row, rows, now),
+    ...(blockedTasks.has(row.task_id) ? { project_blocked: true } : {}),
+    task: record(row), ...(projectAware ? { project_id: row.project_id ?? null } : {}), version: row.version, priority: row.priority, lifecycle: publicLifecycle(row, rows, now),
   });
   if (body.op === 'list') {
     const tasks = [...rows.values()].map(summary);
@@ -684,7 +696,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
       (typeof body.recovery_commitment !== 'string' || !recoveryProof.test(body.recovery_commitment))) {
     return failure(400, 'Invalid candidate recovery commitment');
   }
-  const digest = await sha256(JSON.stringify({ access, body }));
+  const digest = await sha256(JSON.stringify({ access, body, ...(projectId ? { projectId } : {}) }));
   const prior = await query('SELECT task_id, event FROM task_engine_events WHERE owner_id = ? AND namespace = ? AND operation_id = ?',
     owner, namespace, body.operation_id).first();
   if (prior) {
@@ -738,7 +750,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     }
     const version = row.version + 1;
     const next = { ...lifecycle, event: { ...event(id, kind, version, lifecycle.state, attemptId, eventDigest), ...receipt } };
-    const guard = fenceGraph ? unchangedGraph : 'version = ?';
+    const guard = (fenceGraph ? unchangedGraph : 'version = ?') + (projectAware && kind === 'claim' ? ' AND ' + projectGate : '');
     const args = fenceGraph ? snapshotArgs() : [row.version];
     const result = await query(`
       UPDATE proposals SET record = ?, engine = ?, version = ?, priority = ?
@@ -757,7 +769,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     if (!source) return failure(503, 'Known repository revision required');
     let task;
     try {
-      task = proposedTask(body.fields, source.revision ?? source, () => body.operation_id);
+      task = proposedTask(body.fields, source.revision ?? source, () => body.operation_id, repository);
       validateReferenceRevisions(task.requirements);
     }
     catch (error) { return failure(400, error.message); }
@@ -767,11 +779,11 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     if (!priorities.includes(priority)) return failure(400, 'Invalid priority');
     const lifecycle = { state: 'proposed', attempts: [], prerequisites: [], evidence: [], event: event(body.operation_id, 'register', 1, 'proposed') };
     const result = await query(`
-      INSERT OR IGNORE INTO proposals (owner_id, namespace, task_id, created_at, record, engine, priority, stale_revision)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE ${unchangedGraph}
+      INSERT OR IGNORE INTO proposals (owner_id, namespace, task_id, created_at, record, engine, priority, stale_revision${projectId ? ', project_id' : ''})
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?${projectId ? ', ?' : ''} WHERE ${unchangedGraph}
       RETURNING *
     `, owner, namespace, id, task.created_at, JSON.stringify(task), JSON.stringify(lifecycle), priority,
-    Number(source.status === 'stale'), ...snapshotArgs()).first();
+    Number(source.status === 'stale'), ...(projectId ? [projectId] : []), ...snapshotArgs()).first();
     return result ? success(await view(result), 201) : conflict();
   }
 
@@ -793,7 +805,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     const candidate = admitted.filter(row => !body.task_ids || body.task_ids.includes(row.task_id)).map(row => rows.get(row.task_id))
       .filter(row => {
         const lifecycle=details(row);
-        return (!needsContinuation(lifecycle)||body.conversation_continuation===true)&&
+        return !blockedTasks.has(row.task_id)&&(!needsContinuation(lifecycle)||body.conversation_continuation===true)&&
           waitState(record(row),lifecycle,rows,now).state==='ready';
       })
       .sort((a, b) => priorities.indexOf(b.priority) - priorities.indexOf(a.priority) ||

@@ -1,6 +1,5 @@
 import { REPO, isRevision } from './github.mjs';
 
-const api = 'https://api.github.com/repos/' + REPO;
 const byteLimit = 64 * 1024;
 const factLimit = 12;
 const positive = value => Number.isSafeInteger(value) && value > 0;
@@ -70,7 +69,8 @@ async function readSample(stream) {
   }
 }
 
-export async function githubStepLog({ fetcher, token, signal, apiVersion, job, step, paths }) {
+export async function githubStepLog({ fetcher, token, signal, apiVersion, job, step, paths, repository = REPO }) {
+  const api = 'https://api.github.com/repos/' + repository;
   const identity = { head_sha:job.head_sha, workflow_id:job.workflow_id, run_id:job.run_id,
     run_attempt:job.attempt, job_id:job.job_id, step_number:step.number };
   const unavailable = status => ({ source:'github_actions_step_log', ...identity, status });

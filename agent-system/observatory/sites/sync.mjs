@@ -3,8 +3,8 @@ import { sanitizeExport } from '../../../scripts/agent/telemetry-export.mjs';
 export const MAX_SYNC_BYTES = 1024 * 1024;
 export const MAX_VERIFICATION_NAMESPACES = 8;
 export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
-export function validateProjection(body, validateRecord, validateEvent, now = Date.now()) {
-  if (!body || body.export_version !== 1 || body.authority !== 'local-task-records' || body.repository !== 'Kgray44/Aetherwake') throw Error('Unsupported projection authority');
+export function validateProjection(body, validateRecord, validateEvent, now = Date.now(), repository = 'Kgray44/Aetherwake') {
+  if (!body || body.export_version !== 1 || body.authority !== 'local-task-records' || body.repository !== repository) throw Error('Unsupported projection authority');
   if (!Number.isFinite(Date.parse(body.generated_at)) || new Date(body.generated_at).toISOString() !== body.generated_at) throw Error('Invalid export timestamp');
   if (Date.parse(body.generated_at) > now + MAX_CLOCK_SKEW_MS) throw Error('Export timestamp is ahead of trusted clock');
   if (Object.keys(body).some(k => !['export_version','authority','repository','generated_at','records','events','coverage'].includes(k))) throw Error('Unexpected export field');

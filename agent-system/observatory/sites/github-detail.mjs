@@ -1,6 +1,6 @@
 import { capture, githubReader, isRevision, linkedPullNumbers, REPO, runItems } from './github.mjs';
 
-const WEB = 'https://github.com/' + REPO;
+const web = repository => 'https://github.com/' + repository;
 const JOB_LIMIT = 25;
 const STEP_LIMIT = 40;
 const BODY_LIMIT = 8000;
@@ -15,8 +15,8 @@ const names = values => Array.isArray(values) ? values.slice(0, 25).map(user => 
 const logins = v => text(v?.login, 100);
 const lifecycle = v => ({ status: text(v.status, 48), conclusion: text(v.conclusion, 48) });
 
-function pull(data, number) {
-  if (data?.number !== number || data.base?.repo?.full_name !== REPO || !isRevision(data.base?.sha) || !isRevision(data.head?.sha)) {
+function pull(data, number, repository) {
+  if (data?.number !== number || data.base?.repo?.full_name !== repository || !isRevision(data.base?.sha) || !isRevision(data.head?.sha)) {
     throw new Error('Pull request identity mismatch');
   }
   const labels = Array.isArray(data.labels) ? data.labels.slice(0, 40) : [];
@@ -39,12 +39,12 @@ function pull(data, number) {
     closed_at: time(data.closed_at), merged_at: time(data.merged_at),
     changed_files: count(data.changed_files), additions: count(data.additions), deletions: count(data.deletions),
     commits: count(data.commits), comments: count(data.comments), review_comments: count(data.review_comments),
-    url: WEB + '/pull/' + number,
+    url: web(repository) + '/pull/' + number,
   };
 }
 
-function run(data, id) {
-  if (data?.id !== id || data.repository?.full_name !== REPO || !positive(data.run_attempt) || !isRevision(data.head_sha)) {
+function run(data, id, repository) {
+  if (data?.id !== id || data.repository?.full_name !== repository || !positive(data.run_attempt) || !isRevision(data.head_sha)) {
     throw new Error('Workflow run identity mismatch');
   }
   return {
@@ -54,11 +54,11 @@ function run(data, id) {
     workflow_id: positive(data.workflow_id) ? data.workflow_id : null,
     path: text(data.path),
     head_repository_id: positive(data.head_repository?.id) ? data.head_repository.id : null,
-    repository_owned_head: data.head_repository?.full_name === REPO,
-    pull_requests: linkedPullNumbers(data),
+    repository_owned_head: data.head_repository?.full_name === repository,
+    pull_requests: linkedPullNumbers(data, repository),
     head: ref(data.head_branch, data.head_sha), created_at: time(data.created_at),
     started_at: time(data.run_started_at), updated_at: time(data.updated_at),
-    url: WEB + '/actions/runs/' + id,
+    url: web(repository) + '/actions/runs/' + id,
   };
 }
 
@@ -150,13 +150,13 @@ async function pullSections(reader, path, detail, previous, validators, next, no
 
 const emptyJobs = { jobs: [], total_jobs: null, jobs_truncated: false, jobs_observed_at: null, jobs_stale: false };
 
-export async function fetchGitHubDetail(fetcher, token, kind, id, { now, previous, validators, previousFailures }) {
-  const reader = githubReader(fetcher, AbortSignal.timeout(8000), token, now, null, previousFailures);
+export async function fetchGitHubDetail(fetcher, token, kind, id, { now, previous, validators, previousFailures, repository = REPO }) {
+  const reader = githubReader(fetcher, AbortSignal.timeout(8000), token, now, null, previousFailures, repository);
   const path = (kind === 'pulls' ? '/pulls/' : '/actions/runs/') + id;
   const next = {};
   const core = await capture(async () => {
     const current = await reader.get(path, 256 * 1024, previous ? validators.core : null);
-    const detail = current.unchanged ? previous : kind === 'pulls' ? pull(current.data, id) : run(current.data, id);
+    const detail = current.unchanged ? previous : kind === 'pulls' ? pull(current.data, id, repository) : run(current.data, id, repository);
     next.core = current.etag;
     return { detail };
   });
@@ -177,7 +177,7 @@ export async function fetchGitHubDetail(fetcher, token, kind, id, { now, previou
           throw new Error('Invalid workflow history');
         }
         next.history = response.etag;
-        const items = response.unchanged ? previous.history.items : runItems(data.workflow_runs).filter(item =>
+        const items = response.unchanged ? previous.history.items : runItems(data.workflow_runs, repository).filter(item =>
           item.workflow_id === target.workflow_id && item.branch === target.head.ref && item.event === target.event &&
           item.head_repository_id === target.head_repository_id && item.created_at < target.created_at && item.id !== target.id);
         return { history: { items, status: 'available', observed_at: new Date(now()).toISOString() } };

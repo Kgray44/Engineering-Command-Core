@@ -1,11 +1,9 @@
 import { TASK_REQUEST_MAX_BYTES } from '../intake.mjs';
-import { readBounded } from './github.mjs';
-
-const repository = 'Kgray44/Aetherwake';
+import { readBounded, REPO } from './github.mjs';
 const branch = 'observatory-proposed-tasks';
 const directory = 'Proposed%20Tasks';
 
-export async function publishProposal(db, fetcher, token, owner, taskId, validate) {
+export async function publishProposal(db, fetcher, token, owner, taskId, validate, repository = REPO) {
   const row = await db.prepare(
     "SELECT record, github_state FROM proposals WHERE owner_id = ? AND namespace = 'live' AND task_id = ?",
   ).bind(owner, taskId).first();
@@ -15,7 +13,7 @@ export async function publishProposal(db, fetcher, token, owner, taskId, validat
   if (!token) return { state: 'pending', reason: 'GitHub publishing credential is missing.' };
 
   const task = JSON.parse(row.record);
-  if (!validate(task) || task.state !== 'proposed' || task.owner_acceptance !== 'not_reviewed' || task.id !== taskId) {
+  if (!validate(task) || task.state !== 'proposed' || task.owner_acceptance !== 'not_reviewed' || task.id !== taskId || task.repository !== repository) {
     return { state: 'pending', reason: 'Stored proposal is not eligible for publication.' };
   }
   const document = JSON.stringify(task, null, 2) + '\n';

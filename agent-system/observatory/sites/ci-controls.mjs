@@ -2,15 +2,14 @@ import { DIAGNOSTIC, diagnosticRunName, isCancellableRun, isFailedConclusion } f
 import { REPO, isRevision, readBounded } from './github.mjs';
 import { operationId } from './proposal-controls.mjs';
 
-const API = 'https://api.github.com/repos/' + REPO;
 const MAX_OPERATIONS = 1000;
 const LOOKUP_INTERVAL_MS = 3000;
 const POSITIVE = value => Number.isSafeInteger(value) && value > 0;
 const failure = (status, error) => ({ status, body: { error } });
 const badRequest = () => failure(400, 'Invalid CI operation or target');
-const sameRepo = value => value?.full_name === REPO;
-const isPinnedRun = (run, id) => run?.id === id && sameRepo(run.repository) &&
-  sameRepo(run.head_repository) && isRevision(run.head_sha) && POSITIVE(run.workflow_id) && POSITIVE(run.run_attempt);
+const sameRepo = (value, repository) => value?.full_name === repository;
+const isPinnedRun = (run, id, repository) => run?.id === id && sameRepo(run.repository, repository) &&
+  sameRepo(run.head_repository, repository) && isRevision(run.head_sha) && POSITIVE(run.workflow_id) && POSITIVE(run.run_attempt);
 const runPath = id => '/actions/runs/' + id;
 
 function validSecret(env) {
@@ -29,9 +28,9 @@ export function ciAccess(env, owner, verification) {
   return { enabled: true, diagnostics: [{ key: DIAGNOSTIC.key, name: DIAGNOSTIC.name, ref: DIAGNOSTIC.ref }] };
 }
 
-export function integrationCIRerunner({env,owner,verification,fetcher}) {
+export function integrationCIRerunner({env,owner,verification,fetcher,repository}) {
   if (!ciAccess(env,owner,verification).enabled) return undefined;
-  return (job,id) => submitCI({db:env.DB,owner,fetcher,token:env.GITHUB_ACTIONS_TOKEN,
+  return (job,id) => submitCI({db:env.DB,owner,fetcher,token:env.GITHUB_ACTIONS_TOKEN,repository,
     body:{type:'rerun_job',operation_id:id,expected_revision:job.head_sha,run_id:job.run_id,
       workflow_id:job.workflow_id,attempt:job.attempt,job_id:job.job_id}});
 }
@@ -56,7 +55,8 @@ function parseAction(body) {
   return Object.keys(body).every(key => Object.hasOwn(action, key)) ? action : null;
 }
 
-function gitHub(fetcher, token) {
+function gitHub(fetcher, token, repository) {
+  const api = 'https://api.github.com/repos/' + repository;
   const headers = {
     Accept: 'application/vnd.github+json',
     Authorization: 'Bearer ' + token,
@@ -70,7 +70,7 @@ function gitHub(fetcher, token) {
       init.headers = { ...headers, 'Content-Type': 'application/json' };
       init.body = JSON.stringify(body);
     }
-    return fetcher(API + path, init);
+    return fetcher(api + path, init);
   };
 }
 
@@ -103,7 +103,7 @@ function runIdentity(run) {
   };
 }
 
-async function preflight(send, action) {
+async function preflight(send, action, repository) {
   if (action.type === 'dispatch') {
     const [workflow, main] = await Promise.all([
       readGitHub(send, '/actions/workflows/' + DIAGNOSTIC.file),
@@ -124,7 +124,7 @@ async function preflight(send, action) {
   }
   const path = runPath(action.run_id);
   const run = await readGitHub(send, path);
-  if (!isPinnedRun(run, action.run_id) || run.head_sha !== action.expected_revision ||
+  if (!isPinnedRun(run, action.run_id, repository) || run.head_sha !== action.expected_revision ||
       run.workflow_id !== action.workflow_id || run.run_attempt !== action.attempt) {
     targetError('The workflow run is stale, belongs to a fork, or does not match the confirmed revision. Refresh the run.');
   }
@@ -161,7 +161,7 @@ async function preflight(send, action) {
     target.job_name = typeof job.name === 'string' ? job.name.slice(0, 240) : null;
     // A rerun is addressed by GitHub job ID. Check that it is still the latest attempt after the job read.
     const current = await readGitHub(send, path);
-    if (!isPinnedRun(current, action.run_id) || current.run_attempt !== action.attempt ||
+    if (!isPinnedRun(current, action.run_id, repository) || current.run_attempt !== action.attempt ||
         current.head_sha !== action.expected_revision || current.workflow_id !== action.workflow_id ||
         current.status !== 'completed' || current.conclusion !== run.conclusion) targetError('The workflow attempt changed during confirmation.');
     return { target, key, path: '/actions/jobs/' + action.job_id + '/rerun', body: { enable_debug_logging: false }, expectedStatus: 201 };
@@ -187,7 +187,7 @@ function updateOperation(db, row, state, response) {
     .bind(state, JSON.stringify(response), new Date().toISOString(), row.owner_id, row.operation_id, row.updated_at, row.state).run();
 }
 
-async function readback(send, body, action, accepted) {
+async function readback(send, body, action, accepted, repository) {
   const { target } = body;
   let id = body.dispatched_run_id;
   if (action.type === 'dispatch' && !id) {
@@ -202,7 +202,7 @@ async function readback(send, body, action, accepted) {
   const rerun = action.type.startsWith('rerun_');
   const attempt = action.type === 'dispatch' ? 1 : rerun ? action.attempt + 1 : action.attempt;
   const run = await readGitHub(send, runPath(id) + '/attempts/' + attempt);
-  if (!isPinnedRun(run, id) || run.workflow_id !== target.workflow_id ||
+  if (!isPinnedRun(run, id, repository) || run.workflow_id !== target.workflow_id ||
       run.run_attempt !== attempt ||
       (action.type === 'dispatch' && (run.event !== 'workflow_dispatch' ||
         run.head_branch !== DIAGNOSTIC.ref || run.display_title !== diagnosticRunName(action.operation_id)))) return null;
@@ -229,7 +229,7 @@ async function readback(send, body, action, accepted) {
   return { state: 'observed', observed, message: 'GitHub readback found the requested effect.' };
 }
 
-export async function ciStatus({ db, owner, id, fetcher, token }) {
+export async function ciStatus({ db, owner, id, fetcher, token, repository = REPO }) {
   if (!id) {
     const rows = await db.prepare('SELECT * FROM ci_operations WHERE owner_id = ? ORDER BY created_at DESC LIMIT 20').bind(owner).all();
     return { status: 200, body: { operations: rows.results.map(receipt) } };
@@ -251,7 +251,7 @@ export async function ciStatus({ db, owner, id, fetcher, token }) {
     // POST completion may have raced an expired sending receipt. Update only the version claimed above.
     if (latest.state === row.state) {
       let result;
-      try { result = await readback(gitHub(fetcher, token), body, action, ['accepted', 'observed'].includes(row.state)); }
+      try { result = await readback(gitHub(fetcher, token, repository), body, action, ['accepted', 'observed'].includes(row.state), repository); }
       catch { /* GitHub eventual consistency and read limits leave acceptance pending. */ }
       if (result) {
         const { state, ...details } = result;
@@ -262,7 +262,7 @@ export async function ciStatus({ db, owner, id, fetcher, token }) {
   return { status: 200, body: { operation: receipt(await operationRow(db, owner, id)) } };
 }
 
-export async function submitCI({ db, owner, body, fetcher, token }) {
+export async function submitCI({ db, owner, body, fetcher, token, repository = REPO }) {
   const action = parseAction(body);
   if (!action) return badRequest();
   const serialized = JSON.stringify(action);
@@ -274,9 +274,9 @@ export async function submitCI({ db, owner, body, fetcher, token }) {
   };
   const previous = await replay();
   if (previous) return previous;
-  const send = gitHub(fetcher, token);
+  const send = gitHub(fetcher, token, repository);
   let plan;
-  try { plan = await preflight(send, action); }
+  try { plan = await preflight(send, action, repository); }
   catch (cause) {
     if (cause.target) return failure(409, cause.message);
     return failure(cause.status === 401 || cause.status === 403 ? 403 : 503,

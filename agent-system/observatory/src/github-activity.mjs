@@ -74,13 +74,16 @@ export function runRepositoryTotal(group) {
   return Number.isSafeInteger(total) && total >= 0 ? total : null;
 }
 
-export function taskActivityHref(uri) {
+export function taskActivityHref(uri, repository = 'Kgray44/Aetherwake') {
   if (typeof uri !== 'string') return null;
   let url;
   try { url = new URL(uri); } catch { return null; }
   if (url.origin !== 'https://github.com' || url.username || url.password) return null;
-  const pull = /^\/Kgray44\/Aetherwake\/pull\/([1-9]\d*)(?:\/(?:files|commits|checks))?\/?$/i.exec(url.pathname);
-  const run = /^\/Kgray44\/Aetherwake\/actions\/runs\/([1-9]\d*)(?:\/(?:job|attempts)\/[1-9]\d*)?\/?$/i.exec(url.pathname);
+  const prefix = '/' + repository + '/';
+  if (!url.pathname.toLowerCase().startsWith(prefix.toLowerCase())) return null;
+  const path = url.pathname.slice(prefix.length);
+  const pull = /^pull\/([1-9]\d*)(?:\/(?:files|commits|checks))?\/?$/i.exec(path);
+  const run = /^actions\/runs\/([1-9]\d*)(?:\/(?:job|attempts)\/[1-9]\d*)?\/?$/i.exec(path);
   const id = Number(pull?.[1] ?? run?.[1]);
   return Number.isSafeInteger(id) ? activityHref(pull ? 'pulls' : 'runs', id) : null;
 }

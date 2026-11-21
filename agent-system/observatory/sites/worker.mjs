@@ -25,10 +25,11 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; style-src-
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 const error = (message, status) => json({ error: message }, status);
 
-export function createWorker({ assets, validate, sourceRevision, validateEvent, fetcher = fetch }) {
+export function createWorker({ assets, validate, sourceRevision, validateEvent, fetcher = fetch, application }) {
+  const repository = application?.repository;
   const lookupOpenAIPrice = createOpenAIModelPricing(fetcher);
   async function taskRevision(env) {
-    const { main } = await cachedGitHub(env.DB, fetcher, validate, env.GITHUB_READ_TOKEN || env.GITHUB_PROPOSAL_TOKEN);
+    const { main } = await cachedGitHub(env.DB, fetcher, validate, env.GITHUB_READ_TOKEN || env.GITHUB_PROPOSAL_TOKEN, Date.now(), repository);
     return isRevision(main.revision) && (main.status === 'available' || (main.status === 'stale' && main.observed_at)) ? main : null;
   }
   async function api(request, env, url) {
@@ -82,9 +83,9 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
           : JSON.parse(await readBounded(request.body, 4096));
       } catch (cause) { return error('Invalid integration request', cause instanceof RangeError ? 413 : 400); }
       const github = githubIntegration(fetcher, env.GITHUB_READ_TOKEN, access.merge_enabled ? env.GITHUB_INTEGRATION_MERGE_TOKEN : null,
-        access.publish_enabled ? env.GITHUB_INTEGRATION_PUBLISH_TOKEN : null);
-      const rerunJob = integrationCIRerunner({env,owner,verification,fetcher});
-      const result = await integrationOperation({ db: env.DB, owner, namespace, github, access, body, rerunJob });
+        access.publish_enabled ? env.GITHUB_INTEGRATION_PUBLISH_TOKEN : null, repository);
+      const rerunJob = integrationCIRerunner({env,owner,verification,fetcher,repository});
+      const result = await integrationOperation({ db: env.DB, owner, namespace, github, access, body, rerunJob, repository });
       return json(result.body, result.status);
     }
 
@@ -94,7 +95,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
       catch (cause) { return error('Invalid Task request', cause instanceof RangeError ? 413 : 400); }
       const access=owner===env.OBSERVATORY_TASK_ENGINE_OWNER_ID?'owner':'agent';
       const result=await taskOperation({
-        db:env.DB,owner,namespace,body,validate,revision:()=>taskRevision(env),access,
+        db:env.DB,owner,namespace,body,validate,revision:()=>taskRevision(env),access,repository,projectAware:Boolean(application),
       });
       if (body.op==='list'&&result.status===200&&access==='owner') {
         const codex=isTaskWorkerKey(env.OBSERVATORY_TASK_WORKER_KEY)?'configured':'not_configured';
@@ -102,7 +103,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
       }
       if (result.status===200&&['get','command'].includes(body.op)&&result.body.lifecycle) {
         const {links=[],evidence=[]}=result.body.lifecycle;
-        const snapshots=await peekTaskGitHubDetails(env.DB,env.GITHUB_READ_TOKEN||env.GITHUB_PROPOSAL_TOKEN,[...links,...evidence])
+        const snapshots=await peekTaskGitHubDetails(env.DB,env.GITHUB_READ_TOKEN||env.GITHUB_PROPOSAL_TOKEN,[...links,...evidence], Date.now(), repository)
           .catch(()=>[]);
         return json({...result.body,engineering_snapshots:snapshots});
       }
@@ -113,7 +114,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
       const access = ciAccess(env, owner, verification);
       if (!access.enabled) return readOnly && !url.searchParams.has('operation')
         ? json({ access, operations: [] }) : error(access.reason, 403);
-      const options = { db: env.DB, owner, fetcher, token: env.GITHUB_ACTIONS_TOKEN };
+      const options = { db: env.DB, owner, fetcher, token: env.GITHUB_ACTIONS_TOKEN, repository };
       if (readOnly) {
         const result = await ciStatus({ ...options, id: url.searchParams.get('operation') });
         return json({ access, ...result.body }, result.status);
@@ -125,7 +126,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
       return json(result.body, result.status);
     }
 
-    const syncScope = () => sha256(JSON.stringify(['observatory-telemetry-v1', owner, namespace]));
+    const syncScope = () => sha256(JSON.stringify(['observatory-telemetry-v1', owner, namespace, ...(application ? [application.id] : [])]));
     if (automaticSync) {
       const id = decodeURIComponent(url.pathname.slice('/api/task-telemetry/'.length));
       if (!telemetryTaskId.test(id)) return error('Invalid telemetry Task ID', 400);
@@ -136,7 +137,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
       let body;
       try { body = JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)); }
       catch (cause) { return error('Invalid telemetry update payload', cause instanceof RangeError ? 413 : 400); }
-      const result = await ingestTaskTelemetry({ db: env.DB, owner, namespace, id, body, validate, validateEvent });
+      const result = await ingestTaskTelemetry({ db: env.DB, owner, namespace, id, body, validate, validateEvent, repository });
       return json(result.body, result.status);
     }
 
@@ -158,25 +159,25 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
 
     if (publish) {
       if (verification !== null || !UUID.test(publish[1])) return error('Not found', 404);
-      const github = await publishProposal(env.DB, fetcher, env.GITHUB_PROPOSAL_TOKEN, owner, 'task_' + publish[1], validate);
+      const github = await publishProposal(env.DB, fetcher, env.GITHUB_PROPOSAL_TOKEN, owner, 'task_' + publish[1], validate, repository);
       return github ? json({ github }) : error('Proposal not found', 404);
     }
     const readToken = env.GITHUB_READ_TOKEN || env.GITHUB_PROPOSAL_TOKEN;
-    if (detailsRoute) return json(await cachedGitHubDetail(env.DB, fetcher, readToken, detailsRoute[1], detailId));
+    if (detailsRoute) return json(await cachedGitHubDetail(env.DB, fetcher, readToken, detailsRoute[1], detailId, Date.now(), repository));
 
     if (sync) {
       let projection;
-      try { projection = validateProjection(JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)), validate, validateEvent); }
+      try { projection = validateProjection(JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)), validate, validateEvent, Date.now(), repository); }
       catch (cause) { return error(cause instanceof RangeError ? 'Payload too large' : 'Invalid private projection', cause instanceof RangeError ? 413 : 400); }
       const saved = await storeProjection(env.DB, owner, namespace, projection);
       return saved ? json({ stored: true, authority: 'local-task-records', approval: 'not-granted' }) : error('Older/conflicting projection or verification namespace limit reached', 409);
     }
     if (overview) {
-      const repository = url.searchParams.get('prefer') === 'cached'
-        ? peekGitHub(env.DB, readToken)
-        : cachedGitHub(env.DB, fetcher, validate, readToken).then(snapshot => ({snapshot,refresh:false}));
+      const githubData = url.searchParams.get('prefer') === 'cached'
+        ? peekGitHub(env.DB, readToken, Date.now(), repository)
+        : cachedGitHub(env.DB, fetcher, validate, readToken, Date.now(), repository).then(snapshot => ({snapshot,refresh:false}));
       const [{snapshot, refresh}, rows, projectionRow, taskTelemetry, telemetryScope] = await Promise.all([
-        repository,
+        githubData,
         readTaskRows({ db: env.DB, owner, namespace }),
         env.DB.prepare('SELECT payload FROM private_projection WHERE owner_id = ? AND namespace = ?').bind(owner, namespace).first(),
         env.DB.prepare('SELECT task_id, digest, received_at, payload, event_receipt_batches FROM task_telemetry WHERE owner_id = ? AND namespace = ? ORDER BY received_at DESC, task_id')
@@ -245,10 +246,10 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
     if (existing) {
       const task = JSON.parse(existing.record);
       const github = existing.github_state
-        ? await publishProposal(env.DB, fetcher, env.GITHUB_PROPOSAL_TOKEN, owner, task.id, validate) : null;
+        ? await publishProposal(env.DB, fetcher, env.GITHUB_PROPOSAL_TOKEN, owner, task.id, validate, repository) : null;
       return json({ task, github, revision_was_stale: existing.stale_revision === 1 });
     }
-    const { main } = await cachedGitHub(env.DB, fetcher, validate, readToken);
+    const { main } = await cachedGitHub(env.DB, fetcher, validate, readToken, Date.now(), repository);
     const staleRevision = main.status === 'stale';
     const privateCachedRevision = staleRevision && !publicProposal && Boolean(main.observed_at);
     if (!isRevision(main.revision) || (main.status !== 'available' && !privateCachedRevision)) {
@@ -257,7 +258,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
 
     let task;
     try {
-      task = proposedTask(body, main.revision, requestId ? () => requestId : undefined);
+      task = proposedTask(body, main.revision, requestId ? () => requestId : undefined, repository);
     } catch (cause) {
       return error(cause.message, 400);
     }
@@ -270,7 +271,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
     `).bind(owner, namespace, task.id, task.created_at, JSON.stringify(task), publicProposal ? 'pending' : null, Number(staleRevision), owner, namespace, MAX_PROPOSALS).run();
     if (result.meta.changes !== 1) return error('Proposal already submitted or proposal limit reached. Retry the same request to check.', 409);
     const github = publicProposal
-      ? await publishProposal(env.DB, fetcher, env.GITHUB_PROPOSAL_TOKEN, owner, task.id, validate) : null;
+      ? await publishProposal(env.DB, fetcher, env.GITHUB_PROPOSAL_TOKEN, owner, task.id, validate, repository) : null;
     return json({
       task, github, revision_was_stale: staleRevision,
       storage: verification === null ? 'private-sites-d1' : 'isolated-verification-d1',
@@ -279,9 +280,13 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
   }
 
   return {
+    registerProjectTask({ env, owner, namespace, body, projectId }) {
+      return taskOperation({ db: env.DB, owner, namespace, body, projectId, access: 'owner', validate,
+        repository, projectAware: true, revision: () => taskRevision(env) });
+    },
     async fetch(request, env) {
       const url = new URL(request.url);
-      if(url.pathname === '/mcp') return mcp(request, env, {validate, validateEvent, fetcher, taskRevision: () => taskRevision(env)});
+      if(url.pathname === '/mcp') return mcp(request, env, {validate, validateEvent, fetcher, application, taskRevision: () => taskRevision(env)});
       if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
         try { return await api(request, env, url); }
         catch { return error('Observatory data temporarily unavailable', 503); }

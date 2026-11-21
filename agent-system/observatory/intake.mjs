@@ -63,10 +63,10 @@ export function validateNewTask(b){
     requirements:b.requirements?.map(({kind,uri,revision})=>({kind,uri:uri.trim(),...(revision?.trim()?{revision:revision.trim()}:{})})),
     deliverables:b.deliverables?.map(item=>item.trim())};
 }
-export function proposedTask(body,rev,uuid=()=>crypto.randomUUID()){
+export function proposedTask(body,rev,uuid=()=>crypto.randomUUID(),repository='Kgray44/Aetherwake'){
   const v=validateNewTask(body);
   if(!rev||!/^[0-9a-f]{40}$/.test(rev))throw Error('A checked-out Git revision is required to create a task');
   const now=new Date().toISOString(),id='task_'+uuid();
-  return {schema_version:1,record_type:'task',id,created_at:now,repository:'Kgray44/Aetherwake',revision:rev,title:v.title,objective:v.objective,classification:{primary:v.primary,secondary:[]},prerequisites:{task_ids:v.ids,capabilities:v.capabilities,...(v.mergedIds.length?{merged_task_ids:v.mergedIds}:{})},acceptance:{profile_id:v.profile,criteria:v.accept},state:'proposed',owner_acceptance:'not_reviewed',artifacts:[],
+  return {schema_version:1,record_type:'task',id,created_at:now,repository,revision:rev,title:v.title,objective:v.objective,classification:{primary:v.primary,secondary:[]},prerequisites:{task_ids:v.ids,capabilities:v.capabilities,...(v.mergedIds.length?{merged_task_ids:v.mergedIds}:{})},acceptance:{profile_id:v.profile,criteria:v.accept},state:'proposed',owner_acceptance:'not_reviewed',artifacts:[],
     ...(v.requirements?.length?{requirements:v.requirements}:{}),...(v.deliverables?.length?{deliverables:v.deliverables}:{})};
 }

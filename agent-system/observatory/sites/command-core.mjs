@@ -1,0 +1,178 @@
+import { applicationId, repositoryName, uuid } from './application-config.mjs';
+import { readBounded } from './github.mjs';
+import { projectOperation } from './projects.mjs';
+import { MAX_SYNC_BYTES } from './sync.mjs';
+import { createWorker } from './worker.mjs';
+
+const identityHeader = 'oai-authenticated-user-id';
+const environmentKeys = [
+  'DB', 'OBSERVATORY_TASK_ENGINE_OWNER_ID', 'OBSERVATORY_TASK_WORKER_KEY', 'OBSERVATORY_CI_OWNER_ID',
+  'OBSERVATORY_INTEGRATION_MERGE_OWNER_ID', 'OBSERVATORY_INTEGRATION_PUBLISH_OWNER_ID',
+  'OBSERVATORY_INTEGRATION_SOURCE_REPAIR_OWNER_ID', 'GITHUB_READ_TOKEN', 'GITHUB_PROPOSAL_TOKEN',
+  'GITHUB_ACTIONS_TOKEN', 'GITHUB_INTEGRATION_MERGE_TOKEN', 'GITHUB_INTEGRATION_PUBLISH_TOKEN',
+];
+const secrets = environmentKeys.filter(key => key.endsWith('_KEY') || key.endsWith('_TOKEN'));
+const toolSchema = {
+  type: 'object', additionalProperties: false, required: ['application_id', 'request'],
+  properties: { application_id: { type: 'string', pattern: applicationId.source }, verification: { type: 'string' },
+    request: { type: 'object', required: ['op'], properties: {
+      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate'] },
+      id: { type: 'string', description: 'Project UUID' },
+    } } },
+};
+const response = (body, status = 200) => Response.json(body, {
+  status, headers: { 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' },
+});
+const error = (message, status) => response({ error: message }, status);
+
+function scopedEnvironment(env, binding) {
+  return Object.fromEntries(environmentKeys.map(key => [key, env[binding]?.[key] ?? env[binding + '_' + key]]));
+}
+
+export function createCommandCore({ applications, portfolio = { id: 'engineering', name: 'Engineering' },
+  legacyApplication, trustedIdentity = request => request.headers.get(identityHeader), ...workerOptions }) {
+  if (!Array.isArray(applications) || !applications.length || !applicationId.test(portfolio.id)) throw Error('Invalid portfolio');
+  const byId = new Map();
+  const byOrigin = new Map();
+  const bindings = new Set();
+  const repositories = new Set();
+  for (const config of applications) {
+    const { id, name, repository, origin, binding } = config;
+    if (typeof id !== 'string' || !applicationId.test(id) || typeof name !== 'string' || !name ||
+      typeof repository !== 'string' || !repositoryName.test(repository) || repository.endsWith('/.') || repository.endsWith('/..') ||
+      typeof binding !== 'string' || !/^[A-Z][A-Z0-9_]{0,47}$/.test(binding) ||
+      typeof origin !== 'string' || !/^https:\/\//.test(origin) || new URL(origin).origin !== origin ||
+      byId.has(id) || byOrigin.has(origin) || bindings.has(binding) || repositories.has(repository.toLowerCase())) {
+      throw Error('Invalid or duplicate application configuration');
+    }
+    bindings.add(binding);
+    repositories.add(repository.toLowerCase());
+    const application = Object.freeze({ id, name, repository, portfolio_id: portfolio.id });
+    const worker = createWorker({ ...workerOptions, assets: config.assets ?? workerOptions.assets, application });
+    const runtime = { application, worker, binding };
+    byId.set(id, runtime);
+    byOrigin.set(origin, runtime);
+  }
+  if (legacyApplication !== undefined && !byId.has(legacyApplication)) throw Error('Unknown legacy application');
+
+  function resolve(request, env, owner, runtime) {
+    if (!runtime) return null;
+    const scoped = scopedEnvironment(env, runtime.binding);
+    if (scoped.OBSERVATORY_TASK_ENGINE_OWNER_ID !== owner) return null;
+    return scoped;
+  }
+
+  async function checkPartition(env, runtime, scoped) {
+    if (!scoped.DB) return false;
+    for (const other of byId.values()) {
+      if (other === runtime) continue;
+      const peer = scopedEnvironment(env, other.binding);
+      if (scoped.DB === peer.DB || secrets.some(key => scoped[key] && secrets.some(otherKey => scoped[key] === peer[otherKey]))) {
+        return false;
+      }
+    }
+    const binding = await scoped.DB.prepare('SELECT application_id, repository, portfolio_id FROM application_partition WHERE singleton = 1')
+      .bind().first();
+    return binding?.application_id === runtime.application.id && binding?.repository === runtime.application.repository &&
+      binding?.portfolio_id === portfolio.id;
+  }
+
+  async function project(runtime, scoped, owner, verification, body) {
+    if (verification !== undefined && (typeof verification !== 'string' || !uuid.test(verification))) {
+      return { status: 400, body: { error: 'Invalid verification namespace' } };
+    }
+    const namespace = verification ? 'verification:' + verification : 'live';
+    return projectOperation({ db: scoped.DB, owner, namespace, application: runtime.application, body,
+      registerTask: (projectId, task) => runtime.worker.registerProjectTask({ env: scoped, owner, namespace, body: task, projectId }),
+    });
+  }
+
+  return {
+    async fetch(request, env) {
+      const url = new URL(request.url);
+      if (url.pathname === '/healthz' && request.method === 'GET') return response({ status: 'ready', service: 'engineering-command-core' });
+      const originRuntime = byOrigin.get(url.origin);
+      const owner = await trustedIdentity(request, env);
+      if (!owner) return error('Authenticated caller required', 401);
+      if (!originRuntime) return error('Application origin unavailable', 404);
+      try {
+        if (url.pathname === '/mcp') {
+          if (request.method !== 'POST') return error('Method not allowed', 405);
+          const origin = request.headers.get('origin');
+          if ((origin !== null && origin !== url.origin) ||
+              ![null, 'none', 'same-origin'].includes(request.headers.get('sec-fetch-site'))) return error('Cross-origin request rejected', 403);
+          if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') return error('Expected JSON', 415);
+          let message;
+          try { message = JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)); }
+          catch { return error('Invalid or oversized RPC request', 400); }
+          if (message?.jsonrpc !== '2.0' || !['string', 'number'].includes(typeof message.id)) return error('Invalid RPC envelope', 400);
+          const rpc = result => response({ jsonrpc: '2.0', id: message.id, result });
+          const reject = (code, messageText) => response({ jsonrpc: '2.0', id: message.id, error: { code, message: messageText } });
+          const allowed = [...byId.values()].filter(app => resolve(request, env, owner, app));
+          if (!allowed.length) return error('Application access denied', 403);
+          const named = message.params?.name;
+          const args = message.params?.arguments ?? {};
+          const forward = (runtime, scoped, payload) => runtime.worker.fetch(new Request(url, {
+            method: 'POST', headers: request.headers, body: JSON.stringify(payload),
+          }), scoped);
+          if (message.method === 'tools/list') {
+            const app = allowed[0];
+            const original = await (await forward(app, resolve(request, env, owner, app), message)).json();
+            const existing = original.result.tools.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
+              properties: { ...tool.inputSchema.properties, application_id: toolSchema.properties.application_id },
+            } }));
+            return rpc({ tools: [...existing, { name: 'projects_v1', description: 'List and manage scoped engineering Projects', inputSchema: toolSchema },
+              { name: 'list_applications', description: 'List engineering applications assigned to the authenticated caller',
+                inputSchema: { type: 'object', additionalProperties: false, properties: {} } }] });
+          }
+          if (message.method !== 'tools/call') return forward(allowed[0], resolve(request, env, owner, allowed[0]), message);
+          if (typeof args !== 'object' || !args || Array.isArray(args)) return reject(-32602, 'Invalid tool arguments');
+          if (named === 'list_applications') {
+            if (Object.keys(args).length) return reject(-32602, 'Unexpected arguments');
+            const structuredContent = { portfolio, applications: allowed.map(app => app.application) };
+            return rpc({ structuredContent, content: [{ type: 'text', text: JSON.stringify(structuredContent) }] });
+          }
+          const { application_id: selected, ...params } = args;
+          const compatible = named !== 'projects_v1' && originRuntime.application.id === legacyApplication;
+          if (selected === undefined && !compatible || selected !== undefined && (typeof selected !== 'string' || !applicationId.test(selected))) {
+            return reject(-32602, 'Explicit application identity required');
+          }
+          const runtime = byId.get(selected ?? legacyApplication);
+          const scoped = resolve(request, env, owner, runtime);
+          if (!scoped) return error('Application access denied', 403);
+          if (!await checkPartition(env, runtime, scoped)) return error('Application partition unavailable', 503);
+          if (named === 'projects_v1') {
+            if (Object.keys(params).some(key => !['verification', 'request'].includes(key))) return reject(-32602, 'Invalid Projects arguments');
+            const result = await project(runtime, scoped, owner, params.verification, params.request);
+            const structuredContent = { status: result.status, ...result.body };
+            return rpc({ structuredContent, content: [{ type: 'text', text: JSON.stringify(structuredContent) }], isError: result.status >= 400 });
+          }
+          return forward(runtime, scoped, { ...message, params: { name: named, arguments: params } });
+        }
+        const scoped = resolve(request, env, owner, originRuntime);
+        if (!scoped) return error('Application access denied', 403);
+        if (url.pathname === '/api/applications' && request.method === 'GET') {
+          return response({ portfolio, applications: [...byId.values()].filter(app => resolve(request, env, owner, app)).map(app => app.application) });
+        }
+        if (!await checkPartition(env, originRuntime, scoped)) return error('Application partition unavailable', 503);
+        if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {
+          let body;
+          if (request.method === 'GET') body = url.pathname === '/api/projects' ? { op: 'list' } : { op: 'get', id: url.pathname.slice('/api/projects/'.length) };
+          else if (request.method === 'POST' && url.pathname === '/api/projects') {
+            if (request.headers.get('origin') !== url.origin || ![null, 'same-origin'].includes(request.headers.get('sec-fetch-site'))) {
+              return error('Same-origin request required', 403);
+            }
+            if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') return error('Expected JSON', 415);
+            try { body = JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)); }
+            catch { return error('Invalid Projects payload', 400); }
+          } else return error('Method not allowed', 405);
+          const result = await project(originRuntime, scoped, owner, request.headers.get('x-observatory-verification') ?? undefined, body);
+          return response(result.body, result.status);
+        }
+        return originRuntime.worker.fetch(request, scoped);
+      } catch {
+        return error('Engineering data temporarily unavailable. Read current state before retrying writes.', 503);
+      }
+    },
+  };
+}

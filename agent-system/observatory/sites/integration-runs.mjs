@@ -56,12 +56,12 @@ export function integrationAccess(env, owner, namespace) {
     ...(namespace === 'live' && env.OBSERVATORY_INTEGRATION_SOURCE_REPAIR_OWNER_ID === owner ? { repair_enabled: true } : {}) };
 }
 
-function acceptedCandidate(row) {
+function acceptedCandidate(row, repository) {
   if (!row?.engine) return null;
   const task = JSON.parse(row.record);
   const lifecycle = JSON.parse(row.engine);
   const attempt = lifecycle.attempts.at(-1);
-  if (task.repository !== REPO || task.owner_acceptance !== 'accepted' ||
+  if (task.repository !== repository || task.owner_acceptance !== 'accepted' ||
       !['completed', 'archived'].includes(lifecycle.state) || attempt?.state !== 'succeeded' ||
       !isRevision(attempt.revision) || !isRevision(attempt.candidate_revision) ||
       typeof attempt.branch !== 'string' || !/^codex\/[a-zA-Z0-9/_-]+$/.test(attempt.branch)) return null;
@@ -138,7 +138,7 @@ function actionFor(body) {
   return null;
 }
 
-export async function integrationOperation({ db, owner, namespace, github, access, rerunJob, worker = false, body, now = Date.now() }) {
+export async function integrationOperation({ db, owner, namespace, github, access, rerunJob, worker = false, body, repository = REPO, now = Date.now() }) {
   const scope = [owner, namespace];
   const query = (sql, ...args) => db.prepare(sql).bind(...args);
   const get = async id => decode(await query(
@@ -164,7 +164,7 @@ export async function integrationOperation({ db, owner, namespace, github, acces
     const repair = run?.source_repairs?.find(item=>item.id === body.repair_id && item.worker_id === body.worker_id &&
       item.claim_id === body.claim_id);
     const current = repair?.status === 'running' && Date.parse(repair.expires_at) > now &&
-      (!run.task || acceptedCandidate(await candidateRow(run.task.id))?.attempt_id === run.task.attempt_id);
+      (!run.task || acceptedCandidate(await candidateRow(run.task.id), repository)?.attempt_id === run.task.attempt_id);
     return success({ active: Boolean(current), ...(repair ? { version:run.version } : {}) });
   }
   const tick = body?.op === 'repair_tick' || ciTick;
@@ -256,12 +256,12 @@ export async function integrationOperation({ db, owner, namespace, github, acces
 
   if (action.op === 'start') {
     const source = action.task_id ? await candidateRow(action.task_id) : null;
-    const task = acceptedCandidate(source);
+    const task = acceptedCandidate(source, repository);
     if (action.task_id && (!task || (action.head_sha && action.head_sha !== task.head_sha))) {
       return errors(409, 'A current owner-accepted Task candidate is required');
     }
     const run = {
-      id: action.operation_id, version: 1, repository: REPO, target: 'main', created_at: at,
+      id: action.operation_id, version: 1, repository, target: 'main', created_at: at,
       task, head_sha: task?.head_sha ?? action.head_sha, pr_number: action.pr_number ?? null,
       state: 'awaiting_pr', policy: { approval: 'explicit_owner_confirmation', repair_limit: action.repair_limit },
     };
@@ -288,7 +288,7 @@ export async function integrationOperation({ db, owner, namespace, github, acces
   if (current.version !== action.expected_version) return conflict();
   if (merged(current)) return errors(409, 'The integration already has verified merge evidence');
   const sameCandidate = async () => !current.task ||
-    acceptedCandidate(await candidateRow(current.task.id))?.attempt_id === current.task.attempt_id;
+    acceptedCandidate(await candidateRow(current.task.id), repository)?.attempt_id === current.task.attempt_id;
   if (!await sameCandidate() && !['stop', 'refresh','repair_tick','ci_tick','disarm_ci_reruns','repair_claim','integration_claim'].includes(action.op)) {
     return errors(409, 'Task acceptance changed. A new review and integration run are required');
   }

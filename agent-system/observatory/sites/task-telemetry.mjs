@@ -60,7 +60,7 @@ async function verifyCodexTurns(db, owner, namespace, id, events) {
   }
   return true;
 }
-export async function ingestTaskTelemetry({ db, owner, namespace, id, body, validate, validateEvent }) {
+export async function ingestTaskTelemetry({ db, owner, namespace, id, body, validate, validateEvent, repository = 'Kgray44/Aetherwake' }) {
   if (!body || typeof body !== 'object' || Object.keys(body).some(key => !['base', 'generated_at', 'records', 'events'].includes(key)) ||
       !(body.base === null || (typeof body.base === 'string' && digestPattern.test(body.base))) ||
       !Array.isArray(body.records) || body.records.length > 750 || !Array.isArray(body.events) || body.events.length > 2000 ||
@@ -71,13 +71,13 @@ export async function ingestTaskTelemetry({ db, owner, namespace, id, body, vali
   let payload, projection;
   try {
     const incoming = validateProjection({
-      export_version: 1, authority: 'local-task-records', repository: 'Kgray44/Aetherwake',
+      export_version: 1, authority: 'local-task-records', repository,
       generated_at: body.generated_at, records: body.records, events: body.events,
-    }, validate, validateEvent);
+    }, validate, validateEvent, Date.now(), repository);
     if (!(await verifyCodexTurns(db,owner,namespace,id,incoming.events))) {
       return fail(409, 'Codex history overlaps managed work or is not linked to this Task');
     }
-    projection = validateProjection(applyTelemetryDelta(existing?.projection, incoming), validate, validateEvent);
+    projection = validateProjection(applyTelemetryDelta(existing?.projection, incoming), validate, validateEvent, Date.now(), repository);
     const tasks = projection.records.filter(record => record.record_type === 'task');
     if (tasks.length !== 1 || tasks[0].id !== id ||
         projection.records.some(record => record.task_id !== undefined && record.task_id !== id) ||

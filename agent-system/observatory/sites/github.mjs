@@ -2,9 +2,8 @@ import { TASK_REQUEST_MAX_BYTES } from '../intake.mjs';
 
 export const REPO = 'Kgray44/Aetherwake';
 const API_ORIGIN = 'https://api.github.com';
-const API = API_ORIGIN + '/repos/' + REPO;
-const COUNT_QUERY = `query ObservatoryPullRequestTotals {
-  repository(owner: "Kgray44", name: "Aetherwake") {
+const countQuery = ([owner, name]) => `query ObservatoryPullRequestTotals {
+  repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) {
     nameWithOwner
     all: pullRequests(first: 1) { totalCount }
     open: pullRequests(first: 1, states: [OPEN]) { totalCount }
@@ -19,7 +18,7 @@ const RECORD_DIRS = ['agent-system/records', 'agent-system/observatory/records']
 const ISSUE_PAGE_SIZE = 12;
 const ACTIVITY_PAGE_SIZE = 40;
 const MAX_PULL_RESPONSE_BYTES = 2 * 1024 * 1024;
-const REPO_URL = 'https://github.com/' + REPO;
+const repoUrl = repository => 'https://github.com/' + repository;
 
 export const isRevision = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 
@@ -88,7 +87,8 @@ function unavailable(reason) {
   return { status: 'unavailable', reason, items: [] };
 }
 
-export function githubReader(fetcher, signal, token, now, previousApi, previousFailures) {
+export function githubReader(fetcher, signal, token, now, previousApi, previousFailures, repository = REPO) {
+  const api = API_ORIGIN + '/repos/' + repository;
   let authentication = token
     ? (['authenticated', 'rejected'].includes(previousApi?.authentication) ? previousApi.authentication : 'unverified')
     : 'anonymous';
@@ -117,9 +117,9 @@ export function githubReader(fetcher, signal, token, now, previousApi, previousF
     const init = { headers, signal, redirect:'manual' };
     if (graphql) {
       headers['Content-Type'] = 'application/json';
-      Object.assign(init, {method:'POST', body:JSON.stringify({query:COUNT_QUERY})});
+      Object.assign(init, {method:'POST', body:JSON.stringify({query:countQuery(repository.split('/'))})});
     }
-    const response = await fetcher(graphql ? API_ORIGIN + '/graphql' : API + path, init);
+    const response = await fetcher(graphql ? API_ORIGIN + '/graphql' : api + path, init);
     const seenAt = now();
     const observed = rateHeaders(response.headers, seenAt);
     if (!graphql && observed.observed_at) rate = observed;
@@ -192,7 +192,7 @@ export async function capture(work) {
 
 const recordPath = path => path.split('/').map(encodeURIComponent).join('/');
 
-async function contractRecords(get, revision, validate) {
+async function contractRecords(get, revision, validate, repository) {
   const directories = [...RECORD_DIRS];
   const absent = [];
   const errors = [];
@@ -235,7 +235,7 @@ async function contractRecords(get, revision, validate) {
           truncated = true;
           break;
         }
-        if (!validate(record) || record.repository.toLowerCase() !== REPO.toLowerCase()) {
+        if (!validate(record) || record.repository.toLowerCase() !== repository.toLowerCase()) {
           rejected++;
           continue;
         }
@@ -257,14 +257,14 @@ const positiveInteger = value => Number.isSafeInteger(value) && value > 0;
 const text = value => typeof value === 'string' && value.length ? value : null;
 const date = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 
-function issueItems(data) {
+function issueItems(data, repository) {
   if (!Array.isArray(data)) throw new Error('Invalid GitHub issue list');
   return data.filter(item => positiveInteger(item?.number) && !item.pull_request).slice(0, ISSUE_PAGE_SIZE)
     .map(item => ({
       label: '#' + item.number,
       title: text(item.title)?.slice(0, 200),
       state: item.state,
-      url: REPO_URL + '/issues/' + item.number,
+      url: repoUrl(repository) + '/issues/' + item.number,
       date: item.updated_at,
     }));
 }
@@ -275,7 +275,7 @@ function newestFirst(rows) {
   ).slice(0, ACTIVITY_PAGE_SIZE);
 }
 
-function pullItems(data) {
+function pullItems(data, repository) {
   if (!Array.isArray(data)) throw new Error('Invalid GitHub pull request list');
   return newestFirst(data.filter(item => positiveInteger(item?.number)).map(item => {
     const created = date(item.created_at);
@@ -288,7 +288,7 @@ function pullItems(data) {
       label: '#' + item.number,
       title: text(item.title)?.slice(0, 200) ?? null,
       state: text(item.state),
-      url: REPO_URL + '/pull/' + item.number,
+      url: repoUrl(repository) + '/pull/' + item.number,
       revision: isRevision(item.head?.sha) ? item.head.sha : null,
       date: updated,
       created_at: created,
@@ -303,14 +303,14 @@ function pullItems(data) {
   }));
 }
 
-export function linkedPullNumbers(run) {
-  return Array.isArray(run.pull_requests)&&run.repository?.full_name===REPO&&positiveInteger(run.repository.id)
+export function linkedPullNumbers(run, repository = REPO) {
+  return Array.isArray(run.pull_requests)&&run.repository?.full_name===repository&&positiveInteger(run.repository.id)
     ? [...new Set(run.pull_requests.filter(pr=>positiveInteger(pr?.number)&&pr.base?.repo?.id===run.repository.id&&
       pr.head?.sha===run.head_sha).map(pr=>pr.number))].slice(0,20)
     : null;
 }
 
-export function runItems(data) {
+export function runItems(data, repository = REPO) {
   if (!Array.isArray(data)) throw new Error('Invalid GitHub workflow run list');
   return newestFirst(data.filter(item => positiveInteger(item?.id)).map(item => {
     const created = date(item.created_at);
@@ -318,13 +318,13 @@ export function runItems(data) {
     const status = text(item.status);
     const conclusion = text(item.conclusion);
     const workflow = text(item.name);
-    const pullRequests = linkedPullNumbers(item);
+    const pullRequests = linkedPullNumbers(item, repository);
     return {
       id: item.id,
       label: workflow ?? String(item.id),
       title: text(item.display_title)?.slice(0, 200) ?? null,
       state: conclusion ?? status,
-      url: REPO_URL + '/actions/runs/' + item.id,
+      url: repoUrl(repository) + '/actions/runs/' + item.id,
       revision: isRevision(item.head_sha) ? item.head_sha : null,
       date: updated,
       created_at: created,
@@ -349,9 +349,9 @@ function completeRecords(records, revision) {
 }
 
 export async function githubSnapshot(fetcher, validate, token, {
-  now = Date.now, previous, oldValidators = {}, previousApi, previousFailures = 0,
+  now = Date.now, previous, oldValidators = {}, previousApi, previousFailures = 0, repository = REPO,
 } = {}) {
-  const reader = githubReader(fetcher, AbortSignal.timeout(8000), token, now, previousApi, previousFailures);
+  const reader = githubReader(fetcher, AbortSignal.timeout(8000), token, now, previousApi, previousFailures, repository);
   const validators = {};
   const updated = {};
   async function resource(key, path, convert, maxBytes) {
@@ -381,12 +381,12 @@ export async function githubSnapshot(fetcher, validate, token, {
     return { revision: ref.object.sha };
   }, 16 * 1024);
   const issues = await resource('issues', '/issues?state=all&sort=updated&direction=desc&per_page=' + ISSUE_PAGE_SIZE,
-    data => ({ items: issueItems(data) }));
+    data => ({ items: issueItems(data, repository) }));
   const pulls = await resource('pulls', '/pulls?state=all&sort=created&direction=desc&per_page=' + ACTIVITY_PAGE_SIZE,
-    data => ({ items: pullItems(data) }), MAX_PULL_RESPONSE_BYTES);
+    data => ({ items: pullItems(data, repository) }), MAX_PULL_RESPONSE_BYTES);
   const ci = await resource('ci', '/actions/runs?per_page=' + ACTIVITY_PAGE_SIZE,
     data => {
-      const items = runItems(data.workflow_runs);
+      const items = runItems(data.workflow_runs, repository);
       return { items, repository_total:Number.isSafeInteger(data.total_count) && data.total_count >= items.length ? data.total_count : null };
     });
 
@@ -398,23 +398,23 @@ export async function githubSnapshot(fetcher, validate, token, {
     records = unavailable(reader.halted() || main.reason);
   } else {
     const get = async (...args) => (await reader.get(...args)).data;
-    records = await contractRecords(get, main.revision, validate);
+    records = await contractRecords(get, main.revision, validate, repository);
     if (records.errors.length && reader.halted()) records = unavailable(reader.halted());
     else updated.records = new Date(now()).toISOString();
   }
 
-  pulls.totals = await readPullTotals(reader, token, now);
+  pulls.totals = await readPullTotals(reader, token, now, repository);
   ci.repository_total ??= null;
   const { api, retryAt, rateFailures } = reader.status();
   const snapshot = {
-    repository: REPO, retry_at: retryAt || null, checked_at: new Date(now()).toISOString(),
+    repository, retry_at: retryAt || null, checked_at: new Date(now()).toISOString(),
     main, records, issues, pulls, ci, page_size: ISSUE_PAGE_SIZE, api,
   };
   for (const [group, value] of Object.entries(updated)) snapshot[group].observed_at = value;
   return { snapshot, validators, rateFailures };
 }
 
-async function readPullTotals(reader, token, now) {
+async function readPullTotals(reader, token, now, repository) {
   if (!token) return unavailablePullTotals('GitHub read credential unavailable');
   const result = await capture(async () => {
     const { data } = await reader.pullTotals();
@@ -422,7 +422,7 @@ async function readPullTotals(reader, token, now) {
     if (Array.isArray(data?.errors) && data.errors.some(error => ['FORBIDDEN', 'UNAUTHORIZED'].includes(error?.type))) {
       throw new Error(AUTH_REASON);
     }
-    if (repo?.nameWithOwner !== REPO || (data.errors !== undefined && (!Array.isArray(data.errors) || data.errors.length))) {
+    if (repo?.nameWithOwner !== repository || (data.errors !== undefined && (!Array.isArray(data.errors) || data.errors.length))) {
       throw new Error(INVALID_REASON);
     }
     const total = repo.all?.totalCount;

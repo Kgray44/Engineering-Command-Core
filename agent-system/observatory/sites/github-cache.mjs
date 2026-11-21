@@ -1,4 +1,4 @@
-import { AUTH_REASON, githubSnapshot, RATE_REASON, unavailablePullTotals } from './github.mjs';
+import { AUTH_REASON, githubSnapshot, RATE_REASON, REPO, unavailablePullTotals } from './github.mjs';
 import { fetchGitHubDetail } from './github-detail.mjs';
 import { parseActivityHref,taskActivityHref } from '../src/github-activity.mjs';
 
@@ -23,7 +23,7 @@ function retain(snapshot, group, reason) {
   return source?.observed_at ? { ...source, status: 'stale', reason } : unavailable(reason);
 }
 
-function pending(row, key, now) {
+function pending(row, key, now, repository) {
   const old = row.snapshot && JSON.parse(row.snapshot);
   const lost = key === null && row.auth_mode === 'authenticated';
   const changed = key !== row.credential_key;
@@ -39,7 +39,7 @@ function pending(row, key, now) {
   }
   const reason = lost ? MISSING : rejected ? AUTH_REASON : rateLimited ? RATE_REASON : changed ? UNCERTAIN : 'GitHub refresh in progress';
   const result = {
-    repository: 'Kgray44/Aetherwake', page_size: 12, checked_at: old?.checked_at ?? null,
+    repository, page_size: 12, checked_at: old?.checked_at ?? null,
     retry_at: row.rate_until > now ? row.rate_until : null, api: rejected ? apiStatus('rejected') : old?.api && !changed && !lost ? old.api : apiStatus(lost ? 'missing' : key === null ? 'anonymous' : 'unverified'),
   };
   for (const group of GROUPS) result[group] = retain(old, group, reason);
@@ -52,7 +52,7 @@ function pending(row, key, now) {
   return result;
 }
 
-export async function peekGitHub(db, token, now = Date.now()) {
+export async function peekGitHub(db, token, now = Date.now(), repository = REPO) {
   const key = await credentialKey(token);
   const row = await db.prepare(`
     SELECT snapshot, auth_mode, credential_key, retry_at, lease_until, rate_until, read_reject_key, read_reject_until
@@ -63,7 +63,7 @@ export async function peekGitHub(db, token, now = Date.now()) {
     row.rate_until <= now && !(key !== null && row.read_reject_key === key && row.read_reject_until > now) &&
     (row.retry_at <= now || row.credential_key !== key)
   );
-  const snapshot = pending(row ?? { credential_key:key }, key, now);
+  const snapshot = pending(row ?? { credential_key:key }, key, now, repository);
   if (refresh) {
     for (const group of GROUPS) {
       if (snapshot[group]?.status === 'available') snapshot[group] = {...snapshot[group],status:'stale',reason:'Refreshing GitHub data'};
@@ -72,7 +72,7 @@ export async function peekGitHub(db, token, now = Date.now()) {
   return { snapshot, refresh };
 }
 
-export async function cachedGitHub(db, fetcher, validate, token, now = Date.now()) {
+export async function cachedGitHub(db, fetcher, validate, token, now = Date.now(), repository = REPO) {
   const key = await credentialKey(token);
   const mode = key === null ? 'anonymous' : 'authenticated';
   const lease = now + LEASE_MS;
@@ -93,13 +93,13 @@ export async function cachedGitHub(db, fetcher, validate, token, now = Date.now(
   `).bind(mode, lease, now, now, now, key, now, key).first();
   if (!claim) {
     const row = await db.prepare('SELECT snapshot, auth_mode, credential_key, rate_until, read_reject_key, read_reject_until FROM github_snapshot WHERE id = ?').bind(1).first();
-    return pending(row, key, now);
+    return pending(row, key, now, repository);
   }
 
   const old = claim.snapshot && JSON.parse(claim.snapshot);
   const sameCredential = claim.credential_key === key;
   const { snapshot, validators, rateFailures } = await githubSnapshot(fetcher, validate, token, {
-    now: clock,
+    now: clock, repository,
     previous: old,
     oldValidators: sameCredential ? JSON.parse(claim.validators) : {},
     previousApi: sameCredential ? old?.api : null,
@@ -134,10 +134,10 @@ function detailFallback(old, reason) {
     : { detail: null, status: 'unavailable', observed_at: null, reason };
 }
 
-export async function peekTaskGitHubDetails(db, token, references, now = Date.now()) {
+export async function peekTaskGitHubDetails(db, token, references, now = Date.now(), repository = REPO) {
   if (!token) return [];
   const keys = [...new Set(references.flatMap(({uri})=>{
-    const route = parseActivityHref(taskActivityHref(uri)??'');
+    const route = parseActivityHref(taskActivityHref(uri, repository)??'');
     return route?.id ? [route.kind+':'+route.id] : [];
   }))].slice(0,32);
   if (!keys.length) return [];
@@ -168,7 +168,7 @@ export async function peekTaskGitHubDetails(db, token, references, now = Date.no
   });
 }
 
-export async function cachedGitHubDetail(db, fetcher, token, kind, id, now = Date.now()) {
+export async function cachedGitHubDetail(db, fetcher, token, kind, id, now = Date.now(), repository = REPO) {
   if (!['pulls', 'runs', 'histories'].includes(kind) || !Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid GitHub detail identity');
   const key = await credentialKey(token);
   const cacheKey = kind + ':' + id;
@@ -207,7 +207,7 @@ export async function cachedGitHubDetail(db, fetcher, token, kind, id, now = Dat
   const old = parsed(row);
   const sameCredential = row?.credential_key === key;
   const { result, validators, retryAt, rateFailures, api } = await fetchGitHubDetail(fetcher, token, kind, id, {
-    now: clock, previous: sameCredential ? old?.detail : null,
+    now: clock, repository, previous: sameCredential ? old?.detail : null,
     validators: sameCredential ? JSON.parse(row.validators) : {}, previousFailures: claim.rate_failures,
   });
   const payload = result.detail ? result : detailFallback(old, result.reason);

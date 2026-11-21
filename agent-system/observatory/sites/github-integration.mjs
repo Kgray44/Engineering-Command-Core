@@ -22,10 +22,10 @@ function classify(error) {
 }
 
 const normalizedName = value => typeof value === 'string' && value.length <= 240 && value.trim() ? value : null;
-const runLink = id => 'https://github.com/' + REPO + '/actions/runs/' + id;
 const observedTime = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
 
-export function githubIntegration(fetcher, token, mergeToken, publishToken) {
+export function githubIntegration(fetcher, token, mergeToken, publishToken, repository = REPO) {
+  const runLink = id => 'https://github.com/' + repository + '/actions/runs/' + id;
   const read = (url, init, version = apiVersion) => fetcher(url, { ...init,
     headers: { ...init.headers, 'X-GitHub-Api-Version': version } });
   async function inspect({ pr_number: number, head_sha: head, task: accepted, reviewed_source, expected_base: base,
@@ -33,7 +33,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
     const task = reviewed_source ?? accepted;
     if (!token) return blocked('repository_or_credential', 'Authenticated GitHub reads are required.');
     const signal = AbortSignal.timeout(10_000);
-    const reader = githubReader(read, signal, token, Date.now, null, 0);
+    const reader = githubReader(read, signal, token, Date.now, null, 0, repository);
     async function get(path, requireComplete = true) {
       const result = await reader.get(path);
       if (requireComplete && result.hasNext) throw new RangeError('Incomplete GitHub response');
@@ -42,17 +42,17 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
 
     try {
       const [pr, main] = await Promise.all([get('/pulls/' + number), get('/git/ref/heads/main')]);
-      if (pr?.number !== number || pr.base?.repo?.full_name !== REPO || pr.base.ref !== 'main' ||
+      if (pr?.number !== number || pr.base?.repo?.full_name !== repository || pr.base.ref !== 'main' ||
           !positive(pr.base.repo.id) || !isRevision(pr.head?.sha) ||
           main?.ref !== 'refs/heads/main' || main.object?.type !== 'commit' || !isRevision(main.object.sha)) {
         return blocked('identity', 'GitHub did not confirm the repository, pull request, and target branch.');
       }
       const evidence = {
-        pr_number: number, url: 'https://github.com/' + REPO + '/pull/' + number,
+        pr_number: number, url: 'https://github.com/' + repository + '/pull/' + number,
         observed_head: pr.head.sha, base_sha: main.object.sha, pr_created_at: observedTime(pr.created_at),
       };
       if (head !== pr.head.sha) return blocked('head_drift', 'The pull request head changed. Confirm the new revision separately.', evidence);
-      if (task && (pr.head.repo?.id !== pr.base.repo.id || pr.head.repo.full_name !== REPO || pr.head.ref !== (publishedBranch ?? task.branch))) {
+      if (task && (pr.head.repo?.id !== pr.base.repo.id || pr.head.repo.full_name !== repository || pr.head.ref !== (publishedBranch ?? task.branch))) {
         return blocked('identity', 'The pull request is outside the reviewed Task branch.', evidence);
       }
       if (task) {
@@ -72,11 +72,11 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
           // The async merge API version can omit the resulting SHA on the PR.
           // Read the older representation for the same closed, exact-head PR.
           const legacy = githubReader((url, init) => read(url, init, mergeCommitReadVersion),
-            signal, token, Date.now, null, 0);
+            signal, token, Date.now, null, 0, repository);
           const { data, hasNext } = await legacy.get('/pulls/' + number);
           if (hasNext || data?.number !== number || data.state !== 'closed' || data.merged !== true ||
               data.merged_at !== pr.merged_at || data.head?.sha !== head || data.base?.ref !== 'main' ||
-              data.base.repo?.id !== pr.base.repo.id || data.base.repo.full_name !== REPO ||
+              data.base.repo?.id !== pr.base.repo.id || data.base.repo.full_name !== repository ||
               !isRevision(data.merge_commit_sha)) {
             return blocked('merge_readback', 'GitHub did not provide a complete merge record for the same pull request.', evidence);
           }
@@ -148,7 +148,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
           for (const check of checkRuns) {
             if (positive(check.id) && !passing.has(check.conclusion ?? check.status) &&
                 !pending.has(check.conclusion ?? check.status)) {
-              failedRequiredCheckURLs.add('https://api.github.com/repos/' + REPO + '/check-runs/' + check.id);
+              failedRequiredCheckURLs.add('https://api.github.com/repos/' + repository + '/check-runs/' + check.id);
             }
           }
           return { context, app: app ?? null, source, state };
@@ -157,7 +157,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
         positive(run.run_attempt) && run.repository?.id === pr.base.repo.id).slice(0, 40).map(run => ({
         run_id: run.id, workflow_id: run.workflow_id, attempt: run.run_attempt,
         head_sha: head, name: normalizedName(run.name), url: runLink(run.id),
-        same_repository: run.repository?.full_name === REPO && run.head_repository?.full_name === REPO,
+        same_repository: run.repository?.full_name === repository && run.head_repository?.full_name === repository,
         status: normalizedName(run.status), conclusion: normalizedName(run.conclusion),
         created_at: observedTime(run.created_at), run_started_at: observedTime(run.run_started_at), updated_at: observedTime(run.updated_at),
       }));
@@ -206,12 +206,12 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
 
   async function requestMerge(number, head, method, queue, base) {
     if (!mergeToken || !token || !isRevision(head) || !isRevision(base)) return { status: 'unavailable' };
-    const reader = githubReader(read, AbortSignal.timeout(5000), token, Date.now, null, 0);
+    const reader = githubReader(read, AbortSignal.timeout(5000), token, Date.now, null, 0, repository);
     try {
       const [{ data: pr }, { data: main }] = await Promise.all([
         reader.get('/pulls/' + number), reader.get('/git/ref/heads/main'),
       ]);
-      if (pr?.number !== number || pr.base?.repo?.full_name !== REPO || pr.base.ref !== 'main' ||
+      if (pr?.number !== number || pr.base?.repo?.full_name !== repository || pr.base.ref !== 'main' ||
           pr.base.sha !== base || pr.head?.sha !== head || pr.state !== 'open' || pr.draft || pr.stack ||
           main?.ref !== 'refs/heads/main' || main.object?.type !== 'commit' || main.object.sha !== base) {
         return { status: 'rejected', reason: 'head_or_base_drift' };
@@ -220,7 +220,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
       return { status: 'rejected', reason: 'target_read_unavailable' };
     }
     try {
-      const response = await fetcher('https://api.github.com/repos/' + REPO + '/pulls/' + number + '/merge-async', {
+      const response = await fetcher('https://api.github.com/repos/' + repository + '/pulls/' + number + '/merge-async', {
         method: 'PUT', redirect: 'manual', signal: AbortSignal.timeout(10_000),
         headers: {
           Accept: 'application/vnd.github+json', 'Content-Type': 'application/json',
@@ -244,13 +244,13 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
 
   async function rerunTarget(run) {
     if (!token || !positive(run.pr_number) || !isRevision(run.head_sha) || !isRevision(run.evidence?.base_sha)) return false;
-    const reader = githubReader(read,AbortSignal.timeout(5000),token,Date.now,null,0);
+    const reader = githubReader(read,AbortSignal.timeout(5000),token,Date.now,null,0,repository);
     try {
       const [{data:pr},{data:main}] = await Promise.all([
         reader.get('/pulls/'+run.pr_number),reader.get('/git/ref/heads/main'),
       ]);
       return pr?.number === run.pr_number && pr.state === 'open' && !pr.draft &&
-        pr.base?.repo?.full_name === REPO && pr.base.ref === 'main' && pr.base.sha === run.evidence.base_sha &&
+        pr.base?.repo?.full_name === repository && pr.base.ref === 'main' && pr.base.sha === run.evidence.base_sha &&
         pr.head?.sha === run.head_sha && main?.ref === 'refs/heads/main' && main.object?.type === 'commit' &&
         main.object.sha === run.evidence.base_sha;
     } catch { return false; }
@@ -259,7 +259,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
   async function mergeStatus(number, requestId) {
     if (!mergeToken || typeof requestId !== 'string' || !/^[a-f0-9-]{36}$/.test(requestId)) return null;
     try {
-      const response = await fetcher('https://api.github.com/repos/' + REPO + '/pulls/' + number + '/merge-async/' + requestId, {
+      const response = await fetcher('https://api.github.com/repos/' + repository + '/pulls/' + number + '/merge-async/' + requestId, {
         redirect: 'manual', signal: AbortSignal.timeout(5000),
         headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': apiVersion,
           'User-Agent': 'Aetherwake-Engineering-Observatory', Authorization: 'Bearer ' + mergeToken },
@@ -271,12 +271,12 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
 
   async function publicationSource(task, branch) {
     if (!token) return { reason: 'Authenticated GitHub reads are required.' };
-    const reader = githubReader(read, AbortSignal.timeout(8000), token, Date.now, null, 0);
+    const reader = githubReader(read, AbortSignal.timeout(8000), token, Date.now, null, 0, repository);
     try {
       const branchRules = await reader.get('/rules/branches/' + encodeURIComponent(branch) + '?per_page=100');
       const rules = Array.isArray(branchRules.data) && !branchRules.hasNext ? branchRules.data : [];
       const frozen = rules.find(rule => rule.type === 'update' && rule.ruleset_source_type === 'Repository' &&
-        rule.ruleset_source === REPO && positive(rule.ruleset_id) &&
+        rule.ruleset_source === repository && positive(rule.ruleset_id) &&
         rules.some(item => item.ruleset_id === rule.ruleset_id && item.type === 'deletion'));
       if (!frozen) return { reason: 'The integration branch needs an active ruleset restricting updates and deletion.' };
       const ruleset = await reader.get('/rulesets/' + frozen.ruleset_id);
@@ -299,11 +299,11 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
       if (commit?.data?.sha !== task.head_sha ||
           commit.data.parents?.length !== 1 || commit.data.parents[0]?.sha !== task.parent_sha ||
           !isRevision(commit.data.commit?.tree?.sha)) return { reason: 'GitHub did not confirm the reviewed candidate and its parent.' };
-      const [account] = REPO.split('/');
+      const [account] = repository.split('/');
       const filtered = await reader.get('/pulls?state=open&base=main&head=' + encodeURIComponent(account + ':' + branch) + '&per_page=5');
       if (filtered.hasNext || !Array.isArray(filtered.data)) return { reason: 'GitHub did not return an unambiguous pull request set.' };
       const matching = filtered.data.filter(pr => positive(pr.number) && pr.state === 'open' && pr.head?.sha === task.head_sha &&
-        pr.head.ref === branch && pr.head.repo?.full_name === REPO && pr.base?.ref === 'main' && pr.base.repo?.full_name === REPO);
+        pr.head.ref === branch && pr.head.repo?.full_name === repository && pr.base?.ref === 'main' && pr.base.repo?.full_name === repository);
       if (matching.length > 1 || (filtered.data.length && matching.length !== filtered.data.length)) {
         return { reason: 'GitHub returned a pull request outside the confirmed source identity.' };
       }
@@ -316,7 +316,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
   async function openCandidatePull(task, branch, source) {
     if (!publishToken) return { status: 'rejected' };
     try {
-      const post = (path, body) => fetcher('https://api.github.com/repos/' + REPO + path, {
+      const post = (path, body) => fetcher('https://api.github.com/repos/' + repository + path, {
         method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(8000),
         headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': apiVersion,
           'Content-Type': 'application/json', 'User-Agent': 'Aetherwake-Engineering-Observatory', Authorization: 'Bearer ' + publishToken },
@@ -345,13 +345,13 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
     if (evidence.reason !== 'ci_failure') return null;
     const jobs = (evidence.jobs ?? []).filter(job => !job.infrastructure && job.failed_steps?.length && job.head_sha === run.head_sha);
     if (!jobs.length || !token) return null;
-    const reader = githubReader(read, AbortSignal.timeout(8000), token, Date.now, null, 0);
+    const reader = githubReader(read, AbortSignal.timeout(8000), token, Date.now, null, 0, repository);
     try {
       const files = await reader.get('/pulls/' + run.pr_number + '/files?per_page=100');
       const latest = (await reader.get('/pulls/' + run.pr_number)).data;
       if (files.hasNext || !Array.isArray(files.data) || latest.number !== run.pr_number || latest.state !== 'open' ||
           latest.head?.sha !== run.head_sha || latest.base?.sha !== evidence.base_sha ||
-          latest.base?.ref !== 'main' || latest.base?.repo?.full_name !== REPO) return null;
+          latest.base?.ref !== 'main' || latest.base?.repo?.full_name !== repository) return null;
       const paths = [...new Set(files.data.filter(file => ['modified', 'added', 'renamed'].includes(file.status) &&
         repairablePath(file.filename)).map(file => file.filename))];
       if (allowedPaths && !allowedPaths.every(path=>paths.includes(path))) return null;
@@ -365,22 +365,22 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
         ? job.steps.map(step=>({job:jobs[index],step})) : []).slice(0,3);
       const logSignal = AbortSignal.timeout(6500);
       await Promise.all(targets.map(async ({job,step}) => {
-        step.log = await githubStepLog({ fetcher, token, signal:logSignal, apiVersion, job, step, paths:allowedPaths ?? paths });
+        step.log = await githubStepLog({ fetcher, token, signal:logSignal, apiVersion, job, step, repository, paths:allowedPaths ?? paths });
       }));
       if (targets.some(({step})=>step.log.status === 'observed')) {
-        const rebound = githubReader(read, AbortSignal.timeout(4000), token, Date.now, null, 0);
+        const rebound = githubReader(read, AbortSignal.timeout(4000), token, Date.now, null, 0, repository);
         const [fresh, main, ...runs] = await Promise.all([
           rebound.get('/pulls/' + run.pr_number),
           rebound.get('/git/ref/heads/main'),
           ...[...new Map(targets.map(({job})=>[job.run_id,job])).values()].map(async job => {
             const {data} = await rebound.get('/actions/runs/' + job.run_id);
             return data?.id === job.run_id && data.workflow_id === job.workflow_id && data.run_attempt === job.attempt &&
-              data.status === 'completed' && data.head_sha === run.head_sha && data.repository?.full_name === REPO;
+              data.status === 'completed' && data.head_sha === run.head_sha && data.repository?.full_name === repository;
           }),
         ]);
         if (fresh.data?.number !== run.pr_number || fresh.data.state !== 'open' || fresh.data.head?.sha !== run.head_sha ||
             fresh.data.base?.sha !== evidence.base_sha || fresh.data.base?.ref !== 'main' ||
-            fresh.data.base?.repo?.full_name !== REPO || main.data?.ref !== 'refs/heads/main' ||
+            fresh.data.base?.repo?.full_name !== repository || main.data?.ref !== 'refs/heads/main' ||
             main.data.object?.type !== 'commit' || main.data.object.sha !== evidence.base_sha ||
             runs.some(match=>!match)) return null;
       }
@@ -390,7 +390,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken) {
 
   async function transferAnchor(revision) {
     if (!token || !isRevision(revision)) return false;
-    const reader = githubReader(read, AbortSignal.timeout(5000), token, Date.now, null, 0);
+    const reader = githubReader(read, AbortSignal.timeout(5000), token, Date.now, null, 0, repository);
     try { return (await reader.get('/commits/' + revision)).data?.sha === revision; }
     catch { return false; }
   }
