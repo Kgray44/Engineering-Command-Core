@@ -50,27 +50,31 @@ export function parseTaskHref(hash) {
   return id && idPattern.test(id) ? { id, ...(evidence ? { section: 'evidence' } : {}) } : null;
 }
 
+export function sortTasks(tasks, sort, priority = task => task.priority) {
+  const rank = task => {
+    const index = priorities.indexOf(priority(task));
+    return index < 0 ? priorities.length : index;
+  };
+  return tasks.toSorted((a, b) => {
+    const newest = String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''));
+    if (sort === 'oldest') return -newest || a.id.localeCompare(b.id);
+    if (sort === 'priority') return rank(a) - rank(b) || newest || a.id.localeCompare(b.id);
+    if (sort === 'title') return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
+    return newest || a.id.localeCompare(b.id);
+  });
+}
+
 export function organizeTasks(tasks, filters, controls = {}, workByTask) {
   const query = (filters.query ?? '').trim().toLowerCase();
   const hasControl = task => Object.hasOwn(controls, task.id);
-  const rank = task => {
-    const index = priorities.indexOf(hasControl(task) ? controls[task.id].priority : undefined);
-    return index < 0 ? priorities.length : index;
-  };
   const visible = tasks.filter(task =>
     (filters.source !== 'private' || hasControl(task) && controls[task.id].source !== 'published') &&
     (!filters.work||filters.work==='all'||workByTask?.get(task.id)===filters.work) &&
     ((!filters.state||filters.state==='all') ? task.state!=='archived'||filters.work==='archived' : task.state===filters.state) &&
     [task.title, task.objective, task.id, task.classification?.primary].join(' ').toLowerCase().includes(query));
-  visible.sort((a, b) => {
-    const newest = String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''));
-    if (filters.sort === 'oldest') return -newest || a.id.localeCompare(b.id);
-    if (filters.sort === 'priority') return rank(a) - rank(b) || newest || a.id.localeCompare(b.id);
-    if (filters.sort === 'title') return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
-    return newest || a.id.localeCompare(b.id);
-  });
+  const ordered = sortTasks(visible, filters.sort, task => hasControl(task) ? controls[task.id].priority : undefined);
   const groups = new Map();
-  for (const task of visible) {
+  for (const task of ordered) {
     const label = (filters.group === 'state' ? task.state :
       filters.group === 'category' ? task.classification?.primary : 'All Tasks') ?? 'Unavailable';
     if (!groups.has(label)) groups.set(label, []);

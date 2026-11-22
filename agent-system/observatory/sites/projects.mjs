@@ -165,8 +165,10 @@ export async function projectOperation({ db, owner, namespace, application, body
               blockers.push({ type: 'milestone', id: gate.milestone_id, state: gate.status });
             }
           }
-          return { id: row.task_id, title: task.title, version: row.version, priority: row.priority, branch: engine?.attempts.at(-1)?.branch ?? null,
+          return { id: row.task_id, title: task.title, version: row.version, created_at: row.created_at,
+            priority: row.priority, branch: attempt?.branch ?? null,
             state: blockers.length ? 'blocked' : dispatch.state, blockers,
+            ...(engine?.event?.kind && engine.event.at ? { last_activity: { kind: engine.event.kind, at: engine.event.at } } : {}),
             candidate_revision: ['verifying', 'succeeded'].includes(attempt?.state) ? attempt.candidate_revision ?? null : null,
             owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
         });
@@ -305,7 +307,11 @@ export async function projectOperation({ db, owner, namespace, application, body
       return changed ? [event, { kind: 'project_owner_review_changed', version: event.version, occurred_at: event.occurred_at,
         name: Object.hasOwn(reviewHistoryLabels, review) ? reviewHistoryLabels[review] : 'Owner review updated' }] : [event];
     });
-    return success({ project, ...summary, artifacts, artifact_sources: [...artifactSources.values()], github, task_prerequisites: linked.flatMap(view.prerequisitesFor),
+    const linkable_tasks = project.status === 'archived' ? [] : view.taskRows
+      .filter(row => !row.project_id && taskId(row.task_id))
+      .map(row => ({ id: row.task_id, title: JSON.parse(row.record).title, version: row.version }));
+    return success({ project, ...summary, artifacts, artifact_sources: [...artifactSources.values()], github, linkable_tasks,
+      task_prerequisites: linked.flatMap(view.prerequisitesFor),
       history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results,
         ...executionHistory.results.slice(0, executionHistoryLimit)].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)),
       execution_history_truncated: executionHistory.results.length > executionHistoryLimit,

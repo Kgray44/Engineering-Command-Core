@@ -9,7 +9,8 @@ import { motion } from 'motion/react';
 import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useCardMotion } from './card-motion.jsx';
 import { StickySectionAside } from './sticky-section-aside.jsx';
-import { taskEvidenceHref, taskHref } from './task-workspace.mjs';
+import { sortTasks, taskEvidenceHref, taskHref } from './task-workspace.mjs';
+import { preferenceFields } from './workspace-preferences.mjs';
 
 const stages = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
@@ -265,6 +266,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
   const [addingMilestone, setAddingMilestone] = useState(null);
   const [taskQuery, setTaskQuery] = useState('');
   const [taskState, setTaskState] = useState('');
+  const [taskSort, setTaskSort] = useState(null);
+  const [unassignedTaskId, setUnassignedTaskId] = useState('');
   const [moveTaskId, setMoveTaskId] = useState('');
   const [controlTaskId, setControlTaskId] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
@@ -319,7 +322,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       onSuccess?.(result);
       if (request.op !== 'create') await load();
     } catch (error) {
-      if (request.op === 'reorder' && error.status === 409) await load().catch(() => {});
+      if (request.op === 'reorder' && error.status === 409 ||
+          request.op === 'link_task' && [404, 409].includes(error.status)) await load().catch(() => {});
       setError(error.message);
     } finally {
       pending.current = false;
@@ -327,7 +331,12 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     }
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
-  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifact_sources = [], github = [], progress, active_workers, integrations = [] } = data ?? {};
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifact_sources = [], github = [], progress, active_workers, integrations = [], linkable_tasks = [] } = data ?? {};
+  const selectedUnassignedTask = linkable_tasks.find(task => task.id === unassignedTaskId);
+  const effectiveTaskSort = taskSort ?? preferences.task_sort;
+  const query = taskQuery.trim().toLowerCase();
+  const visibleTasks = sortTasks(tasks.filter(task => (!taskState || task.state === taskState) &&
+    (task.title.toLowerCase().includes(query) || task.id.toLowerCase().includes(query))), effectiveTaskSort);
   const moveTask = tasks.find(item => item.id === moveTaskId);
   const controlTask = tasks.find(item => item.id === controlTaskId);
   const nextTask = tasks.find(item => item.state === 'ready');
@@ -417,13 +426,20 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           <label>Task state <select value={taskState} onChange={event => setTaskState(event.target.value)}>
             <option value="">All states</option><Options values={[...new Set(tasks.map(task => task.state))]}/>
           </select></label>
+          <label>Sort Project Tasks <select value={effectiveTaskSort} onChange={event => setTaskSort(event.target.value)}>
+            {Object.entries(preferenceFields.task_sort.choices).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select></label>
         </div>}
-        <ul className="project-list">{tasks.filter(task => (!taskState || task.state === taskState) &&
-          task.title.toLowerCase().includes(taskQuery.trim().toLowerCase())).map(task => <li key={task.id}>
+        {tasks.length > 0 && <p className="low" role="status">{visibleTasks.length} of {tasks.length} Tasks</p>}
+        <ul className="project-list">{visibleTasks.map(task => <li key={task.id}>
           <a className="text-button" href={taskHref(task.id)}>{task.title}</a> <Status value={task.state}/>
+          {task.priority && <small>{task.priority} priority</small>}
           <button type="button" className="quiet-button" aria-label={'Execution controls for ' + task.title}
             aria-expanded={controlTaskId === task.id} onClick={() => setControlTaskId(task.id === controlTaskId ? '' : task.id)}>Execution controls</button>
           {task.branch && <small>{task.branch}</small>}
+          {task.last_activity && <small>Latest activity · {task.last_activity.kind.replaceAll('_', ' ')} · <time dateTime={task.last_activity.at}>
+            {new Date(task.last_activity.at).toLocaleString()}
+          </time></small>}
           {task.blockers.map(item => <small key={item.type + ':' + item.id}>
             {item.type === 'milestone' ? dependencies.find(gate => gate.milestone_id === item.id)?.name ?? item.id :
               item.type === 'project' ? project.name : tasks.find(related => related.id === item.id)?.title ?? item.id} · {item.state}
@@ -431,6 +447,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           {task_milestones.filter(link => link.task_id === task.id).map(link => <small key={link.milestone_id}>{milestones.find(item => item.id === link.milestone_id)?.name}</small>)}
         </li>)}</ul>
         {!tasks.length && <p>No linked tasks.</p>}
+        {tasks.length > 0 && !visibleTasks.length && <p>No Tasks match the filters.</p>}
         {controlTask && <ProjectTaskControls key={controlTask.id} task={controlTask} tasks={tasks} headers={headers} Status={Status}
           workerAccess={workerAccess} workerDispatch={workerDispatch} onClose={() => setControlTaskId('')}
           onRefresh={() => load().catch(cause => setError(cause.message))}/>}
@@ -455,15 +472,19 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           </form>
         </details>}
         {project.status !== 'archived' && <details><summary>Associate an existing Task</summary>
-          <form className="form" onSubmit={event => {
+          {linkable_tasks.length ? <form className="form" onSubmit={event => {
             event.preventDefault();
-            const fields = object(event.currentTarget);
-            submit({ op: 'link_task', task_id: fields.task_id, expected_version: Number(fields.version) });
+            if (!selectedUnassignedTask) return;
+            submit({ op: 'link_task', task_id: selectedUnassignedTask.id, expected_version: selectedUnassignedTask.version },
+              () => setUnassignedTaskId(''));
           }}>
-            <label>Task ID <input name="task_id" required/></label>
-            <label>Current Task version <input name="version" type="number" min="1" required/></label>
-            <button className="quiet-button" disabled={busy}>Link Task</button>
-          </form>
+            <label>Unassigned Task <select required value={selectedUnassignedTask?.id ?? ''}
+              onChange={event => setUnassignedTaskId(event.target.value)}>
+              <option value="">Select a Task</option>
+              {linkable_tasks.map(task => <option key={task.id} value={task.id}>{task.title} · {task.id.slice(-8)}</option>)}
+            </select></label>
+            <button className="quiet-button" disabled={busy || !selectedUnassignedTask}>Link Task</button>
+          </form> : <p>No unassigned Tasks in this application.</p>}
         </details>}
       </Panel>
       <Panel id="project-milestones" title="Milestones" right={project.status !== 'archived' && <button className="quiet-button" aria-expanded={addingMilestone !== null} onClick={() => setAddingMilestone(addingMilestone === null ? '' : null)}>

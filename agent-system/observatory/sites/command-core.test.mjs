@@ -380,6 +380,28 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal((await call(0, path)).body.audit.length, 2);
 });
 
+test('the Project Task picker exposes only unassigned Tasks in the active scope and fences their versions', async t => {
+  const { call, task } = setup(t);
+  const id = crypto.randomUUID();
+  for (const app of [0, 1]) {
+    assert.equal((await call(app, '/api/projects', { op: 'create', id,
+      fields: { name: 'Fixture', objective: 'Verify Task association scope' } })).status, 201);
+  }
+  const [local, peer] = await Promise.all([0, 1].map(app => task(app, {
+    op: 'register', operation_id: crypto.randomUUID(), fields: taskFields,
+  })));
+  const path = '/api/projects/' + id;
+  assert.deepEqual((await call(0, path)).body.linkable_tasks.map(task => task.id), [local.body.task.id]);
+  assert.deepEqual((await call(1, path)).body.linkable_tasks.map(task => task.id), [peer.body.task.id]);
+  const link = (task_id, expected_version) => call(0, '/api/projects', { op: 'link_task', id, task_id, expected_version });
+  assert.equal((await link(peer.body.task.id, peer.body.version)).status, 404);
+  assert.equal((await link(local.body.task.id, local.body.version + 1)).status, 409);
+  assert.equal((await link(local.body.task.id, local.body.version)).status, 200);
+  const linked = (await call(0, path)).body;
+  assert.deepEqual(linked.linkable_tasks, []);
+  assert.deepEqual(linked.tasks.map(task => [task.id, task.version]), [[local.body.task.id, local.body.version]]);
+});
+
 test('Project milestone ordering and eligible Task moves preserve canonical records', async t => {
   const { call, task, one } = setup(t);
   const projects = '/api/projects';

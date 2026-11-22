@@ -315,6 +315,30 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(waiting.status, 201);
   assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: waiting.body.task.id,
     expected_version: waiting.body.version, operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const unassigned = await stage.run('/api/task-engine/v1', { op: 'register', operation_id: crypto.randomUUID(),
+    fields: { title: 'Urgent correction', objective: 'Verify linking an existing Task', primary: 'backend', profile_id: 'backend',
+      priority: 'urgent', criteria: ['Keep the original Task identity'] } });
+  assert.equal(unassigned.status, 201);
+  await page.goto(stage.origin + '/#projects/' + projectId);
+  const projectTasks = page.locator('#project-tasks');
+  await projectTasks.getByText('Associate an existing Task', { exact: true }).click();
+  await projectTasks.getByRole('combobox', { name: 'Unassigned Task', exact: true }).selectOption(unassigned.body.task.id);
+  const association = page.waitForResponse(response => response.url().endsWith('/api/projects') &&
+    response.request().method() === 'POST' && response.request().postDataJSON().op === 'link_task');
+  await projectTasks.getByRole('button', { name: 'Link Task', exact: true }).click();
+  const linked = await association;
+  assert.equal(linked.status(), 200);
+  assert.equal(linked.request().postDataJSON().expected_version, unassigned.body.version);
+  await projectTasks.getByRole('link', { name: 'Urgent correction', exact: true }).waitFor();
+  const taskTitles = projectTasks.locator('ul.project-list > li > a');
+  await projectTasks.getByRole('combobox', { name: 'Sort Project Tasks', exact: true }).selectOption('title');
+  assert.deepEqual(await taskTitles.allTextContents(), ['Release follow-up', 'Release review', 'Urgent correction']);
+  await projectTasks.getByRole('combobox', { name: 'Sort Project Tasks', exact: true }).selectOption('priority');
+  assert.equal(await taskTitles.first().textContent(), 'Urgent correction');
+  await projectTasks.getByRole('searchbox', { name: 'Filter Project Tasks', exact: true }).fill('unmatched');
+  await projectTasks.getByText('No Tasks match the filters.', { exact: true }).waitFor();
+  await projectTasks.getByRole('searchbox', { name: 'Filter Project Tasks', exact: true }).fill(unassigned.body.task.id);
+  assert.deepEqual(await taskTitles.allTextContents(), ['Urgent correction']);
   await page.goto(stage.origin + '/#settings');
   const shell = page.locator('.app-shell[data-application="voyagewright"]');
   await shell.waitFor();

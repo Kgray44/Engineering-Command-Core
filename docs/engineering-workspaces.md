@@ -12,7 +12,7 @@ Open **Activity** to scan all activity, focus on items that need attention, or b
 
 ## Work and acceptance
 
-Use **New project task** for Task intake with the Project association. Filter the Project Task list by name or state. Expand **Execution controls** for scheduling, pause, resume, retry, and other actions available in the current Task state. Open the full Task Workspace for its specification editor, logs, attempt history, and reports. **Move a Task to another Project** preserves canonical Task and attempt IDs for eligible unadmitted or finished Tasks without milestone links. Both Projects retain a relationship event.
+Use **New project task** for Task intake with the Project association. **Associate an existing Task** lists unassigned Tasks from the current application and submits the selected record's version. The Task keeps its original identity. Filter by title, ID, or state and sort by creation date, priority, or title. The sort starts from the saved **Default Task sort** preference. Rows show recorded priority and latest activity. Expand **Execution controls** for scheduling, pause, resume, retry, and other actions available in the current Task state. Open the full Task Workspace for its specification editor, logs, attempt history, and reports. **Move a Task to another Project** preserves canonical Task and attempt IDs for eligible unadmitted or finished Tasks without milestone links. Both Projects retain a relationship event.
 
 Use **Move earlier** or **Move later** to change milestone order. In **Dependencies**, choose a Task to inspect its recorded prerequisites, milestone gates, and dependent Tasks in this Project.
 
