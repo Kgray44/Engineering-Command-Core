@@ -15,7 +15,15 @@ async function capture(page, file) {
 
 async function browserStage(t, options = {}) {
   const part = openPartition(':memory:');
-  t.after(() => part.sqlite.close());
+  let stage;
+  let browser;
+  t.after(async () => {
+    try {
+      await browser?.close();
+    } finally {
+      try { await stage?.close(); } finally { part.sqlite.close(); }
+    }
+  });
   applyMigrations(part.sqlite);
   part.sqlite.prepare('INSERT INTO application_partition VALUES (1, ?, ?, ?)')
     .run(options.applicationId ?? 'aetherwake', options.applicationRepository ?? 'synthetic/observatory', 'engineering');
@@ -25,10 +33,8 @@ async function browserStage(t, options = {}) {
     assets['/assets/' + file] = { type: file.endsWith('.css') ? 'text/css' : 'text/javascript',
       content: await readFile(new URL('assets/' + file, dist), 'utf8') };
   }
-  const stage = await startStage(part, { assets, ...options });
-  t.after(() => stage.close());
-  const browser = await chromium.launch({ headless: true, executablePath: process.env.OBSERVATORY_BROWSER_EXECUTABLE });
-  t.after(() => browser.close());
+  stage = await startStage(part, { assets, ...options });
+  browser = await chromium.launch({ headless: true, executablePath: process.env.OBSERVATORY_BROWSER_EXECUTABLE });
   const page = await browser.newPage({ reducedMotion: 'no-preference', viewport: { width: 1080, height: 780 }, ...options.browser,
     extraHTTPHeaders: { authorization: 'Bearer ' + stage.proof } });
   page.setDefaultTimeout(7000);
@@ -251,4 +257,45 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal((await receipt.json()).run.head_sha, head);
   assert.equal(receipt.request().postDataJSON().head_sha, head);
   assert.equal(receipt.request().postDataJSON().pr_number, 7);
+});
+
+test('touch reorders Project cards across mobile grid rows and reloads the order', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t, {
+    browser: { viewport: { width: 390, height: 1100 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
+  });
+  for (const name of ['Touch project one', 'Touch project two']) {
+    const receipt = await stage.run('/api/projects', { op: 'create', id: crypto.randomUUID(),
+      fields: { name, objective: 'Verify touch reordering through the worker' } });
+    assert.equal(receipt.status, 201);
+  }
+  await page.goto(stage.origin + '/#projects');
+  const grid = page.locator('.project-card-grid');
+  await grid.scrollIntoViewIfNeeded();
+  const titles = page.locator('.project-card-name');
+  const before = await titles.allTextContents();
+  assert.equal(before.length, 2);
+  const handle = await page.getByRole('button', { name: 'Reorder ' + before[0] }).boundingBox();
+  const first = await page.locator('.project-card').first().boundingBox();
+  const second = await page.locator('.project-card').last().boundingBox();
+  assert.ok(second.y > first.y);
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
+  const client = await page.context().newCDPSession(page);
+  const touch = (type, touchPoints) => client.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'), { x, y });
+  assert.equal(hit, 'Reorder ' + before[0], JSON.stringify({ handle, first, second, hit }));
+  await touch('touchStart', [{ x, y }]);
+  await touch('touchMove', [{ x, y: y + 12 }]);
+  await page.locator('[data-dragging][data-drag-over]').waitFor();
+  for (let step = 1; step <= 10; step++) {
+    await touch('touchMove', [{ x, y: y + (second.y - first.y) * step / 10 }]);
+  }
+  await page.locator('[data-insertion]').waitFor();
+  const saved = page.waitForResponse(response => response.url().endsWith('/api/projects') &&
+    response.request().method() === 'POST' && response.request().postDataJSON().op === 'reorder');
+  await touch('touchEnd', []);
+  assert.equal((await saved).status(), 200);
+  await page.reload();
+  await titles.first().waitFor();
+  assert.deepEqual(await titles.allTextContents(), [...before].reverse());
 });

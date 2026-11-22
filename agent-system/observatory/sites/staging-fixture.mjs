@@ -37,7 +37,10 @@ export async function startStage(part, { assets = {}, revision = fixtureRevision
   });
   return {
     origin, proof,
-    close: () => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())),
+    close: () => new Promise((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    }),
     run: async (path, body, authenticated = true) => {
       const response = await fetch(origin + path, { method: body ? 'POST' : 'GET', headers: {
         origin, 'content-type': 'application/json', 'oai-authenticated-user-id': 'spoofed',
