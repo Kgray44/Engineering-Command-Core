@@ -60,7 +60,7 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
       Object.entries(defaults).filter(([field]) => !edited.current.has(field)),
     ) }));
   };
-  return <form className="form" onSubmit={event => {
+  return <form className="form project-definition-form" onSubmit={event => {
     event.preventDefault();
     const { participants, milestone_suggestions, ...fields } = object(event.currentTarget);
     onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean),
@@ -77,13 +77,13 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
     </label>}
     <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
     <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
-    <label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
-    <label>Scope <textarea name="scope" value={draft.scope} onChange={editField} maxLength={16000}/></label>
-    <label>Acceptance requirements <textarea name="acceptance" value={draft.acceptance} onChange={editField} maxLength={16000}/></label>
+    <div className="form-grid"><label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
+    <label>Scope <textarea name="scope" value={draft.scope} onChange={editField} maxLength={16000}/></label></div>
+    <div className="form-grid"><label>Acceptance requirements <textarea name="acceptance" value={draft.acceptance} onChange={editField} maxLength={16000}/></label>
     <label>Suggested milestones
       <textarea name="milestone_suggestions" value={draft.milestone_suggestions} onChange={editField}
         placeholder="One milestone per line" rows={3} maxLength={1812}/>
-    </label>
+    </label></div>
     <ProjectAppearance project={project}/>
     <div className="form-grid">
       <label>Start date <input type="date" name="start_date" defaultValue={project.start_date}/></label>

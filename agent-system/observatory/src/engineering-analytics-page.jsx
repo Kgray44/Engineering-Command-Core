@@ -207,22 +207,6 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
     ['Recent median merge time', spanTime(data.pulls.medianMergeMs), count(data.pulls.mergeSamples) + ' observed merges in the loaded window', Clock3]
   ];
   return <>
-    {ready && <Rise><Panel title="Integration and merge">
-      {integration.loading ? <p role="status">Loading integration evidence…</p> :
-        integration.error ? <p>Integration evidence unavailable.</p> : <MetricRows fields={[
-          ['Recent integration runs', count(merge.runs)], ['Verified on main', count(merge.merged)],
-          ['Blocked integrations', count(merge.blocked)], ['Exact-head CI attempts', count(merge.ciAttempts)],
-          ['CI rerun receipts', count(merge.reruns)], ['Automatic CI rerun receipts',count(merge.automaticReruns)],
-          ['Codex source repairs', count(merge.sourceRepairs)],
-          ['Observed repair uncached input tokens', count(merge.repairUsage?.uncached)],
-          ['Observed repair cached input tokens', count(merge.repairUsage?.cached)],
-          ['Observed repair output tokens', count(merge.repairUsage?.output)],
-          ['Complete repair usage receipts', count(merge.repairUsage?.completeTurns)],
-          ['OpenAI API reference estimate for repairs', repairEstimate.total === null ? 'Unavailable' :
-            formatReferenceCost(repairEstimate.total) + ' across ' + repairEstimate.attempts.length + ' priced repairs'],
-          ['Actual integration billing', 'Unavailable'],
-        ]}/>}
-    </Panel></Rise>}
     <div className="metrics analytics-metrics">{stats.map(([name,value,meta,Icon], index) =>
       <Metric key={name} name={name} value={value} meta={meta} Icon={Icon} index={index}/>)}</div>
     <Rise><Panel title="Engineering activity" right={<span className="panel-meta">14 UTC days · loaded records</span>}>
@@ -261,6 +245,23 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
         <div><h3>Failure categories</h3><Counts entries={data.attempts.byFailure} empty="No classified failures observed."/></div>
       </div></Panel></Rise></StickySectionAside>
     </div>
+    {ready && <Rise><Panel title="Integration and merge">
+      {integration.loading ? <p role="status">Loading integration evidence…</p> :
+        integration.error ? <p>Integration evidence unavailable.</p> : <div className="analytics-integration-grid"><MetricRows fields={[
+          ['Recent integration runs', count(merge.runs)], ['Verified on main', count(merge.merged)],
+          ['Blocked integrations', count(merge.blocked)], ['Exact-head CI attempts', count(merge.ciAttempts)],
+          ['CI rerun receipts', count(merge.reruns)], ['Automatic CI rerun receipts',count(merge.automaticReruns)],
+          ['Codex source repairs', count(merge.sourceRepairs)],
+        ]}/><MetricRows fields={[
+          ['Observed repair uncached input tokens', count(merge.repairUsage?.uncached)],
+          ['Observed repair cached input tokens', count(merge.repairUsage?.cached)],
+          ['Observed repair output tokens', count(merge.repairUsage?.output)],
+          ['Complete repair usage receipts', count(merge.repairUsage?.completeTurns)],
+          ['OpenAI API reference estimate for repairs', repairEstimate.total === null ? 'Unavailable' :
+            formatReferenceCost(repairEstimate.total) + ' across ' + repairEstimate.attempts.length + ' priced repairs'],
+          ['Actual integration billing', 'Unavailable'],
+        ]}/></div>}
+    </Panel></Rise>}
     <Rise><Panel title="Recorded execution phases" right={<Clock3 size={18} className="muted-icon"/>}><PhaseTable trace={data.trace}/></Panel></Rise>
     <div className="analytics-grid">
       <Rise><Panel title="Evidence observations" right={<FileCheck2 size={18} className="muted-icon"/>}>

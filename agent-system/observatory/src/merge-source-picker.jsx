@@ -237,7 +237,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         {Object.entries(preferenceFields.merge_sort.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
     </div>
-    {group?.status && group.status !== 'available' && <p role="status">Pull request feed {group.status}. {group.reason}</p>}
+    {group?.status && group.status !== 'available' && <p className="notice integration-discovery-notice" role="status">Pull request feed {group.status}. {group.reason}</p>}
     {visibleDiscovery?.unavailable && <p role="status">Linked Project and Task search is unavailable.</p>}
     {visibleDiscovery?.truncated && <p role="status">Showing the first 200 linked records for the current pull request feed.</p>}
     <ul className="merge-source-list">
@@ -256,7 +256,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         </button></li>;
       })}
     </ul>
-    {!pulls.length && <p>No pull requests match the current view.</p>}
+    {!pulls.length && <p className="low">No pull requests match the current view.</p>}
     {number && <motion.section key={number} className="merge-source-detail"
       initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .18 }}>
       <h3>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>

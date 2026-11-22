@@ -229,7 +229,7 @@ export function GitHubActivityDetails({ kind, id, group, headers, live, ui, inve
       <a className="primary-button" href={detail?.url ?? githubItemHref(kind, id, ui.repository)} target="_blank" rel="noreferrer">Open on GitHub <ArrowUpRight size={16}/></a>
     </div>
     <Rise><Panel title={title} right={summary && <Status value={activityState(kind, summary) || 'unavailable'}/>}>
-      <p className="low">{live && response === null ? 'Loading GitHub details…' : !live
+      <p className={response?.status === 'unavailable' ? 'notice' : 'low'} role="status">{live && response === null ? 'Loading GitHub details…' : !live
         ? 'Detailed GitHub data is available in Live mode on the private Site.'
         : <>{response.status === 'stale' ? 'Cached · ' : ''}{response.observed_at ? 'Last successful refresh ' + stamp(response.observed_at) : ''}{response.reason && ' ' + response.reason}</>}</p>
       {live && response && <button className="quiet-button" type="button" onClick={() => setRefresh(value => value + 1)}>Refresh details</button>}
