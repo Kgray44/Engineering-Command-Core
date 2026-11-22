@@ -402,6 +402,8 @@ test('canonical operation choices use stored state and the current attempt count
   assert.deepEqual(executionActions({ lifecycle: { state: 'paused', stored_state: 'paused' }, attempts: [{}] }), ['resume', 'cancel']);
   assert.deepEqual(executionActions({ lifecycle: { state: 'failed', stored_state: 'failed' }, attempts: [{}, {}, {}] }), ['archive']);
   assert.deepEqual(executionActions({ lifecycle: { state: 'verifying', stored_state: 'verifying' } }), ['accept', 'cancel']);
+  assert.deepEqual(executionActions({ lifecycle: { state: 'verifying', stored_state: 'verifying' },
+    attempts: [{ revision: 'a'.repeat(40), candidate_revision: 'a'.repeat(40) }] }), ['accept', 'reject', 'cancel']);
   assert.deepEqual(executionActions({ lifecycle: { state: 'verifying', stored_state: 'verifying',
     can_continue_candidate:true } }), ['accept', 'continue_candidate', 'cancel']);
   assert.deepEqual(executionActions({ lifecycle: { stored_state: 'proposed' } }, { publishedIntake: true }), ['admit']);

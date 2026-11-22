@@ -59,7 +59,11 @@ export function executionActions({ lifecycle, attempts = [] }, { publishedIntake
   if (state === 'paused' && attemptsThisCycle < 3) result.push('resume');
   if (state === 'failed' && attempts.at(-1)?.state === 'orphaned') result.push('recover_candidate');
   if (state === 'failed' && attemptsThisCycle > 0 && attemptsThisCycle < 3) result.push('retry');
-  if (state === 'verifying') result.push('accept');
+  if (state === 'verifying') {
+    result.push('accept');
+    const attempt = attempts.at(-1);
+    if (attempt?.candidate_revision && attempt.candidate_revision === attempt.revision) result.push('reject');
+  }
   if (lifecycle.can_continue_candidate === true) result.push('continue_candidate');
   if (!['completed', 'failed', 'cancelled', 'superseded', 'archived', 'cancelling'].includes(state)) result.push('cancel');
   if (['completed','proposed','blocked','failed','cancelled','superseded'].includes(state)) result.push('archive');
