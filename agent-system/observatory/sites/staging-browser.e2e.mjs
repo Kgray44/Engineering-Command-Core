@@ -1114,3 +1114,41 @@ test('touch reorders Project cards across mobile grid rows and reloads the order
   await titles.first().waitFor();
   assert.deepEqual(await titles.allTextContents(), [...before].reverse());
 });
+
+
+test('Aetherwake workspace controls fit at phone width and project actions stay inside their cards', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t, {
+    browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
+  });
+  const receipt = await stage.run('/api/projects', { op: 'create', id: crypto.randomUUID(),
+    fields: { name: 'A long engineering project title that wraps across several lines on a phone',
+      objective: 'Verify the Project card grows to contain metadata and its open action.' } });
+  assert.equal(receipt.status, 201);
+  await page.goto(stage.origin + '/#projects');
+  const card = page.locator('.project-card-link');
+  const action = card.locator('.project-card-action');
+  await action.waitFor();
+  const cardBounds = await card.boundingBox();
+  const actionBounds = await action.boundingBox();
+  assert.ok(actionBounds.y + actionBounds.height <= cardBounds.y + cardBounds.height - 10);
+
+  const menu = page.getByRole('button', { name: 'Workspace navigation' });
+  await menu.click();
+  const nav = page.getByRole('navigation', { name: 'Engineering workspaces' });
+  assert.equal(await nav.getByRole('button').count(), 10);
+  await nav.getByRole('button', { name: 'Merge Control Center' }).click();
+  assert.equal(await menu.getAttribute('aria-expanded'), 'false');
+
+  const field = page.getByRole('combobox', { name: 'Integration repair limit' });
+  await field.waitFor();
+  const style = await field.evaluate(node => {
+    const computed = getComputedStyle(node);
+    return { height: node.getBoundingClientRect().height, appearance: computed.appearance,
+      chevron: computed.backgroundImage, padding: Number.parseFloat(computed.paddingRight) };
+  });
+  assert.ok(style.height >= 44);
+  assert.equal(style.appearance, 'none');
+  assert.ok(style.chevron.startsWith('url('));
+  assert.ok(style.padding >= 30);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+});

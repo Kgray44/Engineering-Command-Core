@@ -357,7 +357,7 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
     {category === 'connections' && settings && <ConnectionChecks headers={headers} settings={settings}/>}
     {category === 'scheduling' && settings && <SchedulerObservations engine={engine}/>}
     {category === 'data' && settings && <DataChecks headers={headers} revision={settings.revision}/>}
-    {settings && fields.length > 0 && <form className="form" onSubmit={event => { event.preventDefault(); if (dirty) update('save'); }}>
+    {settings && fields.length > 0 && <form className="form settings-preferences" onSubmit={event => { event.preventDefault(); if (dirty) update('save'); }}>
       {fields.map(([key, field]) => <label key={key}>{field.label}
         <select value={draft[key] ?? saved.values[key]} onChange={event => setDraft({ ...draft, [key]: event.target.value })}>
           {Object.entries(field.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

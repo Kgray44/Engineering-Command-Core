@@ -95,16 +95,6 @@
 [data-application="voyagewright"] :is(.quiet-button,.icon-button):hover { border-color: var(--voyage-brass); background: #183e3f; }
 [data-application="voyagewright"] :focus-visible { outline: 2px solid var(--voyage-moon); outline-offset: 3px; }
 [data-application="voyagewright"] :is(.merge-source-list,.integration-runs) .quiet-button { border-radius: 14px; }
-[data-application="voyagewright"] .merge-discovery-filters :is(input,select) {
-  min-height: 44px;
-  min-width: 0;
-  width: 100%;
-  padding-inline: .6rem;
-  color: var(--voyage-ink);
-  background: var(--voyage-raised);
-  border: 1px solid var(--voyage-border);
-  border-radius: 8px;
-}
 [data-application="voyagewright"] .task-command-hero {
   background: radial-gradient(ellipse at 100% 0%, rgb(157 216 208 / 12%), transparent 56%), var(--voyage-overlay);
 }
