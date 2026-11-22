@@ -401,6 +401,16 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.goto(stage.origin + '/#projects/' + projectId);
   const currentWork = page.locator('#project-current-work');
   await currentWork.getByText('No recorded integrations', { exact: true }).waitFor();
+  const upstream = page.getByRole('region', { name: 'Upstream prerequisites' });
+  await upstream.getByText('Remove prerequisite', { exact: true }).click();
+  await upstream.getByText(/Remove Release readiness as a requirement for Release review/).waitFor();
+  await upstream.getByRole('button', { name: 'Confirm removal' }).click();
+  await upstream.getByText('No recorded prerequisites.').waitFor();
+  await page.locator('#project-history').getByText('milestone gate removed', { exact: true }).waitFor();
+  assert.equal((await stage.run('/api/projects', { op: 'milestone_gate', id: projectId, task_id: taskId,
+    milestone_id: releaseGate })).status, 200);
+  await page.reload();
+  await upstream.getByRole('link', { name: 'Release readiness', exact: true }).waitFor();
   await page.getByRole('navigation', { name: 'Jump to Project section' }).getByRole('button', { name: 'Evidence', exact: true }).click();
   const artifacts = page.locator('#project-evidence');
   assert.equal(await artifacts.getByRole('link', { name: 'Open pull request on GitHub' }).getAttribute('href'), pull.html_url);
@@ -622,7 +632,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.goto(stage.origin + '/#settings/data');
   await page.getByRole('button', { name: 'Run scoped data checks' }).click();
   const dataChecks = page.getByRole('region', { name: 'Data checks' });
-  await dataChecks.getByText('19 expected objects found').waitFor();
+  await dataChecks.getByText('20 expected objects found').waitFor();
   await dataChecks.getByText('Passed', { exact: true }).waitFor();
   for (const label of ['Invalid milestone gates', 'Preferences missing current receipts', 'Integrations missing current receipts']) {
     assert.equal(await dataChecks.locator('.settings-facts div').filter({ hasText: label }).locator('dd').innerText(), '0');

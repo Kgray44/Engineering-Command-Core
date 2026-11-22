@@ -3,7 +3,7 @@ import { ArrowDown, GitBranch } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { taskHref } from './task-workspace.mjs';
 
-export function ProjectDependencies({ tasks, prerequisites, gates, Status }) {
+export function ProjectDependencies({ tasks, prerequisites, gates, Status, busy, onRemoveGate }) {
   const [focus, setFocus] = useState(null);
   const reduced = useReducedMotion();
   const current = tasks.find(task => task.id === focus) ?? tasks[0];
@@ -32,6 +32,15 @@ export function ProjectDependencies({ tasks, prerequisites, gates, Status }) {
           {milestoneGates.map(item => <li key={item.milestone_id}>
             <a href={'#projects/' + item.project_id}>{item.name}</a>
             <Status value={item.status}/><small>Requires milestone acceptance</small>
+            {onRemoveGate && item.removable_gate_event_id && <details>
+              <summary>Remove prerequisite</summary>
+              <p>Remove {item.name} as a requirement for {current.title}? Project History will retain the change.</p>
+              <button type="button" className="quiet-button" disabled={busy}
+                onClick={() => onRemoveGate({
+                  task_id: current.id, milestone_id: item.milestone_id, expected_version: current.version,
+                  expected_gate_event_id: item.removable_gate_event_id,
+                })}>Confirm removal</button>
+            </details>}
           </li>)}
         </ul> : <p className="low">No recorded prerequisites.</p>}
       </section>

@@ -162,7 +162,16 @@ export async function projectOperation({ db, owner, namespace, application, body
     const [taskRows, milestones, gates, integrations] = await Promise.all([
       readTaskRows({ db, owner, namespace, now, reconcileExpired: false }),
       scope('SELECT id, project_id, version, name, acceptance, status, updated_at FROM milestones WHERE owner_id = ? AND namespace = ? ORDER BY updated_at, id').all(),
-      scope('SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status FROM project_task_gates g JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id WHERE g.owner_id = ? AND g.namespace = ?').all(),
+      scope(`SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status,
+        CASE WHEN p.project_id = ?3 AND json_extract(p.engine, '$.executor') IS NULL THEN (
+          SELECT MAX(e.event_id) FROM project_relationship_events e
+          WHERE e.owner_id = g.owner_id AND e.namespace = g.namespace AND e.task_id = g.task_id
+            AND e.milestone_id = g.milestone_id AND e.kind = 'milestone_gate_set'
+        ) END AS removable_gate_event_id
+        FROM project_task_gates g
+        JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id
+        JOIN proposals p ON p.owner_id = g.owner_id AND p.namespace = g.namespace AND p.task_id = g.task_id
+        WHERE g.owner_id = ?1 AND g.namespace = ?2`, body.op === 'get' ? body.id : null).all(),
       scope(`SELECT r.id, r.task_id, r.pr_number, r.head_sha, r.state, r.updated_at, t.project_id,
         CASE WHEN t.project_id = ?3 AND json_extract(r.record, '$.evidence.observed_head') = r.head_sha
           AND json_extract(r.record, '$.evidence.policy_observed') = 1
@@ -302,7 +311,7 @@ export async function projectOperation({ db, owner, namespace, application, body
           ELSE 'project_changed' END AS kind, version, status, occurred_at, owner_review, technical_state
         FROM snapshots ORDER BY version`, body.id).all(),
       scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
-      scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
+      scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY event_id', body.id).all(),
       scope(executionHistoryQuery, body.id, executionHistoryLimit + 1, heartbeatHistoryLimit + 1).all(),
       scope('SELECT task_id, milestone_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
       scope('SELECT t.* FROM task_telemetry t JOIN proposals p USING (owner_id, namespace, task_id) WHERE t.owner_id = ? AND t.namespace = ? AND p.project_id = ?', body.id).all(),
@@ -466,7 +475,7 @@ export async function projectOperation({ db, owner, namespace, application, body
         .bind(...values, owner, namespace, body.milestone_id, body.id, body.expected_version).first();
     return row ? success({ milestone: row }, body.expected_version === undefined ? 201 : 200) : fail(409, 'Milestone identity or version changed');
   }
-  if (!['link_task', 'milestone_gate', 'milestone_link'].includes(body.op) || !taskId(body.task_id)) return fail(400, 'Invalid Projects operation');
+  if (!['link_task', 'milestone_gate', 'milestone_link', 'remove_milestone_gate'].includes(body.op) || !taskId(body.task_id)) return fail(400, 'Invalid Projects operation');
   const task = await scope('SELECT project_id, version, engine FROM proposals WHERE owner_id = ? AND namespace = ? AND task_id = ?', body.task_id).first();
   if (!task || (task.project_id && task.project_id !== body.id)) return fail(404, 'Task not found in Project scope');
   if (body.op === 'link_task') {
@@ -479,6 +488,25 @@ export async function projectOperation({ db, owner, namespace, application, body
   if (task.project_id !== body.id || !isId(body.milestone_id)) return fail(400, 'Task and milestone identities required');
   const milestone = await scope('SELECT project_id FROM milestones WHERE owner_id = ? AND namespace = ? AND id = ?', body.milestone_id).first();
   if (!milestone) return fail(404, 'Milestone not found');
+  if (body.op === 'remove_milestone_gate') {
+    if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1 ||
+        !Number.isSafeInteger(body.expected_gate_event_id) || body.expected_gate_event_id < 1) {
+      return fail(400, 'Expected Task version and milestone gate receipt required');
+    }
+    const removed = await scope(`
+      DELETE FROM project_task_gates
+      WHERE owner_id = ?1 AND namespace = ?2 AND task_id = ?3 AND milestone_id = ?4
+        AND EXISTS (SELECT 1 FROM proposals t JOIN projects p
+          ON p.owner_id = t.owner_id AND p.namespace = t.namespace AND p.id = t.project_id
+          WHERE t.owner_id = ?1 AND t.namespace = ?2 AND t.task_id = ?3
+            AND t.project_id = ?5 AND t.version = ?6 AND json_extract(t.engine, '$.executor') IS NULL
+            AND p.status <> 'archived')
+        AND ?7 = (SELECT MAX(e.event_id) FROM project_relationship_events e
+          WHERE e.owner_id = ?1 AND e.namespace = ?2 AND e.task_id = ?3
+            AND e.milestone_id = ?4 AND e.kind = 'milestone_gate_set')
+      RETURNING task_id`, body.task_id, body.milestone_id, body.id, body.expected_version, body.expected_gate_event_id).first();
+    return removed ? success({ removed: true }) : fail(409, 'The milestone prerequisite or Task changed. Refresh before trying again.');
+  }
   if (body.op === 'milestone_link') {
     if (milestone.project_id !== body.id) return fail(403, 'Milestone belongs to a different Project');
     const row = await scope("INSERT INTO project_task_milestones SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE owner_id = ? AND namespace = ? AND id = ? AND status <> 'archived') ON CONFLICT DO NOTHING RETURNING task_id",

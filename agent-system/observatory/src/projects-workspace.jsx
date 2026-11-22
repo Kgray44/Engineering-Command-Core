@@ -444,7 +444,7 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
       if (request.op !== 'create') await load();
     } catch (error) {
       if (request.op === 'reorder' && error.status === 409 ||
-          request.op === 'link_task' && [404, 409].includes(error.status)) await load().catch(() => {});
+          ['link_task', 'remove_milestone_gate'].includes(request.op) && [404, 409].includes(error.status)) await load().catch(() => {});
       setError(error.message);
     } finally {
       pending.current = false;
@@ -679,7 +679,8 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
           onSave={fields => submit({ op: 'milestone', ...fields }, () => setAddingMilestone(null))}/>}
       </Panel>
       <Panel id="project-dependencies" title="Dependencies">
-        <ProjectDependencies tasks={tasks} prerequisites={task_prerequisites} gates={dependencies} Status={Status}/>
+        <ProjectDependencies tasks={tasks} prerequisites={task_prerequisites} gates={dependencies} Status={Status} busy={busy}
+          onRemoveGate={project.status === 'archived' ? undefined : fields => submit({ op: 'remove_milestone_gate', ...fields })}/>
         {!tasks.length && <p>Project Tasks will appear here with their prerequisites.</p>}
         {project.status !== 'archived' && tasks.length > 0 && <details><summary>Link a milestone</summary>
           <form className="form" onSubmit={event => {

@@ -18,6 +18,7 @@ const inspectedObjects = new Map([
   ['workspace_preferences', 'table'],
   ['workspace_preference_events', 'table'],
   ['project_task_moved_out', 'trigger'],
+  ['project_milestone_gate_removed', 'trigger'],
 ]);
 
 export async function readDataHealth(db, owner, namespace) {
@@ -27,8 +28,10 @@ export async function readDataHealth(db, owner, namespace) {
   ).bind(...names).all();
   const observed = new Map(results.map(row => [row.name, row.type]));
   const missing = names.filter(name => observed.get(name) !== inspectedObjects.get(name));
+  const marker = observed.get('project_milestone_gate_removed') === 'trigger' ? '0020_project_milestone_gate_removal' :
+    observed.get('project_task_moved_out') === 'trigger' ? '0019_project_task_move_history' : null;
   const schema = { status: missing.length ? 'incomplete' : 'current', checked_objects: names.length, missing,
-    ...(observed.get('project_task_moved_out') === 'trigger' ? { observed_migration_marker: '0019_project_task_move_history' } : {}) };
+    ...(marker ? { observed_migration_marker: marker } : {}) };
   const base = { schema, backup: { status: 'unverified' }, import: { status: 'no_checkpoint_in_served_partition' } };
   if (missing.length) return { ...base, checked_at: new Date().toISOString(), integrity: { status: 'unverified' } };
 

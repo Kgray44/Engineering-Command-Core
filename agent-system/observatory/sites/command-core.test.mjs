@@ -244,6 +244,47 @@ test('Project usage counts only App Server receipts for the recorded attempt and
   assert.equal(detail.body.telemetry.costs, null);
 });
 
+test('only a current, unadmitted Project milestone gate can be removed and the change is retained', async t => {
+  const { call, task } = setup(t);
+  const project = request => call(0, '/api/projects', request);
+  const id = crypto.randomUUID();
+  const dependencyId = crypto.randomUUID();
+  for (const projectId of [id, dependencyId]) {
+    assert.equal((await project({ op: 'create', id: projectId, fields: {
+      name: 'Fixture', objective: 'Verify scoped milestone gate changes',
+    } })).status, 201);
+  }
+  const milestone_id = crypto.randomUUID();
+  assert.equal((await project({ op: 'milestone', id: dependencyId, milestone_id, name: 'Foundation',
+    acceptance: 'Evidence', status: 'planned' })).status, 201);
+  const registration = await project({ op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = registration.body.task.id;
+  const gate = { id, task_id, milestone_id };
+  const read = async () => (await call(0, '/api/projects/' + id)).body;
+  const add = () => project({ ...gate, op: 'milestone_gate' });
+  assert.equal((await add()).status, 200);
+  const version = registration.body.version;
+  const first = (await read()).dependencies[0].removable_gate_event_id;
+  assert.ok(Number.isSafeInteger(first));
+  const remove = { ...gate, op: 'remove_milestone_gate', expected_version: version, expected_gate_event_id: first };
+  assert.equal((await call(1, '/api/projects', remove)).status, 404);
+  assert.equal((await project({ ...remove, expected_version: version + 1 })).status, 409);
+  assert.equal((await project(remove)).status, 200);
+  assert.equal((await read()).dependencies.length, 0);
+  assert.equal((await read()).history.filter(event => event.kind === 'milestone_gate_removed' &&
+    event.task_id === task_id && event.milestone_id === milestone_id).length, 1);
+  assert.equal((await add()).status, 200);
+  const current = (await read()).dependencies[0].removable_gate_event_id;
+  assert.ok(current > first);
+  assert.equal((await project(remove)).status, 409);
+  const admission = await task(0, { op: 'command', task_id, expected_version: version,
+    operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } });
+  assert.equal(admission.status, 200);
+  assert.equal((await read()).dependencies[0].removable_gate_event_id, null);
+  assert.equal((await project({ ...remove, expected_version: admission.body.version, expected_gate_event_id: current })).status, 409);
+  assert.equal((await read()).tasks[0].state, 'blocked');
+});
+
 test('Project progress reports actual scoped execution, milestone gates and owner review', async t => {
   const { call, task, one, rpc } = setup(t);
   const project = request => call(0, '/api/projects', request);
@@ -673,8 +714,8 @@ test('Settings data checks validate the active scoped Project history', async t 
   const first = await call(0, path);
   assert.equal(first.status, 200);
   assert.equal(first.body.schema.status, 'current');
-  assert.equal(first.body.schema.observed_migration_marker, '0019_project_task_move_history');
-  assert.equal(first.body.schema.checked_objects, 19);
+  assert.equal(first.body.schema.observed_migration_marker, '0020_project_milestone_gate_removal');
+  assert.equal(first.body.schema.checked_objects, 20);
   assert.equal(first.body.integrity.tasks_without_engine_receipts, 0);
   assert.equal(first.body.integrity.invalid_project_order_references, 0);
   assert.equal(first.body.integrity.status, 'passed');
