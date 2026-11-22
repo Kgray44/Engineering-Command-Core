@@ -117,3 +117,31 @@ node sites/verify-restore.mjs SOURCE.sqlite RESTORED.sqlite aetherwake Kgray44/A
 ```
 
 The verifier opens both files read-only. It checks application identity, current schema objects, exact schema equality, SQLite integrity, foreign keys, and every table's typed rows, including any migration journal present in the checkpoint. The receipt contains counts and a digest instead of row payloads. Keep that receipt in private custody. Preserve the provider's export and migration receipts, check the file inventory and digests separately where applicable, and read restored identities through the isolated application before recording acceptance.
+
+### Materialize an authorized SQL checkpoint
+
+If the storage operator supplies SQL, request the full schema and data in SQLite CLI-compatible format and retain the provider export receipt in private custody. Record the source partition, export timestamp or bookmark, and SQL SHA-256. Cloudflare D1 documents a SQLite CLI-compatible export format and warns that export can block requests. Use an authorized storage operator and an appropriate maintenance window for any export that could affect a live service. [D1 export formats and availability](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/export/)
+
+Run this PowerShell example only on a trusted provider export, with Python 3.12 and both paths in an existing private working directory outside Git. Size the dump and the additional database copies before running it. This example reads the SQL into memory. Use a fresh destination. If the command fails, retain the original dump and treat the materialized file as an incomplete attempt.
+
+```powershell
+Get-FileHash -LiteralPath 'SOURCE.sql' -Algorithm SHA256
+@'
+import pathlib
+import sqlite3
+import sys
+
+sql, target = map(pathlib.Path, sys.argv[1:])
+with target.open('xb'):
+    pass
+with sqlite3.connect(target) as db:
+    db.set_authorizer(lambda action, *_: sqlite3.SQLITE_DENY
+                      if action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH)
+                      else sqlite3.SQLITE_OK)
+    db.executescript(sql.read_text(encoding='utf-8'))
+'@ | python - 'SOURCE.sql' 'SOURCE.sqlite'
+```
+
+After a successful import, run the SQLite verifier above. Where the storage operator supplies source checks, reconcile the materialized table counts, migration state, record identities, and any available digests against that independent receipt before accepting the restore. The SQLite comparison verifies the copy against the materialized database. Completeness of the hosted export and any separately held files requires evidence from the storage operator.
+
+A local Windows rehearsal converted full SQL dumps of both synthetic application partitions with Python 3.12. The verifier compared each materialized checkpoint and final copy against its original fixture, including a 64-bit integer, BLOB, and NULL value. It verified 23 tables per partition on migration `0020_project_milestone_gate_removal`. The materialization rejected an existing destination. The SQL came from local fixture databases.
