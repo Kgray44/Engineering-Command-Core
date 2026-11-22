@@ -27,6 +27,17 @@ On Chrome 157 for Windows, a controlled 1,440 × 900 headless comparison used th
 
 An isolated 2.6-second grid trace produced 860 to 862 Paint events per baseline run and zero in each of three runs with the translated tile. At the midpoint of the cycle, a screenshot comparison over 1,296,000 pixels found no RGB channel difference greater than one 8-bit level. This confirms a reduction in paint work under the tested workload. Browser frame callbacks and DOM visibility checks cannot establish whether the originally reported intermittent compositor bands are resolved.
 
+### Settings confirmation and live Task updates
+
+On Windows Chrome 157.0.8103.80 at 1,440 × 900, three local SQLite-backed runs measured the in-page Settings reset confirmation and three measured a remote worker claim with the Project Tasks panel in view. The probe captured animation-frame intervals within 250 ms of the first rendered change, plus Layout Instability and long-task observations. Each run began with settled navigation and a fresh scoped fixture.
+
+| Interaction | First visible change | Worst run p95 frame interval | Unexpected layout shift | Long tasks |
+|---|---:|---:|---:|---:|
+| Settings reset confirmation | 58–59 ms from probe start through the browser click | 17.0 ms | 0 across three runs | 0 |
+| Remote Task claim after layout correction | 4.70–4.75 s from probe start through the worker request | 17.0 ms | 0 across three runs | 0 |
+
+The inline confirmation's insertion was input-related, with a layout shift score of 0.0024. The original Task update displaced the execution control and activity text when the status chip widened. The Task row now reserves status space, and Current work uses fixed column proportions. The repeated claim produced one scoped Project read per run. Its observed latency includes the existing five-second Task registry polling interval.
+
 ## Troubleshooting and recovery
 
 If Projects or Settings report a scope error, check the caller's assignment, the origin configuration, and the D1 singleton identity. If a preference or card order conflicts, refresh before resubmitting. For a blocked Task, open its attempt and dependency receipts. For GitHub errors, check the latest observed credential state, rate-limit budget, source SHA, and recorded workflow attempt. A heartbeat is stronger evidence of worker availability than credential presence.

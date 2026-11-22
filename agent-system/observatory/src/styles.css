@@ -479,6 +479,9 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 }
 .project-list { list-style: none; margin: 14px 0; padding: 0; }
 .project-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 0; }
+.project-task-state { min-inline-size: 7rem; }
+#project-current-work .detail-line { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+#project-current-work .detail-line > strong { text-align: end; overflow-wrap: anywhere; }
 .project-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
 .projects-workspace details { margin: 12px 0; }
 .projects-workspace summary { cursor: pointer; }

@@ -467,6 +467,38 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.locator('#integration-detail-title').waitFor();
 });
 
+test('an open Project reflects a remote Task claim without a manual refresh or portfolio reload', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t);
+  const projectId = crypto.randomUUID();
+  const otherId = crypto.randomUUID();
+  for (const id of [projectId, otherId]) {
+    assert.equal((await stage.run('/api/projects', { op: 'create', id, fields: {
+      name: id === projectId ? 'Live Project' : 'Other Project', objective: 'Verify scoped Task refresh',
+    } })).status, 201);
+  }
+  const created = await stage.run('/api/projects', { op: 'register_task', id: projectId, operation_id: crypto.randomUUID(),
+    fields: { title: 'Remote status probe', objective: 'Reflect the remote worker claim', primary: 'backend',
+      profile_id: 'backend', criteria: ['The displayed lifecycle catches up'] } });
+  assert.equal(created.status, 201);
+  const taskId = created.body.task.id;
+  assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
+    expected_version: created.body.version, operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  await page.goto(stage.origin + '/#projects/' + projectId);
+  const tasks = page.locator('#project-tasks');
+  await tasks.locator('.status-ready').waitFor();
+  let portfolioReads = 0;
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/projects') portfolioReads++;
+  });
+  const claim = (await stage.run('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+    name: 'task_engine_v1', arguments: { worker_key: 'w'.repeat(64), application_id: 'aetherwake',
+      request: { op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() } },
+  } })).body.result.structuredContent.claim;
+  assert.equal(claim.task.id, taskId);
+  await tasks.locator('.status-running').waitFor({ timeout: 12_000 });
+  assert.equal(portfolioReads, 0);
+});
+
 test('touch reorders Project cards across mobile grid rows and reloads the order', { timeout: 60_000 }, async t => {
   const { stage, page } = await browserStage(t, {
     browser: { viewport: { width: 390, height: 1100 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },

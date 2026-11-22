@@ -159,6 +159,9 @@ useEffect(()=>{
   return ()=>request.abort();
 },[]);
 const [engine,setEngine]=useState({status:'checking',tasks:[]});
+const projectTaskState=useMemo(()=>projectRoute?.[1] ? JSON.stringify(engine.tasks.filter(item=>item.project_id===projectRoute[1])
+  .map(({task,lifecycle,priority})=>[task.id,lifecycle.state,lifecycle.spec_version,priority]).sort((a,b)=>a[0].localeCompare(b[0]))) : '',
+  [engine.tasks,projectRoute?.[1]]);
 const [github,setGitHub]=useState(null),[proposals,setProposals]=useState(null);
 const [draft,setDraft]=useState(initialDraft),[publishError,setPublishError]=useState('');
 const [taskPriority,setTaskPriority]=useState(null);
@@ -440,7 +443,7 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
 <DetailLine name="Failed attempts" value={attempts.filter(a=>a.state==='failed').length}/><DetailLine name="Imported evidence records" value={evidence.length}/><DetailLine name="Reported passes (unverified)" value={evidence.filter(e=>e.result==='passed').length}/><DetailLine name="Tasks without acceptance" value={tasks.length-work.accepted}/></Panel></Rise></StickySectionAside></div><Rise delay={.24}><Panel title="Recent engineering work" kicker="03 / TASK FEED" right={<button className="text-button" onClick={()=>navigate('tasks')}>Open Task Control Center <ArrowRight size={15}/></button>}><TaskRows tasks={displayTasks.filter(task=>task.state!=='archived').slice(0,9)} controls={privateControls} related={related} activityFor={activityFor} Status={Status} overviewResults={overviewResults}/></Panel></Rise>{!demo&&proposals&&<ExecutionFeed execution={execution} records={records} headers={verificationHeaders} onRefresh={()=>refresh(false)} automatic={telemetryScope?automaticTelemetry:null}/>} {!demo&&github&&<Rise><Panel title="GitHub repository activity" kicker="PUBLIC ENGINEERING SOURCES"><GitHubFeed data={github}/></Panel></Rise>}</>}
 {page==='projects'&&<Suspense fallback={<p role="status">Loading Projects…</p>}>
   <ProjectsWorkspace key={preference.project_sort} preferences={preference} preferencesReady={Boolean(settings)} projectId={projectRoute?.[1]} headers={verificationHeaders} Panel={Panel} Status={Status} Metric={Metric} DetailLine={DetailLine}
-    refreshVersion={projectRefresh} workerAccess={workerAccess} workerDispatch={engine.workerDispatch} onJump={jumpToSection} demo={demo} onNewTask={project=>{navigate('create');setNewTaskProject(project)}}/>
+    refreshVersion={projectRefresh} liveTaskState={projectTaskState} workerAccess={workerAccess} workerDispatch={engine.workerDispatch} onJump={jumpToSection} demo={demo} onNewTask={project=>{navigate('create');setNewTaskProject(project)}}/>
 </Suspense>}
 {page==='tasks'&&<Rise><TaskExplorer tasks={displayTasks} work={taskRoute?.work??'all'} workActivity={activity} controls={privateControls} related={related} activityFor={activityFor}
   Status={Status} Panel={Panel} loading={loading} filters={filters} defaults={taskDefaults} setFilters={setFilters} onCreate={()=>navigate('create')}/></Rise>}

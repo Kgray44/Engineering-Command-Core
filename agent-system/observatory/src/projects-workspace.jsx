@@ -313,7 +313,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, preferences, preferencesReady, workerAccess, workerDispatch, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, workerAccess, workerDispatch, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort }));
@@ -354,9 +354,12 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     void loading.catch(error => {
       if (!controller.signal.aborted && version === readVersion.current) setError(error.message);
     });
-    if (projectId) {
-      void projectRequest(null, headers, { signal: controller.signal }).then(setTaskList).catch(() => {});
-    }
+    return () => controller.abort();
+  }, [projectId, demo, headers, refreshVersion, liveTaskState]);
+  useEffect(() => {
+    if (demo || !projectId) return;
+    const controller = new AbortController();
+    void projectRequest(null, headers, { signal: controller.signal }).then(setTaskList).catch(() => {});
     return () => controller.abort();
   }, [projectId, demo, headers, refreshVersion]);
   useEffect(() => {
@@ -445,7 +448,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
             {edit && <ProjectForm key={project.version} project={project} busy={busy}
               onSave={fields => submit({ op: 'update', expected_version: project.version, fields }, () => setEdit(false))}/>}
           </Panel>
-          <Panel title="Current work">
+          <Panel id="project-current-work" title="Current work">
             <DetailLine name="Task progress" value={progress.tasks.completed + ' of ' + progress.tasks.total + ' complete'}/>
             <DetailLine name="Milestone progress" value={progress.milestones.accepted + ' of ' + progress.milestones.total + ' accepted'}/>
             <DetailLine name="Workers with active Project leases" value={number(active_workers)}/>
@@ -488,7 +491,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </div>}
         {tasks.length > 0 && <p className="low" role="status">{visibleTasks.length} of {tasks.length} Tasks</p>}
         <ul className="project-list">{visibleTasks.map(task => <li key={task.id}>
-          <a className="text-button" href={taskHref(task.id)}>{task.title}</a> <Status value={task.state}/>
+          <a className="text-button" href={taskHref(task.id)}>{task.title}</a>
+          <span className="project-task-state"><Status value={task.state}/></span>
           {task.priority && <small>{task.priority} priority</small>}
           <button type="button" className="quiet-button" aria-label={'Execution controls for ' + task.title}
             aria-expanded={controlTaskId === task.id} onClick={() => setControlTaskId(task.id === controlTaskId ? '' : task.id)}>Execution controls</button>
