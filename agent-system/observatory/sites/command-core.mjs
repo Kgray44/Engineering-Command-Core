@@ -49,7 +49,7 @@ function scopedEnvironment(env, binding) {
 }
 
 export function createCommandCore({ applications, portfolio = { id: 'engineering', name: 'Engineering' },
-  legacyApplication, trustedIdentity, trustedWorkerIngress, ...workerOptions }) {
+  legacyApplication, connectorApplication, trustedIdentity, trustedWorkerIngress, ...workerOptions }) {
   if (typeof trustedIdentity !== 'function') throw Error('Verified request identity adapter required');
   if (!Array.isArray(applications) || !applications.length || !applicationId.test(portfolio.id)) throw Error('Invalid portfolio');
   const byId = new Map();
@@ -76,11 +76,12 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
       }
     }
     const worker = createWorker({ ...workerOptions, assets: appAssets, application });
-    const runtime = { application, worker, binding };
+    const runtime = { application, worker, binding, origin };
     byId.set(id, runtime);
     byOrigin.set(origin, runtime);
   }
   if (legacyApplication !== undefined && !byId.has(legacyApplication)) throw Error('Unknown legacy application');
+  if (connectorApplication !== undefined && !byId.has(connectorApplication)) throw Error('Unknown connector application');
 
   function resolve(env, owner, runtime) {
     if (!runtime) return null;
@@ -271,6 +272,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
             try { body = JSON.parse(await readBounded(request.body, 4096)); }
             catch { return error('Invalid settings payload', 400); }
           } else if (request.method !== 'GET') return error('Method not allowed', 405);
+          const connector = connectorApplication ? byId.get(connectorApplication) : originRuntime;
           const facts = {
             application: originRuntime.application,
             revision: workerOptions.sourceRevision ?? null,
@@ -281,6 +283,10 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
                 integration_read_credential_configured: Boolean(scoped.GITHUB_READ_TOKEN),
               },
               codex: { credential_configured: isTaskWorkerKey(scoped.OBSERVATORY_TASK_WORKER_KEY) },
+              chatgpt: {
+                discovery_here: connector === originRuntime,
+                ...(connector !== originRuntime && resolve(env, owner, connector) ? { connector_origin: connector.origin } : {}),
+              },
             },
             capacity: taskExecutionCapacity,
             integration: integrationAccess(scoped, owner, namespace),

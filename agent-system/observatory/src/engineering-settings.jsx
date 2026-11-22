@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, Bell, Boxes, CalendarClock, Database, GitMerge, Github, Link2, Settings, ShieldCheck } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { preferenceFields } from './workspace-preferences.mjs';
@@ -37,6 +37,7 @@ function Diagnostics({ category, settings, github, dispatch, worker, execution, 
   const observed = github?.main?.observed_at;
   const githubState = github?.main?.status ?? 'unverified';
   const codex = dispatch?.at ? dispatch.label : 'Heartbeat unverified';
+  const telemetryReceipt = (execution?.sources ?? []).map(source => source.received_at).filter(Boolean).sort().at(-1);
   const identities = [['Application', settings.application.name], ['Settings scope', 'Signed-in owner in this application']];
   const rows = {
     general: identities,
@@ -55,14 +56,82 @@ function Diagnostics({ category, settings, github, dispatch, worker, execution, 
       ['Source repair', settings.integration.repair_enabled ? 'Owner authorized' : 'Unavailable'], ['Approval', 'Binds to the reviewed source revision']],
     connections: [['Backend and database', 'Verified · ' + date(settings.database_verified_at)], ['Site source revision', settings.revision],
       ['GitHub main', githubState + ' · ' + date(observed)], ['GitHub Actions', (github?.ci?.status ?? 'unverified') + ' · ' + date(github?.ci?.observed_at)],
+      ['Latest GitHub Actions issue', github?.ci?.reason ?? 'None reported'], ['GitHub request budget', github?.api?.remaining],
       ['Codex workers', codex], ['Last worker issue', worker?.last_error ? worker.last_error.state.replaceAll('_', ' ') + ' · ' + date(worker.last_error.at) : 'None reported'],
-      ['Task scheduler', engineState], ['Telemetry snapshot', date(execution?.generated_at)], ['ChatGPT connector', 'Unverified from this Site']],
+      ['Task registry read', { available: 'Verified', checking: 'Checking', absent: 'Unavailable', error: 'Latest read failed' }[engineState]],
+      ['Telemetry snapshot generated', date(execution?.generated_at)], ['Latest Task telemetry receipt', date(telemetryReceipt)]],
     security: [...identities, ['Credential access', 'Deployment-managed bindings'], ['Write access', 'Authenticated owner and same-origin mutation routes']],
     data: [['Database partition', 'Verified · ' + date(settings.database_verified_at)], ['Settings schema', 'Workspace preferences and audit available'],
       ['Backup and recovery', 'Requires deployment-side verification']],
     notifications: [['Attention Center', <a href="#activity">Open engineering activity</a>], ['External delivery', 'Unavailable from this Site']],
   };
   return <Facts rows={rows[category] ?? []}/>;
+}
+
+async function connectionProbe(path, init, interpret) {
+  try {
+    const response = await fetch(path, { ...init, cache: 'no-store' });
+    if (!response.ok) throw Error('HTTP ' + response.status);
+    const message = interpret(await response.json());
+    return { message, at: new Date().toISOString(), ok: true };
+  } catch (error) {
+    const message = /^HTTP \d{3}$/.test(error.message) ? error.message : 'Unexpected or unavailable response';
+    return { message, at: new Date().toISOString(), ok: false };
+  }
+}
+
+function ConnectionChecks({ settings, headers }) {
+  const [results, setResults] = useState({});
+  const [busy, setBusy] = useState(false);
+  const request = useRef(null);
+  useEffect(() => () => request.current?.abort(), []);
+  const connector = settings.connections.chatgpt;
+  const run = async () => {
+    if (request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setBusy(true);
+    const probes = [['service', connectionProbe('/api/status', { headers, signal: controller.signal }, body => {
+      if (body.status !== 'ready' || body.application?.id !== settings.application.id || !/^[0-9a-f]{40}$/.test(body.revision)) throw Error();
+      return <>Ready for {settings.application.name} <code title={body.revision}>{body.revision.slice(0, 12)}</code></>;
+    })]];
+    if (connector?.discovery_here) probes.push(['discovery', connectionProbe('/mcp', {
+      method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({ jsonrpc: '2.0', id: 'connection-discovery', method: 'tools/list' }),
+    }, body => {
+      const names = new Set(body.result?.tools?.map(tool => tool.name));
+      if (body.jsonrpc !== '2.0' || body.id !== 'connection-discovery' ||
+          !['list_applications', 'task_engine_v1', 'projects_v1'].every(name => names.has(name))) throw Error();
+      return 'Required tools discovered';
+    })]);
+    const outcomes = await Promise.all(probes.map(async ([key, probe]) => [key, await probe]));
+    if (!controller.signal.aborted) {
+      setResults(previous => Object.fromEntries(outcomes.map(([key, result]) => [key, {
+        ...previous[key], latest: result.message, [result.ok ? 'passedAt' : 'failedAt']: result.at,
+        ...(result.ok ? {} : { failure: result.message }),
+      }])));
+      request.current = null;
+      setBusy(false);
+    }
+  };
+  return <section aria-label="Connection checks">
+    <h3>Connection checks</h3>
+    <button type="button" className="quiet-button" onClick={run} disabled={busy}>{busy ? 'Verifying…' : 'Verify connections'}</button>
+    <div role="status">
+      <Facts rows={[
+        ['Deployed service and database', results.service?.latest ?? 'Awaiting probe'],
+        ['Last successful service probe', date(results.service?.passedAt)],
+        ['Last service probe failure', results.service?.failure ? results.service.failure + ' · ' + date(results.service.failedAt) : 'None observed in this session'],
+        ['Site MCP discovery', connector?.discovery_here ? results.discovery?.latest ?? 'Awaiting probe' :
+          connector?.connector_origin ? <a href={connector.connector_origin + '/#settings/connections'}>Verify on the shared connector Site</a> : 'Unavailable from this Site'],
+        ...(connector?.discovery_here ? [
+          ['Last successful discovery', date(results.discovery?.passedAt)],
+          ['Last discovery failure', results.discovery?.failure ? results.discovery.failure + ' · ' + date(results.discovery.failedAt) : 'None observed in this session'],
+        ] : []),
+        ['External ChatGPT connection', 'Unverified from this Site'],
+      ]}/>
+    </div>
+  </section>;
 }
 
 function DataChecks({ headers, revision }) {
@@ -175,6 +244,7 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
     <a className="back" href="#settings">All settings</a>
     <h2>{active[1]}</h2>
     {settings && <Diagnostics {...{ category, settings, github, dispatch, worker, execution, engineState }}/>}
+    {category === 'connections' && settings && <ConnectionChecks headers={headers} settings={settings}/>}
     {category === 'data' && settings && <DataChecks headers={headers} revision={settings.revision}/>}
     {settings && fields.length > 0 && <form className="form" onSubmit={event => { event.preventDefault(); if (dirty) update('save'); }}>
       {fields.map(([key, field]) => <label key={key}>{field.label}
@@ -199,7 +269,9 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
     </details>}
     <div className="integration-actions">
       <button type="button" className="quiet-button" disabled={busy} onClick={refresh}>{settings ? 'Refresh settings' : 'Load settings'}</button>
-      {category === 'connections' && <a href="#activity">Open activity</a>}
+      {category === 'connections' && <>
+        <a href="#activity">Open activity</a><a href="#settings/github">Troubleshoot GitHub</a><a href="#settings/workers">Troubleshoot workers</a>
+      </>}
     </div>
     <p role="status">{message || (!settings ? 'Waiting for the settings service.' : '')}</p>
   </motion.section>;

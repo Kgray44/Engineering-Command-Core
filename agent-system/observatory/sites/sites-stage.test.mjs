@@ -47,6 +47,14 @@ test('two private Sites share an engine and keep durable Projects in distinct da
   const status = await Promise.all(applications.map((app, i) => call(i, '/api/status').then(result => result.json())));
   assert.deepEqual(status.map(entry => entry.application.repository), applications.map(app => app.repository));
   assert.ok(status.every(entry => entry.revision === revision));
+  const connectionSettings = await Promise.all(applications.map((_, index) =>
+    call(index, '/api/settings').then(response => response.json())));
+  assert.equal(connectionSettings[0].connections.chatgpt.discovery_here, true);
+  assert.equal(connectionSettings[1].connections.chatgpt.discovery_here, false);
+  assert.equal(connectionSettings[1].connections.chatgpt.connector_origin, applications[0].origin);
+  const discovery = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+  assert.ok((await (await call(0, '/mcp', discovery)).json()).result.tools.some(tool => tool.name === 'list_applications'));
+  assert.equal((await call(1, '/mcp', discovery)).status, 404);
   const created = await Promise.all(applications.map((app, i) => call(i, '/api/projects', {
     op: 'create', id: crypto.randomUUID(), fields: { name: app.name, objective: 'Qualify the staged integration' },
   })));

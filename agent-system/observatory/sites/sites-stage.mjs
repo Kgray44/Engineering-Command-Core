@@ -94,7 +94,7 @@ export function createSitesStage({ role, applications, portfolio = { id: 'engine
       aetherwake.origin === voyagewright.origin) throw Error('Two distinct private ChatGPT Sites are required');
   const isEngine = role === 'aetherwake';
   const site = isEngine ? aetherwake : voyagewright;
-  const core = isEngine ? createCommandCore({ ...options, applications, portfolio, fetcher,
+  const core = isEngine ? createCommandCore({ ...options, applications, portfolio, fetcher, connectorApplication: aetherwake.id,
     trustedIdentity: (_request, _env, context) => context?.visitor ? owner : null,
     trustedWorkerIngress: (_request, _env, context) => context?.worker === true,
   }) : null;

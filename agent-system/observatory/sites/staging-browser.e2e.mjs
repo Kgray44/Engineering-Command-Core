@@ -395,6 +395,17 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('button', { name: 'Confirm restore' }).click();
   await page.getByText('Category defaults restored.', { exact: true }).waitFor();
   assert.equal(await shell.getAttribute('data-density'), 'comfortable');
+  await page.goto(stage.origin + '/#settings/connections');
+  const probes = page.getByRole('region', { name: 'Connection checks' });
+  await probes.getByRole('button', { name: 'Verify connections' }).click();
+  await probes.getByText(/^Ready for Synthetic staging application/).waitFor();
+  await probes.getByText('Required tools discovered', { exact: true }).waitFor();
+  await probes.getByText('Unverified from this Site', { exact: true }).waitFor();
+  await page.route('**/api/status', route => route.fulfill({ status: 503, json: { error: 'Synthetic outage' } }), { times: 1 });
+  await probes.getByRole('button', { name: 'Verify connections' }).click();
+  await probes.getByText('HTTP 503', { exact: true }).waitFor();
+  const lastSuccess = probes.locator('.settings-facts div').filter({ hasText: 'Last successful service probe' }).locator('dd');
+  assert.notEqual(await lastSuccess.innerText(), 'Unverified');
   await page.goto(stage.origin + '/#settings/security');
   await page.getByText('Settings audit', { exact: true }).click();
   await page.getByText(/Revision 2/).waitFor();
