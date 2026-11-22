@@ -37,7 +37,7 @@ CI for the deployed candidate passed 69 Observatory checks, 139 Sites checks, 12
 
 1. **Projects.** Open either Project Library and inspect the appearance editor and saved views. In an authorized test namespace, move a card by pointer or keyboard and reload. Open a Project with recorded work to inspect Overview, Tasks, Milestones, Dependencies, GitHub and verification, Telemetry, Acceptance, History, and Artifacts. Follow a linked PR and return to its Project.
 2. **Merge.** Find either walkthrough PR with its linked Project or Task name. Compare the observed source context, prerequisite summary, and integration history. After configuring the scoped GitHub credentials, preview the required checks for the displayed head and open the exact failed job where available.
-3. **Voyagewright.** Compare the Projects, Tasks, Merge, Activity, and Settings links with the canonical Voyagewright palette on desktop and mobile. Review keyboard interaction and the reduced-motion setting in the browser.
+3. **Voyagewright.** Compare the Projects, Tasks, Merge, Activity, and Settings links with the canonical Voyagewright palette on desktop and mobile. At phone width, open **Menu** to reach any engineering workspace. Tab to a destination or dismiss the menu with Escape. Review the same workspaces on desktop and repeat the navigation with reduced motion enabled.
 4. **Settings and diagnostics.** In an authorized test namespace, save and reload a preference, then use the category reset. Open Activity, Connections, and Data & Backup to review their actual observations and verification timestamps.
 
 ## Owner decision and external inputs
