@@ -38,7 +38,7 @@ export function ProposalControls({ task, control, tasks, classes, headers, readF
   const checks = draft ? proposalChecks(draft) : {};
   const missing = Object.entries(checks).filter(([, valid]) => !valid).map(([name]) => name);
   const selfDependency = graph.upstream.some(node => node.id === task.id);
-  const replacements = tasks.filter(other =>
+  const replacements = engineCommand ? [] : tasks.filter(other =>
     other.id !== task.id && manageable(other) && ['proposed', 'blocked'].includes(other.state));
 
   useEffect(() => {

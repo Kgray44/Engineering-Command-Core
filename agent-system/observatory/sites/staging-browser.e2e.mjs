@@ -165,6 +165,23 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('link', { name: 'All projects' }).click();
   await page.getByText('0/1 Tasks complete · 0 running · 0 blocked · 0/1 milestones accepted', { exact: true }).waitFor();
   await page.locator('.project-card').getByText('Task registered', { exact: true }).waitFor();
+  await page.goto(stage.origin + '/' + projectHash);
+  await page.getByRole('button', { name: 'Execution controls for Synthetic browser task' }).click();
+  const taskPanel = page.getByRole('region', { name: 'Project Task execution' });
+  await taskPanel.getByText('Task editor', { exact: true }).click({ timeout: 5_000 });
+  const projectTaskEditor = taskPanel.getByRole('form', { name: 'Edit proposed task' });
+  await projectTaskEditor.locator('select[name="priority"]').selectOption('urgent');
+  await projectTaskEditor.locator('textarea[name="objective"]').fill('Update the canonical Task specification from its Project.');
+  await projectTaskEditor.getByRole('button', { name: 'Save proposal', exact: true }).click();
+  await projectTaskEditor.getByText('Task saved.', { exact: true }).waitFor();
+  await page.reload();
+  const taskRow = page.locator('#project-tasks li').filter({ has: page.getByRole('link', { name: 'Synthetic browser task', exact: true }) });
+  await taskRow.getByText('urgent priority', { exact: true }).waitFor();
+  await taskRow.getByRole('link', { name: 'Synthetic browser task', exact: true }).click();
+  await page.locator('#task-editor textarea[name="objective"]').waitFor();
+  assert.equal(await page.locator('#task-editor textarea[name="objective"]').inputValue(),
+    'Update the canonical Task specification from its Project.');
+  await page.goto(stage.origin + '/#projects');
   const explorer = page.getByRole('navigation', { name: 'Project activity views' });
   const search = page.getByRole('searchbox', { name: 'Search projects' });
   await explorer.getByRole('button', { name: /Archived/ }).click();

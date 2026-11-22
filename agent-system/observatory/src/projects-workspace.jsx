@@ -367,7 +367,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, settings, onSettings, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, settings, onSettings, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, taskEditor, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const defaults = libraryDefaults(preferences);
@@ -595,7 +595,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </li>)}</ul>
         {!tasks.length && <p>No linked tasks.</p>}
         {tasks.length > 0 && !visibleTasks.length && <p>No Tasks match the filters.</p>}
-        {controlTask && <ProjectTaskControls key={controlTask.id} task={controlTask} tasks={tasks} headers={headers} Status={Status}
+        {controlTask && <ProjectTaskControls key={controlTask.id} task={controlTask} tasks={tasks} headers={headers} Status={Status} editor={taskEditor}
           workerAccess={workerAccess} workerDispatch={workerDispatch} onClose={() => setControlTaskId('')}
           onRefresh={() => load().catch(cause => setError(cause.message))}/>}
         {tasks.length > 0 && targetProjects.length > 0 && <details><summary>Move a Task to another Project</summary>
