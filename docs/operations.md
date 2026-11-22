@@ -42,6 +42,19 @@ Visual inspection of six sampled frames per application found no blank bands. Hi
 
 During foreground Edge 157 navigation on Windows, the first Voyagewright Project Library load on staging revision `ba359a7` displaced the footer by 432 CSS pixels 643 ms after the click. The layout shift score was 0.0143. Layout Instability attributed the shift to the footer as the portfolio completed. The Project Library now reserves viewport height for the main column while the portfolio loads. A follow-up probe traced a separate 16-pixel movement to the loading paragraph margin collapsing through the workspace. The workspace now establishes its own formatting context to keep that margin inside it. A browser regression holds the Projects API response and compares both the workspace and footer positions before and after the cards render.
 
+### Project card dragging
+
+On Windows Chrome 157.0.8103.80, headless Playwright drove both themes through the shared local Command Core Worker on revision `346f6cb`. Each application used an isolated SQLite partition with eight synthetic Projects. The desktop viewport was 1,440 × 1,000 CSS pixels. Touch emulation used 390 × 1,100 CSS pixels. Motion was enabled. Each trial moved the first card into the next row using 26 paced input steps, waited for the insertion indicator, and required a successful reorder receipt and the same order after reload.
+
+| Theme and input | Trials | Worst trial p95 frame callback interval | Largest frame callback gap |
+|---|---:|---:|---:|
+| Aetherwake pointer | 3 | 4.3 ms | 16.6 ms |
+| Aetherwake touch | 3 | 4.3 ms | 4.4 ms |
+| Voyagewright pointer | 3 | 4.3 ms | 12.6 ms |
+| Voyagewright touch | 3 | 4.3 ms | 8.4 ms |
+
+All 12 moves persisted. The frame window began after drag activation and ended at visible insertion feedback. It contained no unexpected layout shifts or browser long tasks. These frame callback timings cover the tested synthetic workload. Physical touch latency, display presentation, and larger Project libraries remain outside this measurement.
+
 ### Settings confirmation and live Task updates
 
 On Windows Chrome 157.0.8103.80 at 1,440 × 900, three local SQLite-backed runs measured the in-page Settings reset confirmation and three measured a remote worker claim with the Project Tasks panel in view. The probe captured animation-frame intervals within 250 ms of the first rendered change, plus Layout Instability and long-task observations. Each run began with settled navigation and a fresh scoped fixture.
