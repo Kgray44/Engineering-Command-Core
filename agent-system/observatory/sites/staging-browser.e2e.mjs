@@ -38,7 +38,7 @@ async function browserStage(t, options = {}) {
   const page = await browser.newPage({ reducedMotion: 'no-preference', viewport: { width: 1080, height: 780 }, ...options.browser,
     extraHTTPHeaders: { authorization: 'Bearer ' + stage.proof } });
   page.setDefaultTimeout(7000);
-  return { stage, page, part };
+  return { stage, page, part, browser };
 }
 
 test('Projects workspace performs live project and Task mutations through the shared worker', { timeout: 90_000 }, async t => {
@@ -295,7 +295,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     requested_reviewers: [{ login: 'synthetic-reviewer' }], requested_teams: [],
     html_url: 'https://github.com/' + repository + '/pull/7', created_at: '2026-11-20T00:00:00Z',
   };
-  const { stage, page, part } = await browserStage(t, {
+  const { stage, page, part, browser } = await browserStage(t, {
     applicationId: 'voyagewright', applicationRepository: repository, githubToken: 'synthetic-read-token',
     browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
     fetcher: async input => {
@@ -402,6 +402,10 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
   await page.goto(stage.origin + '/#projects/' + projectId);
   await artifacts.getByRole('link', { name: 'Open Task report for Release review' }).click();
+  const taskFacts = page.locator('.task-command-facts');
+  await taskFacts.waitFor({ state: 'visible', timeout: 5_000 });
+  assert.equal(await taskFacts.evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(11, 37, 40)');
+  assert.equal(await taskFacts.evaluate(node => getComputedStyle(node).borderRightColor), 'rgba(201, 169, 95, 0.32)');
   const pdf = page.getByRole('button', { name: 'Download PDF', exact: true });
   const [download] = await Promise.all([page.waitForEvent('download'), pdf.click()]);
   assert.equal(download.suggestedFilename(), taskId + '-report.pdf');
@@ -440,6 +444,10 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const shell = page.locator('.app-shell[data-application="voyagewright"]');
   await shell.waitFor();
   assert.equal(await shell.evaluate(node => getComputedStyle(node).getPropertyValue('--accent').trim()), '#c9a95f');
+  const activeNavigation = shell.getByRole('button', { name: 'Settings', exact: true });
+  assert.equal(await activeNavigation.getAttribute('aria-current'), 'page');
+  assert.equal(await activeNavigation.locator('svg').evaluate(node => getComputedStyle(node).color), 'rgb(244, 237, 220)');
+  assert.match(await activeNavigation.locator('.nav-indicator').evaluate(node => getComputedStyle(node).backgroundImage), /^linear-gradient/);
   assert.equal(await page.locator('.settings-card').count(), 10);
   assert.equal(await page.locator('.scan-grid').evaluate(node => getComputedStyle(node, '::before').animationName), 'none');
   await capture(page, 'voyagewright-settings-mobile.png');
@@ -646,8 +654,17 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await page.getByRole('button', { name: 'Preview required checks' }).count(), 0);
   await page.getByRole('button', { name: 'Refresh GitHub source' }).click();
   await page.getByRole('button', { name: 'Preview required checks' }).waitFor();
-  await page.setViewportSize({ width: 1250, height: 930 });
-  await capture(page, 'voyagewright-merge-source.png');
+  const desktop = await browser.newPage({ viewport: { width: 1250, height: 930 }, reducedMotion: 'reduce',
+    extraHTTPHeaders: { authorization: 'Bearer ' + stage.proof } });
+  await desktop.goto(stage.origin + '/#merge?pr=7');
+  await desktop.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
+  const selectedTitle = desktop.locator('.merge-source-list button[aria-pressed="true"] > strong');
+  await selectedTitle.waitFor();
+  assert.ok(await selectedTitle.evaluate(node => node.offsetHeight <= 64),
+    'The short selected PR title should remain readable beside linked-work metadata');
+  assert.ok(await desktop.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  await capture(desktop, 'voyagewright-merge-source.png');
+  await desktop.close();
   const inspection = page.waitForResponse(response => response.url().endsWith('/api/integrations/v1') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Inspect source' }).click();
   const receipt = await inspection;

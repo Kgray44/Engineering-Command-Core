@@ -552,15 +552,15 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 .merge-discovery { display: grid; gap: .85rem; }
 .merge-discovery-filters { display: grid; gap: .65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .merge-source-list { list-style: none; display: grid; gap: .35rem; padding: .15rem; margin: 0; max-height: 19rem; overflow: auto; }
-.merge-source-list button { display: flex; align-items: baseline; gap: .6rem; justify-content: space-between; width: 100%; text-align: left; }
-.merge-source-list button strong { overflow-wrap: anywhere; }
-.merge-source-list button small { flex-shrink: 0; }
+.merge-source-list button {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: .3rem; width: 100%;
+  justify-items: start; text-align: left; overflow-wrap: anywhere;
+}
 .merge-source-detail { border-top: 1px solid var(--line, #334a56); padding-top: 1rem; min-width: 0; }
 .merge-source-detail dd { overflow-wrap: anywhere; }
 @media (max-width: 520px) {
   .merge-discovery-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .merge-discovery-filters label:first-child { grid-column: 1 / -1; }
-  .merge-source-list button { flex-wrap: wrap; }
 }
 
 .project-card-grid[data-layout="list"] { grid-template-columns: 1fr; }
