@@ -8,7 +8,7 @@ import { ProjectTaskControls } from './project-task-controls.jsx';
 import { motion } from 'motion/react';
 import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useCardMotion } from './card-motion.jsx';
-import { parseActivityHref, taskActivityHref } from './github-activity.mjs';
+import { activityId, activityState, parseActivityHref, taskActivityHref } from './github-activity.mjs';
 import { StickySectionAside } from './sticky-section-aside.jsx';
 import { sortTasks, taskAttemptHref, taskEvidenceHref, taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
@@ -203,6 +203,42 @@ const artifactLinkLabels = {
   artifact: 'Open artifact', verification: 'Open verification evidence',
 };
 
+function ProjectRepositoryEvidence({ evidence, tasks, repository, ciGroup, Status }) {
+  const taskById = new Map(tasks.map(task => [task.id, task]));
+  const reportedBranches = tasks.filter(task => task.branch);
+  const runs = new Map((ciGroup?.items ?? []).map(item => [activityId('runs', item), item]));
+  return <>
+    {reportedBranches.length > 0 && <section aria-label="Recorded task branches">
+      <h3>Recorded task branches</h3>
+      <ul className="project-list">{reportedBranches.map(task => <li key={task.id}>
+        <code>{task.branch}</code><a href={taskHref(task.id)}>{task.title}</a>
+      </li>)}</ul>
+    </section>}
+    {evidence.length ? <ul className="project-list">{evidence.map((item, index) => {
+      const activity = repository ? taskActivityHref(item.uri, repository) : null;
+      const source = parseActivityHref(activity ?? '');
+      const run = source?.kind === 'runs' ? runs.get(source.id) : null;
+      const observedState = run && ['available', 'stale'].includes(ciGroup.status) &&
+        /^[0-9a-f]{40}$/.test(item.revision ?? '') && run.revision === item.revision ? activityState('runs', run) : null;
+      return <li key={item.task_id + item.uri + index}>
+        <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>
+        {source?.kind === 'pulls' && <a className="text-button" href={'#merge?pr=' + source.id}>
+          Inspect PR #{source.id} in Merge Control Center</a>}
+        {source?.kind === 'runs' && <>
+          <a className="text-button" href={activity}>Inspect CI run #{source.id}</a>
+          {observedState ? <>
+            {run.workflow && <span>{run.workflow}</span>}<Status value={observedState}/>
+            {ciGroup.status === 'stale' && <small>Last observed result</small>}
+            {ciGroup.observed_at && <time dateTime={ciGroup.observed_at}>Observed {new Date(ciGroup.observed_at).toLocaleString()}</time>}
+          </> : <small>{run?.revision && item.revision && run.revision !== item.revision
+            ? 'This run reports a different revision.' : 'Exact-revision result unavailable.'}</small>}
+        </>}
+        <a className="text-button" href={taskHref(item.task_id)}>{taskById.get(item.task_id)?.title}</a>
+      </li>;
+    })}</ul> : <p>No linked repository evidence.</p>}
+  </>;
+}
+
 function ProjectArtifacts({ tasks, artifacts }) {
   const byTask = Map.groupBy(artifacts, item => item.task_id);
   if (!tasks.length) return <p>No linked Tasks or reports.</p>;
@@ -311,7 +347,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, repository, repositoryMain, workerAccess, workerDispatch, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort, view: preferences.project_view }));
@@ -614,16 +650,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
             </li>)}</ul>
           </details> : <small>No exact-head required checks recorded.</small>}
         </li>)}</ul>
-        <ul className="project-list">{github.map((item, index) => {
-          const source = repository ? parseActivityHref(taskActivityHref(item.uri, repository)) : null;
-          return <li key={item.task_id + item.uri + index}>
-            <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>
-            {source?.kind === 'pulls' && <a className="text-button" href={'#merge?pr=' + source.id}>
-              Inspect PR #{source.id} in Merge Control Center</a>}
-            <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>
-          </li>;
-        })}</ul>
-        {!github.length && <p>No linked repository evidence.</p>}
+        <ProjectRepositoryEvidence evidence={github} tasks={tasks} repository={repository} ciGroup={repositoryCI} Status={Status}/>
       </Panel>
       <Panel id="project-evidence" title="Artifacts and reports">
         <ProjectArtifacts tasks={tasks} artifacts={artifact_sources}/>

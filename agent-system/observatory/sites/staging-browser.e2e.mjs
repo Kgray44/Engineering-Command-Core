@@ -317,10 +317,14 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
         { id: 77, name: 'Verification', head_sha: head, app: { id: 9 }, conclusion: 'failure' },
       ] });
       if (url.pathname.endsWith('/commits/' + head + '/status')) return Response.json({ sha: head, total_count: 0, statuses: [] });
-      if (url.pathname.endsWith('/actions/runs')) return Response.json({ total_count: 1, workflow_runs: [
-        { id: 8, workflow_id: 34, run_attempt: 1, head_sha: head, status: 'completed', conclusion: 'failure',
-          repository: providerRepository, head_repository: providerRepository },
-      ] });
+      if (url.pathname.endsWith('/actions/runs')) {
+        const workflow_runs = [{ id: 8, workflow_id: 34, run_attempt: 1, head_sha: head, status: 'completed', conclusion: 'failure',
+          repository: providerRepository, head_repository: providerRepository }];
+        if (!url.searchParams.has('head_sha')) workflow_runs.push(
+          { id: 87, head_sha: head, name: 'Project CI verification', status: 'completed', conclusion: 'failure' },
+          { id: 88, head_sha: 'c'.repeat(40), name: 'Unrelated revision CI', status: 'completed', conclusion: 'success' });
+        return Response.json({ total_count: workflow_runs.length, workflow_runs });
+      }
       if (url.pathname.endsWith('/actions/runs/8/attempts/1/jobs')) return Response.json({ total_count: 1, jobs: [
         { id: 15, run_id: 8, head_sha: head, status: 'completed', conclusion: 'failure', name: 'Failed verification', steps: [] },
       ] });
@@ -349,7 +353,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(referenceReceipt.status, 200);
   const screenshotUrl = 'https://example.invalid/project/verification.png';
   const runUrl = 'https://github.com/' + repository + '/actions/runs/87';
-  for (const [kind, uri] of [['artifact', screenshotUrl], ['ci_run', runUrl]]) {
+  for (const [kind, uri] of [['artifact', screenshotUrl], ['ci_run', runUrl], ['ci_run', runUrl.replace('/87', '/88')]]) {
     referenceReceipt = await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
       expected_version: referenceReceipt.body.version, operation_id: crypto.randomUUID(),
       action: { type: 'associate', reference: { kind, uri, revision: head } } });
@@ -365,7 +369,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('navigation', { name: 'Jump to Project section' }).getByRole('button', { name: 'Evidence', exact: true }).click();
   const artifacts = page.locator('#project-evidence');
   assert.equal(await artifacts.getByRole('link', { name: 'Open pull request on GitHub' }).getAttribute('href'), pull.html_url);
-  assert.equal(await artifacts.getByRole('link', { name: 'Open CI run on GitHub' }).getAttribute('href'), runUrl);
+  assert.equal(await artifacts.locator('a[href="' + runUrl + '"]').textContent(), 'Open CI run on GitHub');
   assert.equal(await artifacts.getByRole('link', { name: 'Open artifact' }).getAttribute('href'), screenshotUrl);
   assert.equal(await artifacts.getByRole('link', { name: 'Open Task report for Release review' }).getAttribute('href'), '#tasks/' + taskId);
   assert.equal(await artifacts.getByRole('link', { name: 'Open evidence ledger for Release review' }).getAttribute('href'), '#tasks/' + taskId + '?section=evidence');
@@ -377,6 +381,13 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const verification = page.locator('#project-verification');
   const currentMain = verification.getByRole('link', { name: 'Inspect main commit' });
   assert.equal(await currentMain.getAttribute('href'), 'https://github.com/' + repository + '/commit/' + 'd'.repeat(40));
+  const matchingCi = verification.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Inspect CI run #87', exact: true }) });
+  await matchingCi.getByText('Project CI verification', { exact: true }).waitFor({ timeout: 5_000 });
+  await matchingCi.getByText('failure', { exact: true }).waitFor();
+  assert.equal(await matchingCi.getByRole('link', { name: 'Inspect CI run #87' }).getAttribute('href'), '#ci-runs/87');
+  const otherCi = verification.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'Inspect CI run #88', exact: true }) });
+  await otherCi.getByText('This run reports a different revision.', { exact: true }).waitFor();
+  assert.equal(await otherCi.getByText('success', { exact: true }).count(), 0);
   const recordedRun = crypto.randomUUID();
   const staleRun = crypto.randomUUID();
   const insertProjectRun = part.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, ?, 'blocked', 1, ?, ?, ?)");
@@ -832,7 +843,7 @@ test('an open Project reflects a remote Task claim without a manual refresh or p
   const pulse = (await stage.run('/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
     name: 'task_engine_v1', arguments: { worker_key: 'w'.repeat(64), application_id: 'aetherwake',
       request: { op: 'report', task_id: taskId, attempt_id: claim.attempt.id, lease: claim.lease,
-        operation_id: crypto.randomUUID(), report: { type: 'heartbeat' } } },
+        operation_id: crypto.randomUUID(), report: { type: 'heartbeat', branch: 'codex/recorded-project-branch' } } },
   } })).body.result.structuredContent;
   assert.equal(pulse.status, 200);
   await page.reload();
@@ -843,6 +854,9 @@ test('an open Project reflects a remote Task claim without a manual refresh or p
   await history.getByText('heartbeat', { exact: true }).waitFor();
   await history.getByRole('button', { name: 'Hide worker heartbeats' }).click();
   assert.equal(await history.getByText('heartbeat', { exact: true }).count(), 0);
+  const branches = page.getByRole('region', { name: 'Recorded task branches' });
+  await branches.getByText('codex/recorded-project-branch', { exact: true }).waitFor();
+  assert.equal(await branches.getByRole('link', { name: 'Remote status probe' }).getAttribute('href'), '#tasks/' + taskId);
   const telemetry = page.locator('#project-telemetry');
   await telemetry.getByText('Recent recorded attempts', { exact: true }).click({ timeout: 5_000 });
   const attemptRow = telemetry.getByRole('listitem').filter({ hasText: 'Remote status probe' });

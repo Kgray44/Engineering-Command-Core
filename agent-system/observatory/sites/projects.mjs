@@ -321,7 +321,7 @@ export async function projectOperation({ db, owner, namespace, application, body
       }
       for (const item of [...(engine?.links ?? []), ...(engine?.evidence ?? [])]) {
         if (typeof item.uri === 'string' && item.uri.startsWith('https://github.com/' + application.repository + '/')) {
-          github.push({ task_id: row.task_id, uri: item.uri, kind: item.kind });
+          github.push({ task_id: row.task_id, uri: item.uri, kind: item.kind, revision: item.revision ?? null });
         }
       }
       telemetry.retries += Math.max(0, (engine?.attempts.length ?? 0) - 1);
