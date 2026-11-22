@@ -85,6 +85,9 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   const projectHash = new URL(page.url()).hash;
   const sectionNav = page.getByRole('navigation', { name: 'Jump to Project section' });
+  await sectionNav.getByRole('button', { name: 'Current work', exact: true }).click();
+  await page.waitForFunction(()=>document.activeElement?.textContent==='Current work');
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Jump to Project section"] [aria-current="location"]')?.textContent==='Current work');
   await sectionNav.getByRole('button', { name: 'Acceptance', exact: true }).click();
   const acceptanceSection = page.locator('#project-acceptance');
   await acceptanceSection.getByRole('heading', { name: 'Acceptance', exact: true }).waitFor();
@@ -543,6 +546,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.goto(stage.origin + '/#projects/' + projectId);
   await verification.getByRole('link', { name: 'Inspect PR #7 in Merge Control Center' }).click();
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
+  await page.getByRole('button', { name: 'Review selected PR #7', exact: true }).click();
+  assert.equal(await page.evaluate(()=>document.activeElement?.tagName), 'H3');
   await page.goto(stage.origin + '/#projects/' + projectId);
   await artifacts.getByRole('link', { name: 'Open Task report for Release review' }).click();
   const taskFacts = page.locator('.task-command-facts');
@@ -1192,6 +1197,14 @@ test('Overview and Activity put actionable information ahead of supporting detai
 
   const menu = page.getByRole('button', { name: 'Workspace navigation' });
   await menu.click();
+  await page.getByRole('navigation', { name: 'Engineering workspaces' }).getByRole('button', { name: 'Engineering analytics' }).click();
+  const analytics = page.getByRole('navigation', { name: 'Jump to analytics section' });
+  await analytics.getByRole('button', { name: 'Usage and resources', exact: true }).click();
+  await page.waitForFunction(()=>document.activeElement?.textContent==='Usage and resources');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await page.goto(stage.origin);
+
+  await menu.click();
   await page.getByRole('navigation', { name: 'Engineering workspaces' }).getByRole('button', { name: 'Activity' }).click();
   const empty = page.locator('details.attention-empty');
   await empty.waitFor();
@@ -1199,4 +1212,33 @@ test('Overview and Activity put actionable information ahead of supporting detai
   assert.equal(await page.getByRole('heading', { name: 'Failed attempts', exact: true }).count(), 0);
   await empty.locator('summary').click();
   await empty.getByText('Failed attempts', { exact: true }).waitFor();
+});
+
+
+test('all engineering workspaces fit the 390-pixel viewport', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t, {
+    browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
+  });
+  const destinations = [
+    ['Overview', 'Engineering throughput'],
+    ['Projects', 'Project explorer'],
+    ['Task Control Center', 'Task explorer'],
+    ['Merge Control Center', 'Integration sources'],
+    ['Engineering analytics', 'Engineering activity'],
+    ['Pull requests', 'Pull requests'],
+    ['CI runs', 'CI runs'],
+    ['Activity', 'Activity and attention'],
+    ['Settings', 'Engineering settings'],
+    ['New task', 'Define engineering task'],
+  ];
+  await page.goto(stage.origin);
+  const menu = page.getByRole('button', { name: 'Workspace navigation' });
+  const nav = page.getByRole('navigation', { name: 'Engineering workspaces' });
+  for (const [destination, heading] of destinations) {
+    await menu.click();
+    await nav.getByRole('button', { name: destination, exact: true }).click();
+    await page.getByRole('heading', { name: heading, exact: true }).last().waitFor();
+    const dimensions = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: innerWidth }));
+    assert.ok(dimensions.page <= dimensions.viewport, destination + ': ' + JSON.stringify(dimensions));
+  }
 });

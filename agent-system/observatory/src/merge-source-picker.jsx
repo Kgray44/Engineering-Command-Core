@@ -221,6 +221,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
   const summary = detail ? null : group?.items?.find(pull => activityId('pulls', pull) === number);
   const githubUrl = detail?.url ?? summary?.url;
   const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
+  const inspectorHeading = useRef(null);
   return <div className="merge-discovery">
     <div className="merge-source-browser" role="region" aria-label="Find pull requests">
     <div className="merge-discovery-filters">
@@ -241,7 +242,13 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     {group?.status && group.status !== 'available' && <p className="notice integration-discovery-notice" role="status">Pull request feed {group.status}. {group.reason}</p>}
     {visibleDiscovery?.unavailable && <p role="status">Linked Project and Task search is unavailable.</p>}
     {visibleDiscovery?.truncated && <p role="status">Showing the first 200 linked records for the current pull request feed.</p>}
-    <p className="merge-result-count" aria-live="polite">{pulls.length} {pulls.length===1?'pull request':'pull requests'}</p>
+    <div className="merge-results-heading">
+      <p className="merge-result-count" aria-live="polite">{pulls.length} {pulls.length===1?'pull request':'pull requests'}</p>
+      {number && <button type="button" className="text-button" onClick={() => {
+        inspectorHeading.current?.focus({preventScroll:true});
+        inspectorHeading.current?.scrollIntoView({block:'start',behavior:reduced?'auto':'smooth'});
+      }}>Review selected PR #{number}</button>}
+    </div>
     <ul className="merge-source-list">
       {pulls.map(pull => {
         const id = activityId('pulls', pull);
@@ -262,7 +269,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     </div>
     {number ? <motion.section key={number} className="merge-source-detail" aria-label="Selected pull request"
       initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .18 }}>
-      <h3>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>
+      <h3 ref={inspectorHeading} tabIndex={-1}>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>
       <p role="status">{!source ? 'Reading GitHub source…' : source.reason || source.error ||
         (source.observed_at ? 'GitHub observed ' + new Date(source.observed_at).toLocaleString() : 'GitHub observation unavailable')}</p>
       <div className="integration-actions">

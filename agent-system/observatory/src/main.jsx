@@ -6,6 +6,7 @@ import {demoRecords} from './demo-data.js';
 import {observedTaskTraceCoverage} from './trace-timeline.mjs';
 import {ExecutionFeed,TraceWaterfall} from './execution-feed.jsx';
 import {TaskExecutionTiming} from './task-execution-timing.jsx';
+import {SectionNavigation} from './section-navigation.jsx';
 import {useAutomaticTelemetry} from './automatic-telemetry.jsx';
 import {ownerReviewByCriterion} from './evidence-status.mjs';
 import {GitHubFeed} from './github-feed.jsx';
@@ -419,7 +420,9 @@ const attentionIntegration=useIntegrationRuns(verificationHeaders,!demo&&page===
 const nextAction=taskNextAction(canonical,workerAccess,engine.workerDispatch);
 const executionStatus=canonical?taskExecutionStatus({taskId:canonical.task.id,state:detailState,
   attempt:canonical.attempts.at(-1),events:taskEvents,audits:taskAudits}):null;
-const statusBanner=executionStatus??nextAction;
+const statusBanner=executionStatus&&detailState==='verifying'&&nextAction?.section==='task-evidence'
+  ? {...executionStatus,title:'Candidate ready for owner review',description:null}
+  : executionStatus??nextAction;
 const statusSection=nextAction?.section??'task-attempts';
 const canonicalTasks=tasks.filter(task=>summaries.has(task.id)&&proposals?.publication?.[task.id]!=='pending');
 const publishedIntake=publication==='published'&&!canonical?.lifecycle.executor;
@@ -516,11 +519,11 @@ const [projectRefresh,setProjectRefresh]=useState(0);
 const title=({overview:'Engineering overview',projects:'Project Control Center',tasks:'Task Control Center',detail:current?.title??'Task inspection',merge:'Merge Control Center',analytics:'Engineering analytics',create:'Create task',settings:'Engineering settings',activity:'Activity and attention',pulls:'Pull requests',runs:'CI runs','github-detail':githubView?.kind==='pulls'?'Pull request':'CI run'})[page],desc=({overview:'Systems intelligence / Engineering operations',projects:'Manage milestones and engineering work by project',tasks:'Manage tasks, inspect execution, and review results.',detail:'Complete execution trace and acceptance evidence',merge:'Inspect pull requests, required checks, and verified merges into main',analytics:'Delivery, verification, and execution observations',create:'Structured engineering task intake',settings:'Manage preferences and inspect application configuration',activity:'Review work that needs attention',pulls:'Find changes and inspect their GitHub details',runs:'Inspect workflow outcomes, jobs, and steps','github-detail':repository})[page];
 useEffect(()=>{document.title=title+' · '+(voyage?'Voyagewright Engineering':'Aetherwake Observatory')},[title,voyage]);
 const githubUi={Metric,Panel,Rise,Status,repository};
-const jumpToSection=id=>{
+const jumpToSection=useCallback(id=>{
   const panel=document.getElementById(id);
   panel?.querySelector('h2,h3')?.focus({preventScroll:true});
   panel?.scrollIntoView({block:'start',behavior:reduce?'instant':'smooth'});
-};
+},[reduce]);
 const requestedAttempt = taskRoute?.attemptId && taskAttempts.find(attempt => attempt.id === taskRoute.attemptId);
 const taskSection = taskRoute?.section === 'evidence' ? 'task-evidence'
   : requestedAttempt ? 'task-attempt-' + requestedAttempt.id : null;
@@ -579,21 +582,13 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
   summaries={summaries} headers={verificationHeaders} settings={settings} demo={demo} Panel={Panel} Status={Status}/>}
 {page==='analytics'&&<WorkspaceContent fallback={<p role="status">Loading engineering analytics…</p>}><EngineeringAnalyticsPage
   records={records} events={execution?.events} github={demo?null:github} execution={demo?null:execution}
-  ready={!demo&&hasLiveFeed} ui={githubUi} headers={verificationHeaders}/></WorkspaceContent>}
+  ready={!demo&&hasLiveFeed} ui={githubUi} headers={verificationHeaders} onJump={jumpToSection}/></WorkspaceContent>}
 {page==='detail'&&(current?<><div className="task-detail-toolbar"><button className="back" onClick={()=>navigate('tasks')}><ArrowLeft size={15}/> Back to Task Control Center</button>
 {conversation&&<a className="primary-button" href={codexThreadHref(conversation)}>Open in Codex</a>}
 <TaskReportExport key={current.id} disabled={!demo&&(loadingPrice||!hasLiveFeed||Boolean(engineSummary&&!canonical)||Boolean(proposalControls&&legacyHistory?.taskId!==current.id))}
   snapshot={{task:canonical?.task??current,canonical,attempts:taskAttempts,pricing,workerAccess,records,events:taskEvents,audits:taskAudits,github:demo?null:github,telemetrySource:taskTelemetrySource,integrationRuns:integrationRuns.runs,
     coverage:demo?'Simulated demonstration data. Times use UTC.':legacyHistory?.taskId===current.id&&legacyHistory?.unavailable?'Legacy proposal audit history could not be read. The report includes the remaining linked records. Times use UTC.':undefined}}/></div>
-<nav className="task-section-nav" aria-label="Jump to Task section">
-  {engineSummary&&<button className="quiet-button" disabled={!hasLiveFeed} onClick={()=>jumpToSection('task-controls')}>Execution controls</button>}
-  <button className="quiet-button" onClick={()=>jumpToSection('task-timeline')}>Timeline</button>
-  <button className="quiet-button" onClick={()=>jumpToSection('task-development-notes')}>Development notes</button>
-  {(proposalControls||canonical&&hasLiveFeed&&!publishedIntake)&&<button className="quiet-button" onClick={()=>jumpToSection('task-editor')}>Task editor</button>}
-  <button className="quiet-button" onClick={()=>jumpToSection('task-attempts')}>Attempts</button>
-  <button className="quiet-button" onClick={()=>jumpToSection('task-evidence')}>Evidence</button>
-  <button className="quiet-button" onClick={()=>jumpToSection('task-telemetry')}>Telemetry</button>
-</nav>
+
 {detailState==='completed'&&<div className="task-completion" role="status"><CheckCircle2 size={24} aria-hidden="true"/><div><strong>Implementation complete</strong><small>Owner accepted the verified result.</small></div></div>}
 {!demo&&(canonical?.task??current).owner_acceptance==='accepted'&&
   <IntegrationTaskStatus {...integrationRuns} taskId={current.id} attemptId={canonical?.attempts.at(-1)?.id}/>}
@@ -605,6 +600,15 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
   <button className="quiet-button" onClick={()=>jumpToSection(statusSection)}>{
     ({'task-evidence':'View evidence','task-attempts':'View attempts','task-controls':'View controls'})[statusSection]}</button>
 </div>}
+<SectionNavigation label="Jump to Task section" onJump={jumpToSection} sections={[
+  ...(engineSummary ? [{id:'task-controls',label:'Execution controls',disabled:!hasLiveFeed}] : []),
+  {id:'task-timeline',label:'Timeline'},
+  {id:'task-development-notes',label:'Development notes'},
+  ...(proposalControls||canonical&&hasLiveFeed&&!publishedIntake ? [{id:'task-editor',label:'Task editor'}] : []),
+  {id:'task-attempts',label:'Attempts'},
+  {id:'task-evidence',label:'Evidence'},
+  {id:'task-telemetry',label:'Telemetry'},
+]}/>
 {detailState==='archived'&&<p className="notice" role="status">Task archived{(canonical?.task??current).owner_acceptance==='accepted'?' · Owner accepted the final result.':''}</p>}
 {engineSummary&&hasLiveFeed&&<Rise><Panel id="task-controls" title="Execution controls">
   {engineTask.error&&<p role="alert">{engineTask.error}</p>}

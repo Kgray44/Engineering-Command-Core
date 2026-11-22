@@ -10,6 +10,7 @@ import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldChec
 import { useCardMotion } from './card-motion.jsx';
 import { activityId, activityState, parseActivityHref, taskActivityHref } from './github-activity.mjs';
 import { StickySectionAside } from './sticky-section-aside.jsx';
+import { SectionNavigation } from './section-navigation.jsx';
 import { sortTasks, taskAttemptHref, taskEvidenceHref, taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
 import { settingsRequest } from './engineering-settings.jsx';
@@ -545,12 +546,11 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
           <Plus size={16} aria-hidden="true"/> New project task
         </button>}
       </div>
-      <nav className="task-section-nav" aria-label="Jump to Project section">
-        {[
-          ['overview', 'Project overview'], ['tasks', 'Tasks'], ['milestones', 'Milestones'], ['dependencies', 'Dependencies'],
-          ['telemetry', 'Telemetry'], ['verification', 'Verification'], ['acceptance', 'Acceptance'], ['evidence', 'Evidence'], ['history', 'History'],
-        ].map(([id, label]) => <button type="button" className="quiet-button" key={id} onClick={() => onJump('project-' + id)}>{label}</button>)}
-      </nav>
+      <SectionNavigation label="Jump to Project section" onJump={onJump} sections={[
+        ['overview', 'Project overview'], ['current-work', 'Current work'], ['tasks', 'Tasks'], ['milestones', 'Milestones'],
+        ['dependencies', 'Dependencies'], ['verification', 'Verification'], ['evidence', 'Evidence'],
+        ['acceptance', 'Acceptance'], ['telemetry', 'Telemetry'], ['history', 'History'],
+      ].map(([id,label])=>({id:'project-'+id,label}))}/>
       {project.owner_review === 'accepted' && <div className="task-completion" role="status">
         <ShieldCheck size={24} aria-hidden="true"/><div><strong>Project accepted</strong><small>Owner accepted the Project.</small></div>
       </div>}

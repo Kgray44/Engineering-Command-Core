@@ -589,6 +589,10 @@ test('owner schedules an engine Task, observes blockers and controls the queue',
   const jump=page.getByRole('navigation',{name:'Jump to Task section'});
   await jump.getByRole('button',{name:'Timeline',exact:true}).click();
   await page.waitForFunction(()=>document.activeElement?.textContent==='Task Timeline');
+  await jump.getByRole('button',{name:'Timeline',exact:true}).waitFor();
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Jump to Task section"] [aria-current="location"]')?.textContent==='Timeline');
+  assert.equal(await jump.evaluate(node=>getComputedStyle(node).position),'sticky');
+
   const timeline=page.getByRole('region',{name:'Task timeline'});
   await timeline.getByText('Formal Task Engine attempts',{exact:true}).waitFor();
   await timeline.getByText('Known executor sessions',{exact:true}).waitFor();
