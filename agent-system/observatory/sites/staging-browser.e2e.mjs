@@ -1213,3 +1213,32 @@ test('Overview and Activity put actionable information ahead of supporting detai
   await empty.locator('summary').click();
   await empty.getByText('Failed attempts', { exact: true }).waitFor();
 });
+
+
+test('all engineering workspaces fit the 390-pixel viewport', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t, {
+    browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
+  });
+  const destinations = [
+    ['Overview', 'Engineering throughput'],
+    ['Projects', 'Project explorer'],
+    ['Task Control Center', 'Task explorer'],
+    ['Merge Control Center', 'Integration sources'],
+    ['Engineering analytics', 'Engineering activity'],
+    ['Pull requests', 'Pull requests'],
+    ['CI runs', 'CI runs'],
+    ['Activity', 'Activity and attention'],
+    ['Settings', 'Engineering settings'],
+    ['New task', 'Define engineering task'],
+  ];
+  await page.goto(stage.origin);
+  const menu = page.getByRole('button', { name: 'Workspace navigation' });
+  const nav = page.getByRole('navigation', { name: 'Engineering workspaces' });
+  for (const [destination, heading] of destinations) {
+    await menu.click();
+    await nav.getByRole('button', { name: destination, exact: true }).click();
+    await page.getByRole('heading', { name: heading, exact: true }).last().waitFor();
+    const dimensions = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: innerWidth }));
+    assert.ok(dimensions.page <= dimensions.viewport, destination + ': ' + JSON.stringify(dimensions));
+  }
+});
