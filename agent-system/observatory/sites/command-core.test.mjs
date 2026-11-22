@@ -242,6 +242,8 @@ test('Project progress reports actual scoped execution, milestone gates and owne
     event.kind === 'start' && event.pr_number === 42 && event.status === 'merged'));
   assert.ok(detail.history.some(event => event.kind === 'project_owner_review_changed' && event.name === 'Owner review requested'));
   assert.deepEqual(detail.tasks[0].blockers, [{ type: 'milestone', id: milestone_id, state: 'planned' }]);
+  const gates = (await call(0, '/api/projects/' + dependencyId)).body.milestone_dependents;
+  assert.deepEqual(gates, [{ milestone_id, task_id, title: taskFields.title, project_id: id }]);
   const portfolio = (await call(0, '/api/projects')).body;
   assert.deepEqual(portfolio.projects.find(item => item.id === id).progress, detail.progress);
   assert.equal((await call(1, '/api/projects')).body.projects.length, 0);

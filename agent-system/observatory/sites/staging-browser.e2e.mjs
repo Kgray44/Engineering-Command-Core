@@ -186,6 +186,17 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.equal((await moved).status(), 200);
   await page.goto(stage.origin + '/' + secondHash);
   await page.getByRole('link', { name: 'Synthetic browser task', exact: true }).first().waitFor();
+  await page.getByRole('button', { name: 'Draft Define the question' }).click();
+  await page.getByLabel('Acceptance evidence required').fill('Record the research question and the review receipt');
+  await page.getByRole('button', { name: 'Add milestone', exact: true }).click();
+  const milestoneEvidence = page.getByRole('region', { name: 'Milestone evidence for Define the question' });
+  await page.locator('#project-milestones summary').filter({ hasText: 'Define the question' }).click();
+  await milestoneEvidence.getByText('Review the milestone requirements.', { exact: true }).waitFor();
+  await milestoneEvidence.getByRole('combobox', { name: 'Task to link' }).selectOption({ label: 'Synthetic browser task' });
+  await milestoneEvidence.getByRole('button', { name: 'Link Task to milestone' }).click();
+  await milestoneEvidence.getByRole('link', { name: 'Synthetic browser task' }).waitFor();
+  await milestoneEvidence.getByText('Linked work remains open.', { exact: true }).waitFor();
+  await milestoneEvidence.getByRole('heading', { name: 'Milestone history' }).waitFor();
   await page.getByRole('link', { name: 'All projects' }).click();
 
   const titles = page.locator('.project-card-name');

@@ -140,6 +140,15 @@ export async function projectOperation({ db, owner, namespace, application, body
     const rows = new Map(taskRows.map(row => [row.task_id, row]));
     return {
       taskRows,
+      milestoneDependents(projectId) {
+        return gates.results.filter(gate => gate.project_id === projectId).flatMap(gate => {
+          const dependent = rows.get(gate.task_id);
+          return dependent?.project_id ? [{
+            milestone_id: gate.milestone_id, task_id: gate.task_id,
+            project_id: dependent.project_id, title: JSON.parse(dependent.record).title,
+          }] : [];
+        });
+      },
       prerequisitesFor(row) {
         return storedTaskPrerequisites(row, rows).map(check => {
           const source = check.type === 'task' ? rows.get(check.id) : null;
@@ -315,7 +324,7 @@ export async function projectOperation({ db, owner, namespace, application, body
       history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results,
         ...executionHistory.results.slice(0, executionHistoryLimit)].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)),
       execution_history_truncated: executionHistory.results.length > executionHistoryLimit,
-      task_milestones: associations.results, telemetry });
+      task_milestones: associations.results, milestone_dependents: view.milestoneDependents(body.id), telemetry });
   }
   if (body.op === 'register_task') {
     if (current.status === 'archived') return fail(409, 'Project is archived');

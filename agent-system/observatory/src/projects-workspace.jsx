@@ -104,6 +104,62 @@ function MilestoneForm({ milestone, suggestedName, onSave, busy }) {
   </form>;
 }
 
+function MilestoneEvidence({ milestone, tasks, links, dependents, history, Status, editable, busy, onLink }) {
+  const assigned = new Set(links.filter(link => link.milestone_id === milestone.id).map(link => link.task_id));
+  const linked = tasks.filter(task => assigned.has(task.id));
+  const available = tasks.filter(task => !assigned.has(task.id));
+  const blocked = linked.filter(task => task.blockers.length || ['failed', 'blocked'].includes(task.state));
+  const accepted = linked.filter(task => task.owner_acceptance === 'accepted');
+  const downstream = dependents.filter(task => task.milestone_id === milestone.id);
+  const events = history.filter(event => event.milestone_id === milestone.id).toReversed();
+  let readiness = 'Review the milestone requirements.';
+  if (milestone.status === 'accepted') readiness = 'Milestone acceptance recorded.';
+  else if (blocked.length) readiness = 'Linked work has blockers or failures.';
+  else if (linked.length && accepted.length < linked.length) readiness = 'Linked work remains open.';
+  else if (linked.length) readiness = 'Review the milestone requirements against the accepted Tasks.';
+  return <section aria-label={'Milestone evidence for ' + milestone.name}>
+    <h3>Readiness and evidence</h3>
+    <p>{milestone.acceptance}</p>
+    <p>{readiness}</p>
+    {!!linked.length && <>
+      <h4>Linked Tasks</h4>
+      <ul className="project-list">{linked.map(task => <li key={task.id}>
+        <a href={taskHref(task.id)}>{task.title}</a><Status value={task.state}/>
+        {task.owner_acceptance === 'accepted' && <small>Owner accepted</small>}
+        {task.blockers.map(blocker => <small key={blocker.type + ':' + blocker.id}>
+          {blocker.type.replaceAll('_', ' ')} prerequisite · {tasks.find(item => item.id === blocker.id)?.title ?? blocker.id}
+          {' · '}{blocker.state.replaceAll('_', ' ')}
+        </small>)}
+      </li>)}</ul>
+    </>}
+    {editable && !!available.length && <form className="form" onSubmit={event => {
+      event.preventDefault();
+      onLink(object(event.currentTarget).task_id);
+    }}>
+      <label>Task to link <select name="task_id" defaultValue="" required>
+        <option value="">Choose a Project Task</option>
+        {available.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
+      </select></label>
+      <div className="form-actions"><button className="quiet-button" disabled={busy}>Link Task to milestone</button></div>
+    </form>}
+    {!!downstream.length && <>
+      <h4>Tasks requiring this milestone</h4>
+      <ul className="project-list">{downstream.map(task => <li key={task.task_id}>
+        <a href={taskHref(task.task_id)}>{task.title}</a>
+        <a href={projectHref(task.project_id)}>Open dependent Project</a>
+      </li>)}</ul>
+    </>}
+    {!!events.length && <>
+      <h4>Milestone history</h4>
+      <ol className="project-list">{events.map(event => <li key={event.kind + ':' + (event.event_id ?? event.version)}>
+        <span>{event.kind === 'milestone_linked' ? 'Task linked' : 'Milestone saved'}</span>
+        {event.status && <Status value={event.status}/>}
+        <time dateTime={event.occurred_at}>{new Date(event.occurred_at).toLocaleString()}</time>
+      </li>)}</ol>
+    </>}
+  </section>;
+}
+
 function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSave, Panel, DetailLine }) {
   const completed = tasks.filter(task => task.candidate_revision);
   const decisions = Object.entries(reviewDecisions);
@@ -331,7 +387,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     }
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
-  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifact_sources = [], github = [], progress, active_workers, integrations = [], linkable_tasks = [] } = data ?? {};
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], milestone_dependents = [], artifact_sources = [], github = [], progress, active_workers, integrations = [], linkable_tasks = [] } = data ?? {};
   const selectedUnassignedTask = linkable_tasks.find(task => task.id === unassignedTaskId);
   const effectiveTaskSort = taskSort ?? preferences.task_sort;
   const query = taskQuery.trim().toLowerCase();
@@ -491,7 +547,9 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         {addingMilestone !== null ? 'Close form' : 'New milestone'}</button>}>
         {milestones.map((milestone, index) => <details key={milestone.id}>
           <summary>{milestone.name} <Status value={milestone.status}/></summary>
-          <p>{milestone.acceptance}</p>
+          <MilestoneEvidence milestone={milestone} tasks={tasks} links={task_milestones} dependents={milestone_dependents}
+            history={history} Status={Status} editable={project.status !== 'archived'} busy={busy}
+            onLink={task_id => submit({ op: 'milestone_link', milestone_id: milestone.id, task_id })}/>
           {project.status !== 'archived' && milestones.length > 1 && <div className="project-actions">
             <button type="button" className="quiet-button" aria-label={'Move ' + milestone.name + ' earlier'}
               disabled={busy || index === 0} onClick={() => moveMilestone(index, -1)}>Move earlier</button>

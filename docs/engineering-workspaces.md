@@ -16,7 +16,7 @@ Use **New project task** for Task intake with the Project association. **Associa
 
 Use **Move earlier** or **Move later** to change milestone order. In **Dependencies**, choose a Task to inspect its recorded prerequisites, milestone gates, and dependent Tasks in this Project.
 
-A milestone is an explicit acceptance gate. Link Tasks to a milestone to show related work, or set another Project's milestone as a prerequisite where the scoped engine permits it. The engine checks dependency, milestone, and Project conditions before dispatch. The completion counts summarize work. Review and accept milestones separately after checking the stated evidence.
+A milestone is an explicit acceptance gate. Open a milestone to link an existing Project Task, inspect its readiness and blockers, see which downstream Tasks require the milestone, and review its recorded history. Use **Dependencies** to set another Project's milestone as a prerequisite where the scoped engine permits it. The engine checks dependency, milestone, and Project conditions before dispatch. Review the stated evidence and save the milestone's acceptance decision separately, even when every linked Task has been accepted.
 
 Project progress and telemetry draw from observed Tasks, attempts, and integration records. Missing token, cost, and CI values show as unavailable.
 
