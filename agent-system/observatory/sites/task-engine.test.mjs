@@ -16,7 +16,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { proposedTask } from '../intake.mjs';
 import { taskAttemptRecord, taskOperation } from './task-engine.mjs';
 import { observeCodexStream } from '../../../scripts/agent/provider-events.mjs';
-import { checkWorkerStorage, checkWorkspaceTelemetryScope, codexTaskPrompt, executeAppServer, prepareRecoveredCandidate, provisionTaskWorkspace, runClaim } from '../../../scripts/agent/observatory-task-worker.mjs';
+import { checkoutIdentity, checkWorkerStorage, checkWorkspaceTelemetryScope, codexTaskPrompt, executeAppServer, prepareRecoveredCandidate, provisionTaskWorkspace, registeredGitCheckout, runClaim } from '../../../scripts/agent/observatory-task-worker.mjs';
 import { reconcileAbandonedClaim } from '../../../scripts/agent/claim-telemetry.mjs';
 import { hasLiveTaskWork, workerDispatchStatus } from '../src/task-engine-client.mjs';
 import { openObservatoryConnector } from '../../../scripts/agent/observatory-connector.mjs';
@@ -27,6 +27,39 @@ const rev = 'a'.repeat(40);
 const fields = name => ({
   title: 'Task ' + name, objective: 'Produce a checked artifact for task ' + name,
   primary: 'backend', profile_id: 'backend', criteria: ['Artifact is readable'], dependencies: [],
+});
+
+test('registered linked checkout requires active custody and excludes its ownership marker from source status', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'ecc-linked-checkout-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = join(root, 'source');
+  const workspace = join(root, 'checkout');
+  const registryPath = join(root, 'registry.json');
+  await mkdir(source);
+  const run = promisify(execFile);
+  const git = async (cwd, ...args) => (await run('git', args, { cwd })).stdout.trim();
+  const repository = 'Kgray44/treasurehuntSoT';
+  const taskId = 'task_754ea14e-d24e-49fe-992e-d755e6cd9cb9';
+  const branch = 'codex/aads-task-ecc-acceptance-fixture';
+  await git(source, 'init', '-b', 'main');
+  await git(source, 'remote', 'add', 'origin', 'https://github.com/' + repository + '.git');
+  await git(source, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.com',
+    'commit', '--allow-empty', '-m', 'fixture');
+  const revision = await git(source, 'rev-parse', 'HEAD');
+  await git(source, 'worktree', 'add', '-b', branch, workspace, revision);
+  const record = { id: 'workspace-id', kind: 'worktree', path: workspace, task: taskId, state: 'ACTIVE', token: 'fixture', branch };
+  const registry = { config: { repository, commonDir: join(source, '.git') }, records: [record] };
+  await writeFile(registryPath, JSON.stringify(registry));
+  await writeFile(join(workspace, '.voyagewright-workspace.json'), JSON.stringify(record));
+  const linkedCheckout = await registeredGitCheckout(workspace, taskId, registryPath, repository);
+  assert.deepEqual(await checkoutIdentity(workspace, revision, { repository, linkedCheckout }),
+    { branch, revision, dirty: false });
+  await assert.rejects(checkoutIdentity(workspace, revision, { repository }), /dedicated application checkout/);
+  await writeFile(join(workspace, 'candidate.txt'), 'actual source edit');
+  assert.equal((await checkoutIdentity(workspace, revision, { repository, linkedCheckout })).dirty, true);
+  record.state = 'HELD';
+  await writeFile(registryPath, JSON.stringify(registry));
+  await assert.rejects(registeredGitCheckout(workspace, taskId, registryPath, repository), /Active lifecycle custody/);
 });
 
 function setup(t, { countAuditWrites = false } = {}) {

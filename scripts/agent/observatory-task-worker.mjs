@@ -79,14 +79,44 @@ async function checkoutLocation(read, fastReadback) {
   return Promise.all(['--show-toplevel','HEAD','--absolute-git-dir'].map(arg=>read('rev-parse',arg)));
 }
 
-export async function checkoutIdentity(path, base, { fastReadback = process.env.AADS_GIT_FAST_READBACK==='1', readGit = git, repository = aetherwakeRepository } = {}) {
+const ownershipMarker = '.voyagewright-workspace.json';
+const candidatePathspec = ['--', '.', ':(exclude,top)' + ownershipMarker];
+
+export async function registeredGitCheckout(path, taskId, registryPath, repository) {
+  const registry = JSON.parse(await readFile(registryPath, 'utf8'));
+  const entry = registry.records?.find(record => record.path === path && record.task === taskId && record.kind === 'worktree' && record.state === 'ACTIVE');
+  const markerPath = join(path, ownershipMarker);
+  const markerInfo = await lstat(markerPath);
+  if (!entry || registry.config?.repository !== repository || !markerInfo.isFile() || markerInfo.isSymbolicLink()) {
+    throw Error('Active lifecycle custody is required for a linked checkout');
+  }
+  const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+  if (marker.id !== entry.id || marker.path !== path || marker.task !== taskId ||
+      typeof entry.token !== 'string' || !entry.token || marker.token !== entry.token) {
+    throw Error('Linked checkout ownership did not match its lifecycle registry');
+  }
+  const common = await realpath(registry.config.commonDir);
+  const [directory, actualCommon] = await Promise.all([
+    git(path, 'rev-parse', '--absolute-git-dir').then(realpath),
+    git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir').then(realpath),
+  ]);
+  if (common !== actualCommon || dirname(directory) !== join(common, 'worktrees')) {
+    throw Error('Linked checkout Git directory is outside the registered repository');
+  }
+  return { directory, branch: entry.branch };
+}
+
+export async function checkoutIdentity(path, base, { fastReadback = process.env.AADS_GIT_FAST_READBACK==='1', readGit = git, repository = aetherwakeRepository, linkedCheckout } = {}) {
   const read = (...args) => readGit(path,...args);
   const [[root, revision, gitDir], origin, branch, dirty] = await Promise.all([
     checkoutLocation(read,fastReadback), read('remote', 'get-url', 'origin'),
-    read('symbolic-ref', '--short', 'HEAD'), read('status', '--porcelain', '--untracked-files=normal'),
+    read('symbolic-ref', '--short', 'HEAD'), read('status', '--porcelain', '--untracked-files=normal',
+      ...(linkedCheckout ? candidatePathspec : [])),
   ]);
+  const directory = await realpath(gitDir);
   if (await realpath(root) !== path || !repositoryMatches(origin, repository) || !branch.startsWith('codex/aads-task-') ||
-      relative(path, await realpath(gitDir)) !== '.git') {
+      (linkedCheckout ? directory !== linkedCheckout.directory || branch !== linkedCheckout.branch :
+        relative(path, directory) !== '.git')) {
     throw Error('Executor requires a dedicated application checkout and task branch');
   }
   await read('merge-base', '--is-ancestor', base, revision);
@@ -127,29 +157,30 @@ async function existingPrivateDirectory(path) {
   }
 }
 
-async function workerTelemetryDirectory(root, taskId, workspace) {
+async function workerTelemetryDirectory(root, taskId, workspace, linkedCheckout) {
   const current = join(root,'.aads-observatory',taskId);
-  const legacy = join(workspace??join(root,taskId),'.git','agent-harness');
+  const legacy = join(linkedCheckout?.directory ?? join(workspace??join(root,taskId),'.git'),'agent-harness');
   return !await existingPrivateDirectory(current) && await existingPrivateDirectory(legacy) ? legacy : current;
 }
 
-export async function verifyRetainedCandidate(workspace, marker, repository = aetherwakeRepository) {
+export async function verifyRetainedCandidate(workspace, marker, repository = aetherwakeRepository, linkedCheckout) {
   if (marker.workspace!==workspace || marker.candidateRevision===marker.revision ||
       !await existingPrivateDirectory(workspace)) return false;
   try {
-    const result=await checkoutIdentity(workspace,marker.revision,{repository,readGit:(cwd,...args)=>git(cwd,'--no-lazy-fetch',...args)});
+    const result=await checkoutIdentity(workspace,marker.revision,{repository,linkedCheckout,readGit:(cwd,...args)=>git(cwd,'--no-lazy-fetch',...args)});
     return !result.dirty && result.branch===marker.branch && result.revision===marker.candidateRevision;
   } catch { return false; }
 }
 
-function workspaceLock(workspace, attemptId) {
-  const directory=toNamespacedPath(join(workspace,'.git','aads-task-worker.lock'));
+function workspaceLock(workspace, attemptId, linkedCheckout) {
+  const gitDirectory = linkedCheckout?.directory ?? join(workspace, '.git');
+  const directory=toNamespacedPath(join(gitDirectory,'aads-task-worker.lock'));
   const owner=createHash('sha256').update(attemptId).digest('hex');
   return {directory,owner};
 }
 
-async function takeWorkspaceLock(workspace, attemptId) {
-  const lock=workspaceLock(workspace,attemptId);
+async function takeWorkspaceLock(workspace, attemptId, linkedCheckout) {
+  const lock=workspaceLock(workspace,attemptId,linkedCheckout);
   const pending=await mkdtemp(lock.directory+'.pending-');
   try {
     await writeFile(join(pending,lock.owner),'',{flag:'wx'});
@@ -183,9 +214,10 @@ async function releaseWorkspaceLock({directory,owner}) {
   });
 }
 
-export async function prepareRecoveredCandidate(workspace, marker, repository = aetherwakeRepository) {
-  if (!await verifyRetainedCandidate(workspace,marker,repository) || !await existingPrivateDirectory(join(workspace,'.git'))) return false;
-  const lock=workspaceLock(workspace,marker.attemptId);
+export async function prepareRecoveredCandidate(workspace, marker, repository = aetherwakeRepository, linkedCheckout) {
+  if (!await verifyRetainedCandidate(workspace,marker,repository,linkedCheckout) ||
+      !await existingPrivateDirectory(linkedCheckout?.directory ?? join(workspace,'.git'))) return false;
+  const lock=workspaceLock(workspace,marker.attemptId,linkedCheckout);
   const info=await lstat(lock.directory).catch(error=>{if(error.code!=='ENOENT')throw error;});
   // Older workers wrote an empty file without an owner. Recover the candidate
   // from those attempts, leaving their lock for explicit reconciliation.
@@ -193,7 +225,7 @@ export async function prepareRecoveredCandidate(workspace, marker, repository = 
   return releaseWorkspaceLock(lock);
 }
 
-async function recoverInterruptedCheckout({directory,workspace,task,attempt,checkpoint,identity,confirmLease}) {
+async function recoverInterruptedCheckout({directory,workspace,task,attempt,checkpoint,identity,confirmLease,linkedCheckout}) {
   const marker=await readInterruptedClaim(directory,task.id,checkpoint.attempt_id);
   if (!marker || marker.candidateRevision || !marker.turnId ||
       marker.workspace!==workspace || marker.revision!==attempt.revision || identity.revision!==attempt.revision ||
@@ -201,9 +233,10 @@ async function recoverInterruptedCheckout({directory,workspace,task,attempt,chec
       marker.sessionId!==attempt.resume_session_id || !/^[a-f0-9]{64}$/.test(marker.recoveryKey ?? '') ||
       createHash('sha256').update(marker.recoveryKey).digest('hex')!==checkpoint.recovery_commitment ||
       marker.pid===marker.providerPid || !processHasExited(marker.pid) || !processHasExited(marker.providerPid) ||
-      !await existingPrivateDirectory(workspace) || !await existingPrivateDirectory(join(workspace,'.git'))) return false;
+      !await existingPrivateDirectory(workspace) ||
+      !await existingPrivateDirectory(linkedCheckout?.directory ?? join(workspace,'.git'))) return false;
   await confirmLease();
-  return releaseWorkspaceLock(workspaceLock(workspace,marker.attemptId));
+  return releaseWorkspaceLock(workspaceLock(workspace,marker.attemptId,linkedCheckout));
 }
 
 function gitProvisioningIdentity(settings) {
@@ -339,11 +372,11 @@ export async function provisionTaskWorkspace({ root, task, attempt, interruptedC
   }
 }
 
-async function checkpointCandidate(workspace, { branch, revision }, task, attempt) {
+async function checkpointCandidate(workspace, { branch, revision }, task, attempt, linkedCheckout) {
   const noHooks = 'core.hooksPath=' + join(workspace, '.git', 'aads-disabled-hooks-' + randomUUID());
   const writeGit = (...args) => git(workspace, '-c', noHooks, '-c', 'core.fsmonitor=false',
     '-c', 'commit.gpgsign=false', ...args);
-  await writeGit('add', '-A', '--', '.');
+  await writeGit('add', '-A', ...(linkedCheckout ? candidatePathspec : ['--', '.']));
   const tree = await writeGit('write-tree');
   const candidate = await writeGit('commit-tree', tree, '-p', revision, '-m',
     'Checkpoint AADS Task ' + task.id + ' attempt ' + attempt.id);
@@ -459,13 +492,13 @@ function termination(child) {
   try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
 }
 
-async function prepareObjectiveSource(workspace, task, attempt) {
+async function prepareObjectiveSource(workspace, task, attempt, linkedCheckout) {
   if (task.objective.length <= 6000) return;
   if (!attemptIdPattern.test(attempt.id ?? '')) throw Error('Invalid objective source identity');
   const path = '.git/aads-objective-' + attempt.id + '.json';
   const document = { task_id:task.id, attempt_id:attempt.id, revision:attempt.revision,
     spec_version:attempt.spec_version, task_digest:taskDigest(task), objective:task.objective };
-  const absolute = join(workspace,path);
+  const absolute = linkedCheckout ? join(linkedCheckout.directory, path.slice(5)) : join(workspace,path);
   try {
     await writeSnapshot(absolute, document);
   } catch (error) {
@@ -476,7 +509,7 @@ async function prepareObjectiveSource(workspace, task, attempt) {
       throw Error('Existing objective source does not match this claim');
     }
   }
-  return path;
+  return linkedCheckout ? absolute : path;
 }
 
 export function codexTaskPrompt(task, attempt, { objectiveSource, executionNotes = [] } = {}) {
@@ -602,7 +635,7 @@ export async function executeAppServer(connector, {cwd,task,attempt,onSession,on
 
 export async function runClaim({ claim, send, workspace, executable, signal, admitStorage, recoveryKey,
   identify = checkoutIdentity, execute = executeCodex, onTelemetryStart, onUsage, onTelemetryEnd, onTelemetryStage, onTelemetryStageStart,
-  telemetryDirectory, onDevelopmentNote,
+  telemetryDirectory, onDevelopmentNote, linkedCheckout,
   verificationNamespace, prepareWorkspace, managedConnection, providerStream, interval = 12_000,
   requestTimeoutMs = reportTimeoutMs }) {
   const { task, attempt, lease } = claim;
@@ -780,7 +813,7 @@ export async function runClaim({ claim, send, workspace, executable, signal, adm
     }
     await measureStage('worker_initialization','queue',async () => {
       if (!liveStages) await guardStorage();
-      if (workspace) await checkWorkspaceTelemetryScope(workspace, verificationNamespace ?? undefined);
+      if (workspace) await checkWorkspaceTelemetryScope(workspace, verificationNamespace ?? undefined, linkedCheckout);
     });
     storageMonitoring = (async () => {
       const checkSignal = AbortSignal.any([heartbeats.signal,workerSignal]);
@@ -809,7 +842,7 @@ export async function runClaim({ claim, send, workspace, executable, signal, adm
       const checkpoint=claim.interrupted_checkout;
       let recovered=false;
       if (checkpoint && attempt.resume_session_id && telemetryDirectory) {
-        recovered=await recoverInterruptedCheckout({directory:telemetryDirectory,workspace,task,attempt,checkpoint,identity,
+        recovered=await recoverInterruptedCheckout({directory:telemetryDirectory,workspace,task,attempt,checkpoint,identity,linkedCheckout,
           confirmLease:async()=>{
             const result=await confirmControl();
             workerSignal.throwIfAborted();
@@ -822,7 +855,7 @@ export async function runClaim({ claim, send, workspace, executable, signal, adm
             }
           }});
       }
-      try { lock = await takeWorkspaceLock(workspace, attempt.id); }
+      try { lock = await takeWorkspaceLock(workspace, attempt.id, linkedCheckout); }
       catch (error) {
         if (error.code === 'EEXIST') stop('The checkout is still locked. Confirm the previous executor has stopped and reconcile its files before retrying.','checkout');
         throw error;
@@ -842,7 +875,7 @@ export async function runClaim({ claim, send, workspace, executable, signal, adm
     }
     telemetryStarted = true;
     await telemetry(onTelemetryStart, { verificationNamespace, ...(providerStream ? {providerStream} : {}) });
-    const objectiveSource = await prepareObjectiveSource(workspace,task,attempt);
+    const objectiveSource = await prepareObjectiveSource(workspace,task,attempt,linkedCheckout);
     workerSignal.throwIfAborted();
     outcome = await execute({ executable, cwd: workspace, task, attempt, objectiveSource,
       executionNotes:claim.execution_notes,
@@ -937,7 +970,7 @@ export async function runClaim({ claim, send, workspace, executable, signal, adm
           let candidate = await identify(workspace, attempt.revision);
           if (candidate.dirty && candidate.branch === identity.branch && candidate.revision === attempt.revision) {
             await admitStorage();
-            await checkpointCandidate(workspace, candidate, task, attempt);
+            await checkpointCandidate(workspace, candidate, task, attempt, linkedCheckout);
             candidate = await identify(workspace, attempt.revision);
           }
           return candidate;
@@ -1006,8 +1039,8 @@ export async function runClaim({ claim, send, workspace, executable, signal, adm
   }
 }
 
-export async function checkWorkspaceTelemetryScope(workspace, verification) {
-  const connection = await readObservatoryConnection(join(workspace, '.git', 'agent-harness', 'observatory-sync'));
+export async function checkWorkspaceTelemetryScope(workspace, verification, linkedCheckout) {
+  const connection = await readObservatoryConnection(join(linkedCheckout?.directory ?? join(workspace,'.git'), 'agent-harness', 'observatory-sync'));
   if (connection && connection.verification !== verification) {
     throw Error('Worker and checkout telemetry namespace must match');
   }
@@ -1065,18 +1098,31 @@ async function main(configPath) {
         !repositoryMatches(await git(gitCache,'remote','get-url','origin'), repository)) throw Error('Provisioning cache must use the configured repository outside worker checkouts');
   }
   const workspaces = new Map();
+  const linkedWorkspaces = new Map();
+  const workspaceRegistry = config.voyagewright_workspace_registry;
+  if (workspaceRegistry !== undefined && (typeof workspaceRegistry !== 'string' || !isAbsolute(workspaceRegistry) ||
+      !config.worker_mcp_url || app !== 'voyagewright' || repository !== 'Kgray44/treasurehuntSoT')) {
+    throw Error('A Voyagewright staging worker and absolute lifecycle registry path are required for linked checkouts');
+  }
   for (const [id, path] of Object.entries(config.workspaces ?? {})) {
     if (!taskIdPattern.test(id) || !isAbsolute(path)) throw Error('Invalid Task workspace mapping');
     const workspace = await realpath(path);
     if (relative(root, dirname(workspace)) || [...workspaces.values()].includes(workspace)) {
       throw Error('Each Task workspace must be a distinct direct child of workspace_root');
     }
-    await checkWorkspaceTelemetryScope(workspace, verification);
+    const linked = workspaceRegistry ? await registeredGitCheckout(workspace,id,workspaceRegistry,repository) : undefined;
+    await checkWorkspaceTelemetryScope(workspace, verification, linked);
     workspaces.set(id, workspace);
+    if (linked) linkedWorkspaces.set(id, linked);
   }
   if ((!author && !workspaces.size) || workspaces.size > 500) throw Error('Worker requires 1 to 500 Task workspace mappings');
   const scope = config.auto_provision?.task_ids ?? (author ? undefined : [...workspaces.keys()]);
   const appServer = config.executor_transport === 'app_server';
+  const stagingModel = config.staging_codex_model;
+  if (stagingModel !== undefined && (!config.worker_mcp_url || !appServer ||
+      typeof stagingModel !== 'string' || !/^[a-zA-Z0-9_.-]{1,100}$/.test(stagingModel))) {
+    throw Error('A valid model override requires a staged App Server worker');
+  }
   const repairEnabled = config.integration_source_repair === true;
   const ciAutomation = config.integration_ci_automation === true;
   const stagedTransport = config.worker_mcp_url === undefined ? null : openCommandCoreStageConnector({
@@ -1217,12 +1263,15 @@ async function main(configPath) {
       taskIdPattern.test(entry.name)).map(entry=>entry.name)])].filter(id=>!scope||scope.includes(id)).sort();
     for (let scanned=0;scanned<Math.min(taskIds.length,4)&&!signal.aborted;scanned++) {
       const taskId=taskIds[recoveryCursor++%taskIds.length];
-      const telemetryDirectory=await workerTelemetryDirectory(root,taskId,workspaces.get(taskId));
+      const linked = linkedWorkspaces.get(taskId);
+      const telemetryDirectory=await workerTelemetryDirectory(root,taskId,workspaces.get(taskId),linked);
       try {
         await reconcileAbandonedClaim({directory:telemetryDirectory,taskId,repository,
           readTask:id=>recovery.call({request:{op:'get',task_id:id},...(verification?{verification}:{})}),
           recoverCandidate:async marker=>{
-            if (!await prepareRecoveredCandidate(workspaces.get(taskId)??join(root,taskId),marker,repository)) return false;
+            const workspace = workspaces.get(taskId) ?? join(root,taskId);
+            const custody = linked ? await registeredGitCheckout(workspace,taskId,workspaceRegistry,repository) : undefined;
+            if (!await prepareRecoveredCandidate(workspace,marker,repository,custody)) return false;
             const request={op:'recover_worker_candidate',task_id:taskId,attempt_id:marker.attemptId,
               operation_id:marker.recoveryOperationId,candidate_recovery:{key:marker.recoveryKey,
                 revision:marker.candidateRevision,session_id:marker.sessionId,branch:marker.branch}};
@@ -1259,15 +1308,19 @@ async function main(configPath) {
           if (result.claim && !signal.aborted) {
             const workspace = workspaces.get(result.claim.task.id);
             const taskId = result.claim.task.id;
-            const telemetryDirectory = await workerTelemetryDirectory(root,taskId,workspace);
+            const linkedCheckout = linkedWorkspaces.get(taskId);
+            const telemetryDirectory = await workerTelemetryDirectory(root,taskId,workspace,linkedCheckout);
             const job = runClaim({ claim:result.claim, send, workspace, executable:config.codex_bin, signal, recoveryKey,
-              verificationNamespace:verification ?? null,managedConnection,telemetryDirectory,
-              identify: (path, revision) => checkoutIdentity(path, revision, { repository }),
+              verificationNamespace:verification ?? null,managedConnection,telemetryDirectory,linkedCheckout,
+              identify: async (path, revision) => checkoutIdentity(path, revision, { repository,
+                linkedCheckout: linkedCheckout ? await registeredGitCheckout(path,taskId,workspaceRegistry,repository) : undefined }),
               ...(config.executor_transport==='app_server' ? {
                   execute:async options=>{
                     // The persistent conversation belongs to this attempt process.
                     // Release its Desktop session when the turn exits.
-                    const executor=openObservatoryConnector({cwd:options.cwd,executable:config.codex_bin});
+                    const executor=openObservatoryConnector({cwd:options.cwd,executable:config.codex_bin,
+                      ...(stagingModel ? { spawnProcess: (file, args, settings) =>
+                        spawn(file, [...args, '-c', 'model=' + JSON.stringify(stagingModel)], settings) } : {}) });
                     try {
                       await options.onProviderProcess(executor.processId);
                       return await executeAppServer(executor,options);
