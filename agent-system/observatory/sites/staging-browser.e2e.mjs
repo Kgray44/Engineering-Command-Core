@@ -342,6 +342,12 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.deepEqual(await titles.allTextContents(), [...firstNames].reverse());
   assert.equal(await page.getByText('Project order saved.', { exact: true }).count(), 0);
   assert.equal(part.sqlite.prepare("SELECT count(*) AS count FROM proposals WHERE project_id IS NOT NULL").get().count, 1);
+  await page.goto(stage.origin + '/#activity');
+  const warning = page.getByRole('link', { name: 'Dedicated GitHub read credential is missing', exact: true });
+  await warning.waitFor();
+  assert.equal(await warning.getAttribute('href'), '#settings/github');
+  await warning.click();
+  await page.getByText('Dedicated integration read credential', { exact: true }).waitFor();
 });
 
 test('Voyagewright mobile Settings and Merge discovery use the shared scoped API', { timeout: 60_000 }, async t => {
@@ -887,6 +893,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   putMerged(crypto.randomUUID(), 9, {});
   await page.goto(stage.origin + '/#activity');
   await page.getByRole('button', { name: 'All activity', exact: true }).click();
+  await panel('Connections').waitFor();
+  assert.equal(await page.getByRole('link', { name: 'Dedicated GitHub read credential is missing', exact: true }).count(), 0);
   const reviewsPending = panel('Projects awaiting owner review');
   await reviewsPending.getByRole('link', { name: 'Release project', exact: true }).click({ timeout: 5_000 });
   await page.waitForFunction(() => document.activeElement === document.querySelector('#project-acceptance h2'));

@@ -71,13 +71,15 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
     href: '#merge?pr=' + activityId('pulls', item), at: item.updated_at, state: item.draft ? 'draft' : 'open',
     detail: github?.pulls?.status === 'stale' ? 'Cached GitHub observation' : null });
   const openPulls = (github?.pulls?.items ?? []).filter(item => item.state === 'open' && activityId('pulls', item));
+  const githubConnection = settings?.connections?.github;
+  const githubReadConfigured = githubConnection?.integration_read_credential_configured ?? githubConnection?.credential_configured;
   const connections = [
     { id: 'worker', label: dispatch.label, href: '#settings/workers', at: dispatch.at },
     ...(worker?.last_error ? [{ id: 'worker-receipt', label: 'Last worker issue · ' + label(worker.last_error.state),
       at: worker.last_error.at, href: '#settings/workers' }] : []),
     ...(github?.main?.status !== 'available' ? [{ id: 'github', label: github?.main?.reason ?? 'GitHub main is unverified',
       href: '#settings/github' }] : []),
-    ...(settings?.connections?.github?.credential_configured === false ? [{ id: 'github-read', label: 'GitHub read credential is missing',
+    ...(githubReadConfigured === false ? [{ id: 'github-read', label: 'Dedicated GitHub read credential is missing',
       href: '#settings/github' }] : []),
     ...(runError ? [{ id: 'integration-error', label: 'Integration history is unavailable', href: '#merge' }] : []),
   ];
