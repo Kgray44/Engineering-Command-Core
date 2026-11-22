@@ -4,7 +4,9 @@ Phase 2 is ready for owner walkthrough on the private staging Sites. Hosted GitH
 
 ## Review the deployed candidate
 
-On November 22, signed-in checks on both private staging origins reported Command Core revision `b868d8b7a3e6a610024d341445ec9f8b9b5a383d`. Each Site mirror matched the tested source tree apart from its hosting manifest. The draft PR records deployments after that revision. The signed-in production Observatory Task Control Center loaded on build `8bd0e4553b` and showed its Codex worker online. Sites reported production version 74 active. [Deployed commit](https://github.com/Kgray44/Engineering-Command-Core/commit/b868d8b7a3e6a610024d341445ec9f8b9b5a383d) · [Production Task Control Center](https://aetherwake-engineering-observatory.kgamazing44.chatgpt.site/#tasks)
+Both private staging Sites run Command Core revision `6d872713a252d2e577bfd8480f0365eb97e25127`. Signed-in browser checks reported that revision from each origin. Sites confirms that both version 64 deployments succeeded. Each deployed source mirror matches the CI-tested tree with only its two Site configuration files added. [Deployed commit](https://github.com/Kgray44/Engineering-Command-Core/commit/6d872713a252d2e577bfd8480f0365eb97e25127) · [Candidate CI](https://github.com/Kgray44/Engineering-Command-Core/actions/runs/45012870241)
+
+In the November 22 production check, the signed-in Observatory Task Control Center loaded on build `8bd0e4553b` and showed its Codex worker online. Sites reported production version 74 active. [Production Task Control Center](https://aetherwake-engineering-observatory.kgamazing44.chatgpt.site/#tasks)
 
 | Workspace | Aetherwake | Voyagewright |
 |---|---|---|
