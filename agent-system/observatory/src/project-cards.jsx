@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { motion, useReducedMotion } from 'motion/react';
@@ -44,13 +44,16 @@ export function ProjectAppearance({ project }) {
   </details>;
 }
 
-function Card({ item, Status, sortable }) {
+function Card({ item, Status, sortable, keyboard }) {
   const reduced = useReducedMotion();
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } =
     useSortable({ id: item.id, disabled: !sortable });
+  const pickedUp = sortable && keyboard.drag?.id === item.id;
+  const hovered = isOver || (sortable && keyboard.drag?.target === item.id);
+  const dragging = isDragging || pickedUp;
   const progress = item.progress;
   return <li ref={setNodeRef} data-accent={item.accent ?? 'default'} className="project-card"
-    data-dragging={isDragging || undefined} data-drag-over={isOver || undefined} data-insertion={isOver && !isDragging || undefined}
+    data-dragging={dragging || undefined} data-drag-over={hovered || undefined} data-insertion={hovered && !dragging || undefined}
     style={{ transform: CSS.Transform.toString(transform), transition: reduced ? undefined : transition }}>
     <motion.a className="project-card-link" href={'#projects/' + item.id} whileHover={reduced ? undefined : { y: -2 }}>
       <span className="project-card-icon"><ProjectIcon id={item.icon}/></span>
@@ -62,40 +65,69 @@ function Card({ item, Status, sortable }) {
       <span className="project-card-action">Open project <ChevronRight size={15} aria-hidden="true"/></span>
     </motion.a>
     {sortable && <button type="button" className="icon-button project-card-handle" ref={setActivatorNodeRef}
-      {...attributes} {...listeners} aria-label={'Reorder ' + item.name}><Grip size={18} aria-hidden="true"/></button>}
+      {...attributes} {...listeners} aria-label={'Reorder ' + item.name} aria-pressed={pickedUp}
+      onKeyDown={event => keyboard.onKey(event, item.id)} onBlur={() => keyboard.cancel(item.id)}>
+      <Grip size={18} aria-hidden="true"/>
+    </button>}
   </li>;
 }
 
-// Keyboard direction follows the list across rows. Use the measured target center so
-// uneven card sizes and viewport scrolling do not determine which item is selected.
 const keyboardDirection = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
 
-function projectKeyboardCoordinates(event, { context, active }) {
-  const offset = keyboardDirection[event.code];
-  if (!offset || !context.collisionRect) return;
-  event.preventDefault();
-  const origin = context.droppableContainers.get(context.over?.id ?? active)?.data.current?.sortable;
-  if (!origin) return;
-  const id = origin.items[origin.index + offset];
-  const rect = context.droppableRects.get(id);
-  if (!rect) return;
-  return {
-    x: rect.left + (rect.width - context.collisionRect.width) / 2,
-    y: rect.top + (rect.height - context.collisionRect.height) / 2,
-  };
+function useKeyboardOrder(ids, title, onMove) {
+  const [drag, setDrag] = useState(null);
+  const [announcement, setAnnouncement] = useState('');
+
+  function cancel(id) {
+    if (drag?.id !== id) return;
+    setDrag(null);
+    setAnnouncement('Reordering canceled');
+  }
+
+  function onKey(event, id) {
+    const moving = drag?.id === id;
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      if (event.repeat) return;
+      if (!moving) {
+        setDrag({ id, target: id });
+        setAnnouncement('Picked up ' + title(id));
+      } else {
+        setDrag(null);
+        if (drag.target !== id) onMove(ids, id, drag.target);
+        setAnnouncement(drag.target === id ? 'Order unchanged' :
+          'Moved ' + title(id) + ' to position ' + (ids.indexOf(drag.target) + 1));
+      }
+      return;
+    }
+    if (!moving) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel(id);
+    } else if (keyboardDirection[event.key]) {
+      event.preventDefault();
+      const target = ids[ids.indexOf(drag.target) + keyboardDirection[event.key]];
+      if (target) {
+        setDrag({ id, target });
+        setAnnouncement('Position ' + (ids.indexOf(target) + 1) + ', ' + title(target));
+      }
+    }
+  }
+  return { drag, announcement, onKey, cancel };
 }
 
 export function ProjectCardGrid({ rows, Status, sortable, onMove, layout }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: projectKeyboardCoordinates }),
   );
   const ids = rows.map(item => item.id);
   const title = id => rows.find(item => item.id === id)?.name;
+  const keyboard = useKeyboardOrder(ids, title, onMove);
   return <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
     if (sortable && over && active.id !== over.id) onMove(ids, active.id, over.id);
   }} accessibility={{
+    screenReaderInstructions: { draggable: 'Press Space or Enter to pick up the card. Use the arrow keys to choose its position. Press Space or Enter to drop it, or Escape to cancel.' },
     announcements: {
       onDragStart: ({ active }) => 'Picked up ' + title(active.id),
       onDragOver: ({ over }) => over ? 'Over ' + title(over.id) : 'Outside the project grid',
@@ -104,8 +136,9 @@ export function ProjectCardGrid({ rows, Status, sortable, onMove, layout }) {
       onDragCancel: () => 'Reordering canceled',
     },
   }}>
+    <span className="project-reorder-announcement" role="status" aria-live="polite">{keyboard.announcement}</span>
     <SortableContext items={ids} strategy={rectSortingStrategy}>
-      <ul className="project-card-grid" data-layout={layout}>{rows.map(item => <Card key={item.id} item={item} Status={Status} sortable={sortable}/>)}</ul>
+      <ul className="project-card-grid" data-layout={layout}>{rows.map(item => <Card key={item.id} item={item} Status={Status} sortable={sortable} keyboard={keyboard}/>)}</ul>
     </SortableContext>
   </DndContext>;
 }

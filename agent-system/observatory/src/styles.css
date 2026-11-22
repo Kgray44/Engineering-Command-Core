@@ -533,6 +533,9 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 .project-card-action { margin-top: auto; color: var(--project-accent); font-size: .8rem; }
 .project-card-handle { position: absolute; top: .65rem; right: .65rem; cursor: grab; touch-action: none; }
 .project-card-handle:active { cursor: grabbing; }
+.project-reorder-announcement {
+  position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 .project-icon-choices { display: flex; flex-wrap: wrap; gap: .35rem; }
 .project-icon-choices button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
