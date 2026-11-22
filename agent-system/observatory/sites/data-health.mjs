@@ -8,6 +8,7 @@ const inspectedObjects = new Map([
   ['project_task_gates', 'table'],
   ['proposals', 'table'],
   ['integration_runs', 'table'],
+  ['integration_events', 'table'],
   ['workspace_preferences', 'table'],
   ['workspace_preference_events', 'table'],
   ['project_task_moved_out', 'trigger'],
@@ -42,7 +43,19 @@ export async function readDataHealth(db, owner, namespace) {
         SELECT 1 FROM proposals t JOIN milestones m ON m.owner_id = t.owner_id AND m.namespace = t.namespace AND m.project_id = t.project_id
         WHERE t.owner_id = link.owner_id AND t.namespace = link.namespace AND t.task_id = link.task_id
           AND t.project_id = link.project_id AND m.id = link.milestone_id
-      )) AS invalid_milestone_links
+      )) AS invalid_milestone_links,
+      (SELECT COUNT(*) FROM project_task_gates g WHERE g.owner_id = ?1 AND g.namespace = ?2 AND (
+        NOT EXISTS (SELECT 1 FROM proposals t WHERE t.owner_id = g.owner_id AND t.namespace = g.namespace AND t.task_id = g.task_id)
+        OR NOT EXISTS (SELECT 1 FROM milestones m WHERE m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id)
+      )) AS invalid_milestone_gates,
+      (SELECT COUNT(*) FROM workspace_preferences p WHERE p.owner_id = ?1 AND p.namespace = ?2 AND NOT EXISTS (
+        SELECT 1 FROM workspace_preference_events e WHERE e.owner_id = p.owner_id AND e.namespace = p.namespace
+          AND e.version = p.version AND e.preferences = p.preferences AND e.updated_at = p.updated_at
+      )) AS preferences_without_receipts,
+      (SELECT COUNT(*) FROM integration_runs r WHERE r.owner_id = ?1 AND r.namespace = ?2 AND NOT EXISTS (
+        SELECT 1 FROM integration_events e WHERE e.owner_id = r.owner_id AND e.namespace = r.namespace
+          AND e.integration_id = r.id AND e.version = r.version AND e.event = r.event
+      )) AS integrations_without_receipts
   `).bind(owner, namespace).first();
   return {
     ...base, checked_at: new Date().toISOString(),

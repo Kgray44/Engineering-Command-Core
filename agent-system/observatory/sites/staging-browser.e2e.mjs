@@ -447,8 +447,11 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.goto(stage.origin + '/#settings/data');
   await page.getByRole('button', { name: 'Run scoped data checks' }).click();
   const dataChecks = page.getByRole('region', { name: 'Data checks' });
-  await dataChecks.getByText('12 expected objects found').waitFor();
+  await dataChecks.getByText('13 expected objects found').waitFor();
   await dataChecks.getByText('Passed', { exact: true }).waitFor();
+  for (const label of ['Invalid milestone gates', 'Preferences missing current receipts', 'Integrations missing current receipts']) {
+    assert.equal(await dataChecks.locator('.settings-facts div').filter({ hasText: label }).locator('dd').innerText(), '0');
+  }
   await dataChecks.getByText('Unverified by this Site').waitFor();
   await dataChecks.getByText('Restores code only', { exact: true }).waitFor();
   await page.goto(stage.origin + '/#activity');

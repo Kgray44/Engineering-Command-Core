@@ -160,7 +160,7 @@ function DataChecks({ headers, revision }) {
 
   return <section aria-label="Data checks">
     <h3>Data checks</h3>
-    <p>Check schema objects and Project relationships in this application and the current owner namespace.</p>
+    <p>Check schema objects, engineering relationships, and audit receipts in this application and the current owner namespace.</p>
     <Facts rows={[
       ['Sites version rollback', 'Restores code only'],
       ['Database and file recovery', 'Requires a separately verified export and restore'],
@@ -180,6 +180,9 @@ function DataChecks({ headers, revision }) {
         ['Milestones missing current receipts', result.integrity.milestones_without_receipts],
         ['Tasks missing their Project', result.integrity.tasks_without_projects],
         ['Invalid milestone links', result.integrity.invalid_milestone_links],
+        ['Invalid milestone gates', result.integrity.invalid_milestone_gates],
+        ['Preferences missing current receipts', result.integrity.preferences_without_receipts],
+        ['Integrations missing current receipts', result.integrity.integrations_without_receipts],
         ['Import checkpoint', result.import.status === 'no_checkpoint_in_served_partition' ? 'No checkpoint in the active partition' : 'Unverified'],
         ['Backup and restore', result.backup.status === 'unverified' ? 'Unverified by this Site' : 'Unavailable'],
       ]}/>
