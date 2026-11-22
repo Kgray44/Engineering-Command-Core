@@ -36,4 +36,7 @@ export const preferenceFields = {
     choices: { updated: 'Recently updated', newest: 'Newest first', oldest: 'Oldest first' } },
 };
 
-export const defaultPreferences = Object.fromEntries(Object.entries(preferenceFields).map(([key, field]) => [key, field.initial]));
+export const defaultPreferences = {
+  ...Object.fromEntries(Object.entries(preferenceFields).map(([key, field]) => [key, field.initial])),
+  project_templates: [],
+};

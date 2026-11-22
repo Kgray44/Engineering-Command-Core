@@ -34,7 +34,7 @@ function Options({ values }) {
   return values.map(value => <option key={value} value={value}>{value}</option>);
 }
 
-function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
+function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTemplates = [] }) {
   const [draft, setDraft] = useState(() => ({
     scope: project.scope ?? '',
     acceptance: project.acceptance ?? '',
@@ -47,7 +47,7 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
     setDraft(previous => ({ ...previous, [name]: value }));
   };
   const applyTemplate = id => {
-    const template = projectTemplates.find(item => item.id === id);
+    const template = [...projectTemplates, ...customTemplates].find(item => item.id === id);
     const defaults = {
       scope: template?.scope ?? '',
       acceptance: template?.acceptance ?? '',
@@ -67,6 +67,9 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
       <select defaultValue="" onChange={event => applyTemplate(event.target.value)}>
         <option value="">Blank project</option>
         {projectTemplates.map(template => <option key={template.id} value={template.id}>{template.label}</option>)}
+        {customTemplates.length > 0 && <optgroup label="Custom templates">
+          {customTemplates.map(template => <option key={template.id} value={template.id}>{template.label}</option>)}
+        </optgroup>}
       </select>
     </label>}
     <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
@@ -418,7 +421,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     {application && !projectId && <ProjectExplorer application={application} projects={projects} unassigned={data.unassigned_tasks}
       filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaultSort={preferences.project_sort} defaultView={preferences.project_view} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
       manualOrder={data.manual_order ?? { version: 0, project_ids: [] }} onReorder={submit} busy={busy}>
-      {edit && <div className="project-create"><ProjectForm busy={busy} defaultPriority={preferences.project_priority} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
+      {edit && <div className="project-create"><ProjectForm busy={busy} defaultPriority={preferences.project_priority} customTemplates={preferences.project_templates} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
         window.location.hash = projectHref(result.project.id);
       })}/></div>}
     </ProjectExplorer>}

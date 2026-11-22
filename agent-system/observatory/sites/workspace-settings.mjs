@@ -1,3 +1,4 @@
+import { validCustomProjectTemplates } from '../src/project-templates.mjs';
 import { defaultPreferences, preferenceFields } from '../src/workspace-preferences.mjs';
 
 const snapshot = row => ({
@@ -19,8 +20,12 @@ export async function workspaceSettings({ db, owner, namespace, body, facts }) {
     return error('Invalid settings request', 400);
   }
   const keys = body.op === 'save' ? Object.keys(body.values ?? {}) : body.keys;
-  if (!Array.isArray(keys) || !keys.length || keys.some(key => typeof key !== 'string' || !Object.hasOwn(preferenceFields, key)) ||
-      (body.op === 'save' && keys.some(key => typeof body.values[key] !== 'string' || !Object.hasOwn(preferenceFields[key].choices, body.values[key])))) {
+  const allowed = key => {
+    if (key === 'project_templates') return body.op === 'save' && validCustomProjectTemplates(body.values[key]);
+    if (typeof key !== 'string' || !Object.hasOwn(preferenceFields, key)) return false;
+    return body.op === 'reset' || (typeof body.values[key] === 'string' && Object.hasOwn(preferenceFields[key].choices, body.values[key]));
+  };
+  if (!Array.isArray(keys) || !keys.length || !keys.every(allowed)) {
     return error('Invalid or unsupported workspace preference', 400);
   }
   const version = body.expected_version;

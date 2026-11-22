@@ -579,6 +579,26 @@ test('Activity reads recent Project events from the current owner and verificati
   assert.equal((await call(0, '/api/activity', {})).status, 405);
 });
 
+test('custom Project templates persist in versioned Settings and stay application scoped', async t => {
+  const { call } = setup(t);
+  const path = '/api/settings';
+  const template = { id: crypto.randomUUID(), label: 'Nightly qualification',
+    scope: 'Run scoped checks', acceptance: 'Record the evidence', milestones: ['Inspect', 'Record'] };
+  const change = { op: 'save', expected_version: 0, values: { project_templates: [template] } };
+  assert.equal((await call(0, path, change, 'unassigned')).status, 403);
+  assert.equal((await call(0, path, { ...change, values: { project_templates: [template, template] } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { project_templates: [{ ...template, label: '  ' }] } })).status, 400);
+  assert.equal((await call(0, path, change)).status, 200);
+  const owner = (await call(0, path)).body;
+  assert.deepEqual(owner.preferences.values.project_templates, [template]);
+  assert.deepEqual(owner.audit[0].values.project_templates, [template]);
+  assert.deepEqual((await call(1, path)).body.preferences.values.project_templates, []);
+  assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.values.project_templates, []);
+  assert.equal((await call(0, path, change)).status, 409);
+  const removed = await call(0, path, { op: 'save', expected_version: 1, values: { project_templates: [] } });
+  assert.deepEqual(removed.body.preferences.values.project_templates, []);
+});
+
 test('Settings data checks validate the active scoped Project history', async t => {
   const { call, one } = setup(t);
   const path = '/api/settings/data';

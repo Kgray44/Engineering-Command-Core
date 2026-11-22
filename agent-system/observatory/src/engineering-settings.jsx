@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, Bell, Boxes, CalendarClock, Database, GitMerge, Github, Link2, Settings, ShieldCheck } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
+import { customTemplateLimits, validCustomProjectTemplates } from './project-templates.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
 
 const categories = [
@@ -191,6 +192,67 @@ function DataChecks({ headers, revision }) {
   </section>;
 }
 
+function CustomProjectTemplates({ templates, busy, onSave }) {
+  const [selected, setSelected] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [error, setError] = useState('');
+  const template = templates.find(item => item.id === selected);
+  const limits = customTemplateLimits;
+  const full = !template && templates.length >= limits.count;
+  async function submit(event) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    const value = {
+      id: template?.id ?? crypto.randomUUID(),
+      label: fields.get('label').trim(),
+      scope: fields.get('scope').trim(),
+      acceptance: fields.get('acceptance').trim(),
+      milestones: fields.get('milestones').split('\n').map(name => name.trim()).filter(Boolean),
+    };
+    const next = template ? templates.map(item => item.id === template.id ? value : item) : [...templates, value];
+    if (!validCustomProjectTemplates(next)) {
+      setError('Use a distinct template name and up to eight milestone names of 120 characters each. Shorten the template text if needed.');
+      return;
+    }
+    setError('');
+    if (await onSave(next)) setSelected(value.id);
+  }
+  return <section aria-label="Custom Project templates">
+    <h3>Custom Project templates</h3>
+    <form className="form" onSubmit={submit} key={template?.id ?? 'new'}>
+      <label>Choose a custom template<select value={template?.id ?? ''} disabled={busy} onChange={event => {
+        setSelected(event.target.value);
+        setConfirmRemove(false);
+        setError('');
+      }}>
+        <option value="">New custom template</option>
+        {templates.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select></label>
+      {full ? <p>Four custom templates are saved. Choose one to edit or remove.</p> : <>
+        <label>Template name<input name="label" defaultValue={template?.label} required maxLength={limits.label}/></label>
+        <label>Template scope<textarea name="scope" defaultValue={template?.scope} maxLength={limits.text} rows={2}/></label>
+        <label>Template acceptance requirements<textarea name="acceptance" defaultValue={template?.acceptance} maxLength={limits.text} rows={2}/></label>
+        <label>Template milestones<textarea name="milestones" defaultValue={template?.milestones.join('\n')} placeholder="One milestone per line" rows={3}/></label>
+        <div className="integration-actions">
+          <button className="primary-button" disabled={busy}>Save template</button>
+          {template && <button type="button" className="quiet-button" disabled={busy} onClick={() => setConfirmRemove(true)}>Remove template</button>}
+        </div>
+      </>}
+      {confirmRemove && template && <div className="notice" role="group" aria-label="Confirm template removal">
+        <span>Remove {template.label} from custom templates?</span>
+        <button type="button" className="primary-button" disabled={busy} onClick={async () => {
+          if (await onSave(templates.filter(item => item.id !== template.id))) {
+            setSelected('');
+            setConfirmRemove(false);
+          }
+        }}>Confirm removal</button>
+        <button type="button" className="quiet-button" onClick={() => setConfirmRemove(false)}>Keep template</button>
+      </div>}
+      {error && <p role="alert">{error}</p>}
+    </form>
+  </section>;
+}
+
 export function EngineeringSettings({ category, headers, settings, onSettings, github, dispatch, worker, execution, engineState, demo }) {
   const reduced = useReducedMotion();
   const active = categories.find(([id]) => id === category);
@@ -202,20 +264,21 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
   const saved = settings?.preferences;
   const dirty = fields.some(([key]) => draft[key] !== undefined && draft[key] !== saved?.values[key]);
   useEffect(() => { setDraft({}); setMessage(''); setConfirmReset(false); }, [category]);
-  async function update(op) {
+  async function update(op, customTemplates) {
     if (!saved || busy) return;
     setBusy(true);
     setMessage('');
     setConfirmReset(false);
     try {
-      const values = Object.fromEntries(fields.filter(([key]) => draft[key] !== undefined && saved.values[key] !== draft[key])
+      const values = customTemplates ? { project_templates: customTemplates } : Object.fromEntries(fields.filter(([key]) => draft[key] !== undefined && saved.values[key] !== draft[key])
         .map(([key]) => [key, draft[key]]));
       const result = await settingsRequest(headers, { op, expected_version: saved.version,
         ...(op === 'save' ? { values } : { keys: fields.map(([key]) => key) }) });
       onSettings({ ...settings, preferences: result.preferences,
         audit: [result.preferences, ...settings.audit].slice(0, 15) });
-      setDraft({});
-      setMessage(op === 'save' ? 'Settings saved.' : 'Category defaults restored.');
+      if (!customTemplates) setDraft({});
+      setMessage(customTemplates ? 'Custom templates saved.' : op === 'save' ? 'Settings saved.' : 'Category defaults restored.');
+      return true;
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -264,6 +327,8 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
         <button type="button" className="quiet-button" onClick={() => setConfirmReset(false)}>Keep settings</button>
       </div>}
     </form>}
+    {category === 'projects' && settings && <CustomProjectTemplates templates={saved.values.project_templates ?? []}
+      busy={busy} onSave={templates => update('save', templates)}/>}
     {category === 'security' && settings && <details><summary>Settings audit</summary>
       {settings.audit.length ? <ol>{settings.audit.map(entry => <li key={entry.version}>Revision {entry.version} · {date(entry.updated_at)}</li>)}</ol>
         : <p>No workspace preference changes recorded.</p>}

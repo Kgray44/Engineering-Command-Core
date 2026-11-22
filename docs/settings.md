@@ -4,7 +4,7 @@ Open **Settings** to browse ten categories. General and Projects set workspace p
 
 ## Configuration registry
 
-All editable values below are enum strings. The server validates the allowed values and requires the authenticated owner in the active application and namespace. Save and category reset take effect on the next render or page entry. Landing page changes apply on the next visit without a direct URL. No restart is required. D1 stores versioned preferences and audit snapshots.
+The editable defaults in the table are enum strings. The server validates the allowed values and requires the authenticated owner in the active application and namespace. Save and category reset take effect on the next render or page entry. Landing page changes apply on the next visit without a direct URL. No restart is required. D1 stores versioned preferences and audit snapshots.
 
 | Setting | Default | Accepted values |
 |---|---|---|
@@ -27,7 +27,7 @@ All editable values below are enum strings. The server validates the allowed val
 
 Restore defaults previews the category and requires a confirmation. Task priority and repair limit prefill new forms and can be overridden for each new item. Task grouping applies inside each Task activity view. Pull request criteria apply to the Merge source list. Changes made in either workspace are temporary. Change Settings to update the saved defaults.
 
-Project card order persists independently from these preferences. The settings audit under **Security** lists the last 15 revisions and timestamps; the scoped read API also returns those revision values. If another tab has saved changes, refresh before applying your changes again.
+Project card order persists independently from these preferences. **Projects** also stores up to four custom templates per application and owner namespace. Select a saved template to edit or remove it. Template changes use the same version checks and audit as other workspace settings. The settings audit under **Security** lists the last 15 revisions and timestamps; the scoped read API also returns those revision values. If another tab has saved changes, refresh before applying your changes again.
 
 | Deployment-owned configuration | Scope and source |
 |---|---|

@@ -20,3 +20,20 @@ export const projectTemplates = [
     acceptance: 'Share the findings, supporting evidence, and unresolved uncertainties.',
     milestones: ['Define the question', 'Collect and review evidence', 'Record the recommendation'] },
 ];
+
+export const customTemplateLimits = { count: 4, label: 80, text: 1000, milestones: 8, milestone: 120, bytes: 3600 };
+
+export function validCustomProjectTemplates(templates) {
+  const limits = customTemplateLimits;
+  const text = (value, max) => typeof value === 'string' && value.length <= max && value === value.trim();
+  return Array.isArray(templates) && templates.length <= limits.count && templates.every(template =>
+    template && Object.keys(template).length === 5 &&
+    typeof template.id === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(template.id) &&
+    text(template.label, limits.label) && template.label.length > 0 &&
+    text(template.scope, limits.text) && text(template.acceptance, limits.text) &&
+    Array.isArray(template.milestones) && template.milestones.length <= limits.milestones &&
+    template.milestones.every(name => text(name, limits.milestone) && name.length > 0)) &&
+    new Set(templates.map(template => template.id)).size === templates.length &&
+    new Set(templates.map(template => template.label.toLowerCase())).size === templates.length &&
+    new TextEncoder().encode(JSON.stringify(templates)).length <= limits.bytes;
+}
