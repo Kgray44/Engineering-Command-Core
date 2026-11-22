@@ -79,6 +79,13 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
       href: '#settings/github' }] : []),
     ...(runError ? [{ id: 'integration-error', label: 'Integration history is unavailable', href: '#merge' }] : []),
   ];
+  const integrationRow = run => ({
+    id: run.id,
+    label: run.pr_number ? 'Pull request #' + run.pr_number
+      : taskIndex.get(run.task?.id)?.title ?? 'Task candidate ' + run.head_sha.slice(0, 10),
+    state: run.state, href: '#merge?run=' + run.id + (run.pr_number ? '&pr=' + run.pr_number : ''),
+    at: run.updated_at, task: run.task?.id,
+  });
   const sections = [
     ['attention', 'Owner review', entries.filter(task => task.state === 'verifying')],
     ['attention', 'Waiting on prerequisites', entries.filter(task => !['archived', 'cancelled', 'completed'].includes(task.state) &&
@@ -94,9 +101,13 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
     ['attention', 'Failed or interrupted CI', recent((github?.ci?.items ?? []).filter(item => dispositions.has(item.conclusion) && activityId('runs', item))
       .map(item => ({ id: activityId('runs', item), label: item.title ?? item.workflow, state: item.conclusion,
         href: activityHref('runs', activityId('runs', item)), at: item.updated_at })))],
-    ['attention', 'Integration attention', runs.filter(run => ['blocked', 'checking', 'repairing', 'merge_ready'].includes(run.state))
-      .map(run => ({ id: run.id, label: run.pr_number ? 'Pull request #' + run.pr_number : 'Task candidate ' + run.head_sha.slice(0, 10),
-        state: run.state, href: '#merge?run=' + run.id + (run.pr_number ? '&pr=' + run.pr_number : '') }))],
+    ['attention', 'Integration attention', recent(runs.filter(run => ['blocked', 'checking', 'repairing', 'merge_ready'].includes(run.state))
+      .map(run => ({ ...integrationRow(run), detail: run.state === 'blocked' ? run.evidence?.detail : null })))],
+    ['recent', 'Recently landed integrations', recent(runs.filter(run => ['merged', 'deployed'].includes(run.state) &&
+      /^[a-f0-9]{40}$/.test(run.evidence?.merged_sha ?? '')).map(run => ({
+      ...integrationRow(run), detail: 'Landed commit ' + run.evidence.merged_sha.slice(0, 12),
+      at: run.evidence.merged_at ?? run.updated_at,
+    })))],
     ['attention', 'Connections', connections],
     ['recent', 'Running work', entries.filter(task => ['running', 'pausing', 'cancelling'].includes(task.state))],
     ['recent', 'Recently completed', recent(entries.filter(task => task.accepted && ['completed', 'accepted', 'archived'].includes(task.state)))],

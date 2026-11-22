@@ -576,6 +576,26 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.locator('#integration-detail-title').waitFor();
   await page.getByText('Recorded run span', { exact: false }).waitFor();
   assert.match(await page.getByRole('region', { name: 'Integration history' }).innerText(), /Recorded span \d+ s/);
+  const mergedId = crypto.randomUUID();
+  const mergedAt = new Date().toISOString();
+  const insertRun = part.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, NULL, NULL, ?, ?, 'merged', 1, ?, ?, ?)");
+  const putMerged = (id, prNumber, evidence) => insertRun.run('synthetic-staging-owner', id, head, prNumber, mergedAt,
+    JSON.stringify({ ...run, id, pr_number: prNumber, state: 'merged', evidence }),
+    JSON.stringify({ operation_id: crypto.randomUUID(), at: mergedAt, version: 1, kind: 'start', state: 'merged' }));
+  putMerged(mergedId, 8, { merged_sha: 'e'.repeat(40), merged_at: mergedAt });
+  putMerged(crypto.randomUUID(), 9, {});
+  await page.goto(stage.origin + '/#activity');
+  await page.getByRole('button', { name: 'All activity', exact: true }).click();
+  const attention = panel('Integration attention');
+  await attention.getByText('The observed main revision changed. Inspect the new base before proceeding.', { exact: true }).waitFor();
+  assert.equal(await attention.getByRole('link', { name: 'Pull request #7' }).getAttribute('href'), '#merge?run=' + run.id + '&pr=7');
+  const completedIntegrations = panel('Recently landed integrations');
+  const landed = completedIntegrations.getByRole('link', { name: 'Pull request #8' });
+  await landed.waitFor();
+  assert.equal(await completedIntegrations.getByRole('link', { name: 'Pull request #9' }).count(), 0);
+  assert.equal(await landed.getAttribute('href'), '#merge?run=' + mergedId + '&pr=8');
+  await landed.click();
+  await page.getByRole('heading', { name: 'Merged into main', exact: true }).waitFor();
 });
 
 test('the Project Library layout stays stable while a slow portfolio request completes', { timeout: 45_000 }, async t => {
