@@ -1,4 +1,5 @@
 import {StickySectionAside} from './sticky-section-aside.jsx';
+import {SectionNavigation} from './section-navigation.jsx';
 import React, { useMemo, useState } from 'react';
 import { estimateOpenAIReference, formatReferenceCost, openAIReferenceBasis } from './openai-pricing.mjs';
 import { useOpenAIPricing } from './use-openai-pricing.jsx';
@@ -182,7 +183,7 @@ function TokenAccounting({ accounting, receipts, ready, headers }) {
   </>;
 }
 
-export function EngineeringAnalyticsPage({ records, events, github, execution, ready, ui, headers }) {
+export function EngineeringAnalyticsPage({ records, events, github, execution, ready, ui, headers, onJump }) {
   const { Metric, Panel, Rise, Status } = ui;
   const integration = useIntegrationRuns(headers, ready);
   const merge = integrationAnalytics(integration.runs);
@@ -213,6 +214,13 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
   return <>
     <div className="metrics analytics-metrics">{stats.map(([name,value,meta,Icon], index) =>
       <Metric key={name} name={name} value={value} meta={meta} Icon={Icon} index={index}/>)}</div>
+    <SectionNavigation label="Jump to analytics section" onJump={onJump} sections={[
+      {id:'analytics-delivery',label:'Delivery'},
+      {id:'analytics-execution',label:'Task execution'},
+      {id:'analytics-usage',label:'Usage and resources'},
+    ]}/>
+    <section id="analytics-delivery" className="analytics-section" aria-labelledby="analytics-delivery-heading">
+      <h2 id="analytics-delivery-heading" tabIndex={-1}>Delivery</h2>
     <Rise><Panel title="Engineering activity" right={<span className="panel-meta">14 UTC days · loaded records</span>}>
       <TrendChart days={data.days.map((day, index) => ({
         ...day,
@@ -245,16 +253,6 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
         })}</ul> : <p className="low">{data.ci.total === null ? 'CI results are unavailable.' : 'No failures in the loaded CI window.'}</p>}
       </Panel></Rise></StickySectionAside>
     </div>
-    <div className="analytics-grid">
-      <Rise><Panel title="Task outcomes"><div className="analytics-split">
-        <div><h3>Task states</h3><Counts entries={data.tasks.byState} empty="No Task states observed."/></div>
-        <div><h3>Task classes</h3><Counts entries={data.tasks.byClass} empty="No Task classes observed."/></div>
-      </div></Panel></Rise>
-      <StickySectionAside><Rise><Panel title="Attempt outcomes"><div className="analytics-split">
-        <div><h3>Attempt states</h3><Counts entries={data.attempts.byState} empty="No attempt states observed."/></div>
-        <div><h3>Failure categories</h3><Counts entries={data.attempts.byFailure} empty="No classified failures observed."/></div>
-      </div></Panel></Rise></StickySectionAside>
-    </div>
     {ready && <Rise><Panel title="Integration and merge">
       {integration.loading ? <p role="status">Loading integration evidence…</p> :
         integration.error ? <p>Integration evidence unavailable.</p> : <div className="analytics-integration-grid"><MetricRows fields={[
@@ -272,6 +270,19 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
           ['Actual integration billing', 'Unavailable'],
         ]}/></div>}
     </Panel></Rise>}
+    </section>
+    <section id="analytics-execution" className="analytics-section" aria-labelledby="analytics-execution-heading">
+      <h2 id="analytics-execution-heading" tabIndex={-1}>Task execution</h2>
+    <div className="analytics-grid">
+      <Rise><Panel title="Task outcomes"><div className="analytics-split">
+        <div><h3>Task states</h3><Counts entries={data.tasks.byState} empty="No Task states observed."/></div>
+        <div><h3>Task classes</h3><Counts entries={data.tasks.byClass} empty="No Task classes observed."/></div>
+      </div></Panel></Rise>
+      <StickySectionAside><Rise><Panel title="Attempt outcomes"><div className="analytics-split">
+        <div><h3>Attempt states</h3><Counts entries={data.attempts.byState} empty="No attempt states observed."/></div>
+        <div><h3>Failure categories</h3><Counts entries={data.attempts.byFailure} empty="No classified failures observed."/></div>
+      </div></Panel></Rise></StickySectionAside>
+    </div>
     <Rise><Panel title="Recorded execution phases" right={<Clock3 size={18} className="muted-icon"/>}><PhaseTable trace={data.trace}/></Panel></Rise>
     <div className="analytics-grid">
       <Rise><Panel title="Evidence observations" right={<FileCheck2 size={18} className="muted-icon"/>}>
@@ -289,6 +300,9 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
         ]}/>
       </Panel></Rise></StickySectionAside>
     </div>
+    </section>
+    <section id="analytics-usage" className="analytics-section" aria-labelledby="analytics-usage-heading">
+      <h2 id="analytics-usage-heading" tabIndex={-1}>Usage and resources</h2>
     <Rise><Panel title="Codex token accounting"><TokenAccounting accounting={data.tokenAccounting} receipts={data.attemptReceiptAccounting} ready={ready} headers={headers}/>
       {data.appServerProfiles.length>0&&<details><summary>App Server turn profiles</summary><div className="analytics-table">
         <table><caption>Reconciled response inputs and tool observations. See Task Workspace for the revision and receipt.</caption>
@@ -313,5 +327,6 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
         :<p className="low">Session linkage is unavailable in this feed.</p>}
     </Panel></Rise>
     <Rise><Panel title="Provider and resource observations" right={<Cpu size={18} className="muted-icon"/>}><Usage usage={data.usage}/></Panel></Rise>
+    </section>
   </>;
 }

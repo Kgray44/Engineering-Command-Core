@@ -977,3 +977,49 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 .form-options-body { display: grid; gap: .85rem; padding: .3rem .8rem .85rem; min-width: 0; }
 .form-options :is(input,textarea,select) { min-width: 0; }
 .project-definition-form > label > textarea { min-block-size: 5.5rem; }
+
+
+/* Section navigation stays available while reading long engineering records. */
+.workspace-section-nav {
+  position: sticky;
+  z-index: 5;
+  inset-block-start: .55rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: .4rem;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+  box-shadow: 0 .3rem 1rem rgb(0 0 0 / 18%);
+}
+.workspace-section-nav .quiet-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-block-size: 2.25rem;
+}
+.workspace-section-nav .quiet-button[aria-current="location"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.workspace-section-nav .quiet-button:focus-visible { outline-offset: 1px; }
+.panel:is([id^="task-"],[id^="project-"]),
+.task-attempt-card, .analytics-section {
+  scroll-margin-block-start: 5.2rem;
+}
+.analytics-section > h2 {
+  font-size: 1.25rem;
+  margin: 1.2rem 0 .7rem;
+}
+.analytics-section > h2:focus-visible, .merge-source-detail > h3:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.merge-results-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .35rem .75rem;
+}
+.merge-source-detail > h3 { scroll-margin-block-start: 1.25rem; }
