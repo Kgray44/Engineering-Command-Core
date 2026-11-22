@@ -8,6 +8,7 @@ import { ProjectTaskControls } from './project-task-controls.jsx';
 import { motion } from 'motion/react';
 import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useCardMotion } from './card-motion.jsx';
+import { parseActivityHref, taskActivityHref } from './github-activity.mjs';
 import { StickySectionAside } from './sticky-section-aside.jsx';
 import { sortTasks, taskEvidenceHref, taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
@@ -316,7 +317,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, workerAccess, workerDispatch, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, repository, repositoryMain, workerAccess, workerDispatch, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort, view: preferences.project_view }));
@@ -395,6 +396,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
   const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], milestone_dependents = [], artifact_sources = [], github = [], progress, active_workers, integrations = [], linkable_tasks = [] } = data ?? {};
+  const mainRevision = repository && /^[a-f0-9]{40}$/i.test(repositoryMain?.revision ?? '') &&
+    ['available', 'stale'].includes(repositoryMain.status) ? repositoryMain.revision : null;
   const selectedUnassignedTask = linkable_tasks.find(task => task.id === unassignedTaskId);
   const effectiveTaskSort = taskSort ?? preferences.task_sort;
   const query = taskQuery.trim().toLowerCase();
@@ -597,16 +600,26 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </details>}
       </Panel>
       <Panel id="project-verification" title="GitHub and verification">
+        <DetailLine name={repositoryMain?.status === 'stale' ? 'Last observed main revision' : 'Repository main revision'}
+          value={mainRevision ? <a href={'https://github.com/' + repository + '/commit/' + mainRevision}
+            aria-label="Inspect main commit" target="_blank" rel="noreferrer"><code>{mainRevision.slice(0, 12)}</code></a> : 'Unavailable'}/>
+        {mainRevision && repositoryMain.observed_at && <p>Observed <time dateTime={repositoryMain.observed_at}>
+          {new Date(repositoryMain.observed_at).toLocaleString()}</time></p>}
         <p>{progress.integrations.merged} of {progress.integrations.tracked} tracked integrations merged · {progress.integrations.deployed} deployed</p>
         <ul className="project-list">{integrations.map(item => <li key={item.id}>
           {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <small>{item.head_sha.slice(0, 12)}</small>}
           <Status value={item.state}/>
           {item.pr_number && <a className="text-button" href={'#merge?pr=' + item.pr_number + '&run=' + item.id}>Inspect integration</a>}
         </li>)}</ul>
-        <ul className="project-list">{github.map((item, index) => <li key={item.task_id + item.uri + index}>
-          <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>
-          <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>
-        </li>)}</ul>
+        <ul className="project-list">{github.map((item, index) => {
+          const source = repository ? parseActivityHref(taskActivityHref(item.uri, repository)) : null;
+          return <li key={item.task_id + item.uri + index}>
+            <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>
+            {source?.kind === 'pulls' && <a className="text-button" href={'#merge?pr=' + source.id}>
+              Inspect PR #{source.id} in Merge Control Center</a>}
+            <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>
+          </li>;
+        })}</ul>
         {!github.length && <p>No linked repository evidence.</p>}
       </Panel>
       <Panel id="project-evidence" title="Artifacts and reports">

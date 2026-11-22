@@ -347,6 +347,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await artifacts.getByRole('link', { name: 'Open evidence ledger for Release review' }).click();
   await page.waitForFunction(() => document.activeElement === document.querySelector('#task-evidence h2'));
   await page.goto(stage.origin + '/#projects/' + projectId);
+  const verification = page.locator('#project-verification');
+  const currentMain = verification.getByRole('link', { name: 'Inspect main commit' });
+  assert.equal(await currentMain.getAttribute('href'), 'https://github.com/' + repository + '/commit/' + 'd'.repeat(40));
+  await verification.getByRole('link', { name: 'Inspect PR #7 in Merge Control Center' }).click();
+  await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
+  await page.goto(stage.origin + '/#projects/' + projectId);
   await artifacts.getByRole('link', { name: 'Open Task report for Release review' }).click();
   const pdf = page.getByRole('button', { name: 'Download PDF', exact: true });
   const [download] = await Promise.all([page.waitForEvent('download'), pdf.click()]);

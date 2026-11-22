@@ -26,4 +26,6 @@ Open **Acceptance** to compare completed Task candidates, the Project's verifica
 
 **History** shows Project, milestone, association, and owner decision changes alongside the latest 120 eligible Task and integration changes. Choose **Show worker heartbeats** to include up to 40 recent pulses in the timeline. Pulses have a separate limit, so they cannot crowd changes out of the view. Receipt dates are kept from their source records. Moving a Task preserves earlier events in the previous Project and records later events under the new Project. The Task and integration links open their full source histories.
 
+**GitHub and verification** shows the observed repository main commit and its timestamp when available. Open a linked PR in Merge Control Center to inspect its source and checks. A tracked integration opens its saved run directly.
+
 **Artifacts and reports** collects tracked PRs, GitHub Actions runs, web artifacts, and verification references from linked Tasks. Each Task has a shortcut to its PDF export and a direct link to its Evidence ledger. Only ordinary HTTPS references become direct web links. A private reference stays in its owning Task, and reported or synthetic verification is labeled at the Project level.
