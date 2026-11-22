@@ -24,6 +24,7 @@ The editable defaults in the table are enum strings. The server validates the al
 | Default Task priority | Normal | Low, Normal, High, Urgent |
 | Default repair limit | 3 attempts | 1 to 5 attempts |
 | Default Activity view | All activity | All activity, Needs attention, Recent work |
+| Task status, failure, review, and integration alerts | Show in Needs attention | Show in Needs attention, Show only in All activity |
 
 Restore defaults previews the category and requires a confirmation. Task priority and repair limit prefill new forms and can be overridden for each new item. Task grouping applies inside each Task activity view. Pull request criteria apply to the Merge source list. Changes made in either workspace are temporary. Change Settings to update the saved defaults.
 
@@ -44,3 +45,5 @@ Under **Connections**, choose **Verify connections** to read the current service
 **Scheduling** shows the latest successful Task registry read, ready and scheduled admitted Tasks, blocked admitted Tasks, and the next start when available. The waiting and at-risk links open the Task Control Center.
 
 Under **Connections**, compare observed times, API request budget, worker heartbeats, backend and database readback, and GitHub status. A configured credential may remain unverified. Use the Action, Task, or Project link from **Activity** to inspect the source when a record needs attention.
+
+Under **Notifications**, choose which alerts appear in **Needs attention** for the current owner and application. Task status covers prerequisite waits and blocked Tasks. Failures include failed Tasks, failed attempts, and interrupted CI. Reviews include Project and Task acceptance and requested PR reviews. Integrations cover runs that are blocked, checking, repairing, or merge-ready. **All activity** keeps the complete feed, and connection warnings always appear in **Needs attention**. These settings control the in-app view.

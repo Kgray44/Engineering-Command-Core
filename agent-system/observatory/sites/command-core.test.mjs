@@ -489,14 +489,16 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal(initial.status, 200);
   assert.equal(initial.body.preferences.version, 0);
   assert.equal(initial.body.preferences.values.project_sort, 'manual');
+  assert.equal(initial.body.preferences.values.attention_reviews, 'show');
   assert.equal(initial.body.connections.github.credential_configured, true);
   assert.doesNotMatch(JSON.stringify(initial.body), /one-fixture|a{64}/);
   const change = { op: 'save', expected_version: 0, values: {
     project_sort: 'priority', density: 'compact', task_group: 'category', merge_sort: 'oldest', merge_readiness: 'blocked',
-    project_state: 'planned', project_group: 'state',
+    project_state: 'planned', project_group: 'state', attention_reviews: 'hide',
   } };
   assert.equal((await call(0, path, { ...change, values: { density: 'bad' } })).status, 400);
   assert.equal((await call(0, path, { ...change, values: { project_group: 'unknown' } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { attention_reviews: false } })).status, 400);
   assert.equal((await call(0, path, { ...change, values: { repository: 'peer/repo' } })).status, 400);
   assert.equal((await call(0, path, change, 'unassigned')).status, 403);
   assert.equal((await call(0, path, change, undefined, { origin: fixture[1].origin })).status, 403);
@@ -508,6 +510,7 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal(current.body.preferences.values.project_state, 'planned');
   assert.equal(current.body.preferences.values.project_group, 'state');
   assert.equal(current.body.audit[0].values.density, 'compact');
+  assert.equal(current.body.audit[0].values.attention_reviews, 'hide');
   assert.equal(current.body.preferences.values.task_group, 'category');
   assert.equal(current.body.preferences.values.merge_sort, 'oldest');
   assert.equal(current.body.preferences.values.merge_readiness, 'blocked');
@@ -518,11 +521,13 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal(peer.values.project_group, 'none');
   assert.equal(peer.values.merge_sort, 'updated');
   assert.equal(peer.values.merge_readiness, 'all');
+  assert.equal(peer.values.attention_reviews, 'show');
   assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.version, 0);
-  const reset = await call(0, path, { op: 'reset', expected_version: 1, keys: ['project_sort'] });
+  const reset = await call(0, path, { op: 'reset', expected_version: 1, keys: ['project_sort', 'attention_reviews'] });
   assert.equal(reset.status, 200);
   assert.equal(reset.body.preferences.values.project_sort, 'manual');
   assert.equal(reset.body.preferences.values.density, 'compact');
+  assert.equal(reset.body.preferences.values.attention_reviews, 'show');
   assert.equal((await call(0, path)).body.audit.length, 2);
 });
 

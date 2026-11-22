@@ -45,7 +45,9 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
   const reduced = useReducedMotion();
   const activity = useProjectActivity(headers, !demo && Boolean(settings?.application));
   const [localFilter, setFilter] = useState(null);
-  const filter = localFilter ?? settings?.preferences.values.attention_view ?? 'all';
+  const preferences = settings?.preferences.values;
+  const filter = localFilter ?? preferences?.attention_view ?? 'all';
+  const showsAlert = key => filter !== 'attention' || preferences?.[key] !== 'hide';
   if (demo) return <p className="notice">Open Live mode to view engineering activity.</p>;
 
   const taskIndex = new Map(tasks.map(task => [task.id, task]));
@@ -86,26 +88,31 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
     state: run.state, href: '#merge?run=' + run.id + (run.pr_number ? '&pr=' + run.pr_number : ''),
     at: run.updated_at, task: run.task?.id,
   });
+  const showBlocked = showsAlert('attention_task_status');
+  const showFailures = showsAlert('attention_failures');
+  const taskIssues = entries.filter(({ state }) => (showBlocked && state === 'blocked') || (showFailures && state === 'failed'))
+    .map(task => ({ ...task, detail: issue(task) }));
   const sections = [
-    ['attention', 'Owner review', entries.filter(task => task.state === 'verifying')],
+    ['attention', 'Owner review', entries.filter(task => task.state === 'verifying'), 'attention_reviews'],
     ['attention', 'Projects awaiting owner review', activity.pendingReviews.map(project => ({
       id: project.id, label: project.name, href: '#projects/' + project.id + '?section=acceptance',
-    }))],
+    })), 'attention_reviews'],
     ['attention', 'Waiting on prerequisites', entries.filter(task => !['archived', 'cancelled', 'completed'].includes(task.state) &&
       (task.blockers.length > 0 || (task.projectGate && ['admitted', 'blocked', 'queued', 'ready', 'scheduled'].includes(task.state)))).map(task => ({
       ...task, detail: issue(task),
-    }))],
-    ['attention', 'Blocked and failed Tasks', entries.filter(task => ['blocked', 'failed'].includes(task.state)).map(task => ({ ...task, detail: issue(task) }))],
+    })), 'attention_task_status'],
+    ...(showBlocked || showFailures ? [['attention',
+      showBlocked && showFailures ? 'Blocked and failed Tasks' : showBlocked ? 'Blocked Tasks' : 'Failed Tasks', taskIssues]] : []),
     ['attention', 'Failed attempts', recent(attempts.filter(attempt => attempt.state === 'failed' && taskIndex.has(attempt.task_id))
       .map(attempt => ({ id: attempt.id, label: taskIndex.get(attempt.task_id).title, href: taskAttemptHref(attempt.task_id, attempt.id), state: attempt.state,
-        detail: 'Attempt ' + attempt.attempt_number, at: attempt.finished_at ?? attempt.started_at })))],
+        detail: 'Attempt ' + attempt.attempt_number, at: attempt.finished_at ?? attempt.started_at }))), 'attention_failures'],
     ['attention', 'Pull requests awaiting review', recent(openPulls.filter(item => !item.draft && item.requested_review_count > 0)
-      .map(item => ({ ...pullRow(item), state: 'review requested' })))],
+      .map(item => ({ ...pullRow(item), state: 'review requested' }))), 'attention_reviews'],
     ['attention', 'Failed or interrupted CI', recent((github?.ci?.items ?? []).filter(item => dispositions.has(item.conclusion) && activityId('runs', item))
       .map(item => ({ id: activityId('runs', item), label: item.title ?? item.workflow, state: item.conclusion,
-        href: activityHref('runs', activityId('runs', item)), at: item.updated_at })))],
+        href: activityHref('runs', activityId('runs', item)), at: item.updated_at }))), 'attention_failures'],
     ['attention', 'Integration attention', recent(runs.filter(run => ['blocked', 'checking', 'repairing', 'merge_ready'].includes(run.state))
-      .map(run => ({ ...integrationRow(run), detail: run.state === 'blocked' ? run.evidence?.detail : null })))],
+      .map(run => ({ ...integrationRow(run), detail: run.state === 'blocked' ? run.evidence?.detail : null }))), 'attention_integrations'],
     ['recent', 'Recently landed integrations', recent(runs.filter(run => ['merged', 'deployed'].includes(run.state) &&
       /^[a-f0-9]{40}$/.test(run.evidence?.merged_sha ?? '')).map(run => ({
       ...integrationRow(run), detail: 'Landed commit ' + run.evidence.merged_sha.slice(0, 12),
@@ -126,8 +133,10 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
       {[[ 'all', 'All activity' ], [ 'attention', 'Needs attention' ], [ 'recent', 'Recent work' ]].map(([id, title]) =>
         <button key={id} type="button" className="quiet-button" aria-pressed={filter === id} onClick={() => setFilter(id)}>{title}</button>)}
       {settings?.application && <button type="button" className="text-button" onClick={activity.refresh}>Refresh Project activity</button>}
+      {settings?.application && filter === 'attention' && <a href="#settings/notifications" className="text-button">Edit attention preferences</a>}
     </div>
-    <div className="attention-grid">{sections.filter(([group]) => filter === 'all' || group === filter).map(([, title, items]) => <Panel title={title} key={title}>
+    <div className="attention-grid">{sections.filter(([group, , , key]) => (filter === 'all' || group === filter) && showsAlert(key))
+      .map(([, title, items]) => <Panel title={title} key={title}>
       {['Project changes', 'Projects awaiting owner review'].includes(title) && activity.stale &&
         <p role="status">Project activity could not refresh.{items.length ? ' Showing the last read.' : ''}</p>}
       {items.length ? <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>

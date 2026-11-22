@@ -844,6 +844,36 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await landed.getAttribute('href'), '#merge?run=' + mergedId + '&pr=8');
   await landed.click();
   await page.getByRole('heading', { name: 'Merged into main', exact: true }).waitFor();
+  await page.goto(stage.origin + '/#settings/notifications');
+  await page.getByLabel('Default Activity view').selectOption('attention');
+  for (const name of ['Task status alerts', 'Failure alerts', 'Review alerts', 'Integration alerts']) {
+    await page.getByRole('combobox', { name, exact: true }).selectOption('hide');
+  }
+  await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+  await page.getByText('Settings saved.', { exact: true }).waitFor();
+  await page.goto(stage.origin + '/#activity');
+  await page.reload();
+  await page.getByRole('button', { name: 'Needs attention', pressed: true }).waitFor();
+  await panel('Connections').waitFor();
+  for (const title of ['Waiting on prerequisites', 'Blocked and failed Tasks', 'Failed attempts',
+    'Failed or interrupted CI', 'Projects awaiting owner review', 'Integration attention']) {
+    assert.equal(await panel(title).count(), 0);
+  }
+  await page.getByRole('button', { name: 'All activity', exact: true }).click();
+  await reviewsPending.getByRole('link', { name: 'Release project', exact: true }).waitFor();
+  await attention.getByRole('link', { name: 'Pull request #7' }).waitFor();
+  await page.getByRole('button', { name: 'Needs attention', exact: true }).click();
+  await page.getByRole('link', { name: 'Edit attention preferences' }).click();
+  const reviewAlerts = page.getByRole('combobox', { name: 'Review alerts', exact: true });
+  await reviewAlerts.waitFor();
+  assert.equal(await reviewAlerts.inputValue(), 'hide');
+  await page.getByRole('button', { name: 'Restore defaults', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm restore', exact: true }).click();
+  await page.getByText('Category defaults restored.', { exact: true }).waitFor();
+  await page.goto(stage.origin + '/#activity');
+  await page.getByRole('button', { name: 'Needs attention', exact: true }).click();
+  await reviewsPending.getByRole('link', { name: 'Release project', exact: true }).waitFor();
+  await attention.getByRole('link', { name: 'Pull request #7' }).waitFor();
   await page.goto(stage.origin + '/#projects');
   const explorer = panel('Project explorer');
   await explorer.locator('select[name="state"]').selectOption('planned');

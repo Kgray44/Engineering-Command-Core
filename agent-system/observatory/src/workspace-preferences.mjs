@@ -1,3 +1,5 @@
+const attentionOptions = { show: 'Show in Needs attention', hide: 'Show only in All activity' };
+
 export const preferenceFields = {
   landing_page: { category: 'general', label: 'Landing page', initial: 'overview',
     choices: { overview: 'Overview', projects: 'Projects', tasks: 'Task Control Center', activity: 'Activity', merge: 'Merge Control Center' } },
@@ -31,6 +33,10 @@ export const preferenceFields = {
     choices: { '1': '1 attempt', '2': '2 attempts', '3': '3 attempts', '4': '4 attempts', '5': '5 attempts' } },
   attention_view: { category: 'notifications', label: 'Default Activity view', initial: 'all',
     choices: { all: 'All activity', attention: 'Needs attention', recent: 'Recent work' } },
+  attention_task_status: { category: 'notifications', label: 'Task status alerts', initial: 'show', choices: attentionOptions },
+  attention_failures: { category: 'notifications', label: 'Failure alerts', initial: 'show', choices: attentionOptions },
+  attention_reviews: { category: 'notifications', label: 'Review alerts', initial: 'show', choices: attentionOptions },
+  attention_integrations: { category: 'notifications', label: 'Integration alerts', initial: 'show', choices: attentionOptions },
   merge_state: { category: 'integration', label: 'Default pull request filter', initial: 'open',
     choices: { open: 'Open', merged: 'Merged', closed: 'Closed', all: 'All states' } },
   merge_readiness: { category: 'integration', label: 'Default integration evidence filter', initial: 'all',
