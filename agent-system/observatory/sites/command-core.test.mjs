@@ -420,8 +420,10 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.doesNotMatch(JSON.stringify(initial.body), /one-fixture|a{64}/);
   const change = { op: 'save', expected_version: 0, values: {
     project_sort: 'priority', density: 'compact', task_group: 'category', merge_sort: 'oldest', merge_readiness: 'blocked',
+    project_state: 'planned', project_group: 'state',
   } };
   assert.equal((await call(0, path, { ...change, values: { density: 'bad' } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { project_group: 'unknown' } })).status, 400);
   assert.equal((await call(0, path, { ...change, values: { repository: 'peer/repo' } })).status, 400);
   assert.equal((await call(0, path, change, 'unassigned')).status, 403);
   assert.equal((await call(0, path, change, undefined, { origin: fixture[1].origin })).status, 403);
@@ -430,6 +432,8 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal((await call(0, path, change)).status, 409);
   const current = await call(0, path);
   assert.equal(current.body.preferences.values.project_sort, 'priority');
+  assert.equal(current.body.preferences.values.project_state, 'planned');
+  assert.equal(current.body.preferences.values.project_group, 'state');
   assert.equal(current.body.audit[0].values.density, 'compact');
   assert.equal(current.body.preferences.values.task_group, 'category');
   assert.equal(current.body.preferences.values.merge_sort, 'oldest');
@@ -437,6 +441,8 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   const peer = (await call(1, path)).body.preferences;
   assert.equal(peer.version, 0);
   assert.equal(peer.values.task_group, 'none');
+  assert.equal(peer.values.project_state, '');
+  assert.equal(peer.values.project_group, 'none');
   assert.equal(peer.values.merge_sort, 'updated');
   assert.equal(peer.values.merge_readiness, 'all');
   assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.version, 0);

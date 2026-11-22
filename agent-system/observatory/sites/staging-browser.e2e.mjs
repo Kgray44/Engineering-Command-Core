@@ -749,6 +749,22 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await landed.getAttribute('href'), '#merge?run=' + mergedId + '&pr=8');
   await landed.click();
   await page.getByRole('heading', { name: 'Merged into main', exact: true }).waitFor();
+  await page.goto(stage.origin + '/#projects');
+  const explorer = panel('Project explorer');
+  await explorer.locator('select[name="state"]').selectOption('planned');
+  await explorer.locator('select[name="sort"]').selectOption('title');
+  await explorer.locator('select[name="group"]').selectOption('state');
+  await explorer.getByRole('searchbox', { name: 'Search projects' }).fill('Release');
+  await explorer.getByRole('button', { name: 'Save as default view', exact: true }).click({ timeout: 5_000 });
+  await explorer.getByText('Default Project view saved.', { exact: true }).waitFor();
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('.project-filters select[name="group"]')?.value === 'state');
+  assert.equal(await explorer.locator('select[name="state"]').inputValue(), 'planned');
+  assert.equal(await explorer.locator('select[name="sort"]').inputValue(), 'title');
+  assert.equal(await explorer.getByRole('searchbox', { name: 'Search projects' }).inputValue(), '');
+  await explorer.locator('select[name="group"]').selectOption('none');
+  await explorer.getByRole('button', { name: 'Reset filters', exact: true }).click();
+  assert.equal(await explorer.locator('select[name="group"]').inputValue(), 'state');
 });
 
 test('the Project Library layout stays stable while a slow portfolio request completes', { timeout: 45_000 }, async t => {

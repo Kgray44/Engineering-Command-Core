@@ -12,6 +12,7 @@ import { activityId, activityState, parseActivityHref, taskActivityHref } from '
 import { StickySectionAside } from './sticky-section-aside.jsx';
 import { sortTasks, taskAttemptHref, taskEvidenceHref, taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
+import { settingsRequest } from './engineering-settings.jsx';
 
 const stages = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
@@ -258,7 +259,10 @@ function ProjectArtifacts({ tasks, artifacts }) {
   </li>)}</ul>;
 }
 
-const defaultFilters = { view: 'all', query: '', state: '', sort: 'manual', group: 'none' };
+const libraryDefaults = preferences => ({
+  view: preferences.project_view, query: '', state: preferences.project_state,
+  sort: preferences.project_sort, group: preferences.project_group,
+});
 const projectViews = [
   ['all', 'Current Projects', project => project.status !== 'archived'],
   ['active', 'Active', project => project.status === 'active'],
@@ -273,7 +277,7 @@ const historyLabel = item => item.name ?? (item.source === 'integration' && item
   ? 'Integration started' : item.kind.replaceAll('_', ' '));
 const workerHeartbeat = item => item.source === 'task' && item.kind === 'heartbeat';
 
-function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaultSort, defaultView, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
+function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaults, onSaveDefault, savingDefault, defaultMessage, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
   const interaction = useCardMotion(true);
   const views = projectViews.map(([id, label, matches]) => [id, label, projects.filter(matches)]);
   const viewItems = views.find(([id]) => id === filters.view)[2];
@@ -302,6 +306,8 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   const groups = filters.group === 'none' ? [['Projects', ordered]]
     : stages.map(stage => [stage, ordered.filter(item => item.status === stage)]).filter(([, rows]) => rows.length);
   const field = ({ currentTarget: { name, value } }) => setFilters(previous => ({ ...previous, [name]: value }));
+  const canReset = Object.keys(defaults).some(key => defaults[key] !== filters[key]);
+  const canSave = ['view', 'state', 'sort', 'group'].some(key => defaults[key] !== filters[key]);
 
   return <>
     <div className="metrics project-portfolio" aria-label={application.name + ' portfolio'}>
@@ -335,7 +341,11 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
       </div>
       <div className="task-result-bar">
         <span role="status"><Filter size={14} aria-hidden="true"/> {items.length} of {projects.length} Projects</span>
-        {filters !== defaultFilters && <button type="button" className="text-button" onClick={() => setFilters({ ...defaultFilters, sort: defaultSort, view: defaultView })}>Reset filters</button>}
+        {canReset && <button type="button" className="text-button" onClick={() => setFilters(defaults)}>Reset filters</button>}
+        {onSaveDefault && <button type="button" className="quiet-button" disabled={!canSave || savingDefault} onClick={() => onSaveDefault(filters)}>
+          {savingDefault ? 'Saving default view' : 'Save as default view'}
+        </button>}
+        {defaultMessage && <small role="status">{defaultMessage}</small>}
       </div>
       {!items.length && <p>{projects.length ? 'No Projects match these filters.' : 'No Projects in the current feed.'}</p>}
       {filters.sort === 'manual' && !manualView && <small>To reorder cards, open Current Projects and clear search, state, and grouping.</small>}
@@ -347,10 +357,13 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, settings, onSettings, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort, view: preferences.project_view }));
+  const defaults = libraryDefaults(preferences);
+  const [filters, setFilters] = useState(defaults);
+  const [savingDefault, setSavingDefault] = useState(false);
+  const [defaultMessage, setDefaultMessage] = useState('');
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [addingMilestone, setAddingMilestone] = useState(null);
@@ -424,6 +437,30 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       setBusy(false);
     }
   };
+  async function saveDefaultView({ view, state, sort, group }) {
+    setSavingDefault(true);
+    setDefaultMessage('');
+    try {
+      const { preferences: saved } = await settingsRequest(headers, {
+        op: 'save', expected_version: settings.preferences.version,
+        values: { project_view: view, project_state: state, project_sort: sort, project_group: group },
+      });
+      onSettings(previous => ({ ...previous, preferences: saved, audit: [saved, ...previous.audit].slice(0, 15) }));
+      setDefaultMessage('Default Project view saved.');
+    } catch (error) {
+      setDefaultMessage(error.message);
+      if (error.status === 409) {
+        try {
+          onSettings(await settingsRequest(headers));
+          setDefaultMessage('Settings changed in another session. Review the current filters and save again.');
+        } catch {
+          setDefaultMessage('Settings changed in another session. Reload to read the latest defaults.');
+        }
+      }
+    } finally {
+      setSavingDefault(false);
+    }
+  }
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
   const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], milestone_dependents = [], artifact_sources = [], github = [], progress, active_workers, integrations = [], linkable_tasks = [] } = data ?? {};
   const mainRevision = repository && /^[a-f0-9]{40}$/i.test(repositoryMain?.revision ?? '') &&
@@ -447,7 +484,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     {error && <p className="notice error" role="alert">{error}</p>}
     {!data && !error && <p role="status">Loading Projects…</p>}
     {application && !projectId && <ProjectExplorer application={application} projects={projects} unassigned={data.unassigned_tasks}
-      filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaultSort={preferences.project_sort} defaultView={preferences.project_view} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
+      filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaults={defaults}
+      onSaveDefault={settings ? saveDefaultView : undefined} savingDefault={savingDefault} defaultMessage={defaultMessage} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
       manualOrder={data.manual_order ?? { version: 0, project_ids: [] }} onReorder={submit} busy={busy}>
       {edit && <div className="project-create"><ProjectForm busy={busy} defaultPriority={preferences.project_priority} customTemplates={preferences.project_templates} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
         window.location.hash = projectHref(result.project.id);
