@@ -1,5 +1,6 @@
 import React, {useRef,useState} from 'react';
 import {Download,FileDown} from 'lucide-react';
+import {downloadFile} from './download-file.mjs';
 
 function createPdf(snapshot) {
   return new Promise((resolve,reject)=>{
@@ -14,17 +15,6 @@ function createPdf(snapshot) {
     try { worker.postMessage(snapshot); }
     catch(error) { finish(reject,error); }
   });
-}
-
-function download(blob,filename) {
-  const url=URL.createObjectURL(blob);
-  const link=document.createElement('a');
-  link.href=url;
-  link.download=filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),30_000);
 }
 
 export function TaskReportExport({snapshot, disabled}) {
@@ -59,7 +49,7 @@ export function TaskReportExport({snapshot, disabled}) {
         try { await stream.write(pdf); await stream.close(); }
         catch(error) { await stream.abort().catch(()=>{}); throw error; }
       } else {
-        download(pdf,filename);
+        downloadFile(pdf,filename);
       }
       setStatus(handle?'Task report saved.':'Task report download started.');
     } catch(error) {

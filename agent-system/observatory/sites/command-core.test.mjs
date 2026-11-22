@@ -761,6 +761,10 @@ test('Settings data checks validate the active scoped Project history', async t 
   assert.equal(first.body.integrity.preferences_without_receipts, 0);
   assert.equal(first.body.integrity.integrations_without_receipts, 0);
   assert.equal(first.body.backup.status, 'unverified');
+  assert.equal(first.body.hosted_export.status, 'unverified');
+  assert.deepEqual(first.body.scope, { application_id: 'aetherwake', namespace: 'live', source_revision: 'd'.repeat(40) });
+  assert.deepEqual(first.body.retention, { controls: 'deployment_managed', github_detail_cache_entries: 128,
+    worker_liveness_max_age_ms: 86_400_000 });
   assert.ok(Date.parse(first.body.checked_at) > 0);
   assert.doesNotMatch(JSON.stringify(first.body), /one-fixture|a{64}|synthetic-owner/);
   one.sqlite.prepare('DELETE FROM project_events WHERE project_id = ?').run(id);
@@ -781,7 +785,11 @@ test('Settings data checks validate the active scoped Project history', async t 
   assert.equal(affected.body.integrity.preferences_without_receipts, 1);
   assert.equal(affected.body.integrity.integrations_without_receipts, 1);
   assert.equal((await call(1, path)).body.integrity.status, 'passed');
-  assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.integrity.status, 'passed');
+  const verification = crypto.randomUUID();
+  const isolated = await call(0, path, undefined, undefined, { 'x-observatory-verification': verification });
+  assert.equal(isolated.body.integrity.status, 'passed');
+  assert.equal(isolated.body.scope.namespace, 'verification');
+  assert.ok(!JSON.stringify(isolated.body).includes(verification));
   assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
   assert.equal((await call(0, path, {})).status, 405);
 });

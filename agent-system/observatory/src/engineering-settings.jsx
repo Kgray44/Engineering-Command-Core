@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { customTemplateLimits, validCustomProjectTemplates } from './project-templates.mjs';
 import { taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
+import { downloadFile } from './download-file.mjs';
 
 const categories = [
   ['general', 'General', 'Landing page and display preferences', Settings],
@@ -174,6 +175,8 @@ function DataChecks({ headers, revision }) {
     {result && <div role="status">
       <Facts rows={[
         ['Checked', date(result.checked_at)],
+        ['Checked application', result.scope?.application_id],
+        ['Checked namespace', result.scope?.namespace],
         ['Schema objects', result.schema.status === 'current' ? result.schema.checked_objects + ' expected objects found' :
           'Missing ' + result.schema.missing.join(', ')],
         ['Observed schema migration marker', result.schema.observed_migration_marker],
@@ -188,8 +191,17 @@ function DataChecks({ headers, revision }) {
         ['Preferences missing current receipts', result.integrity.preferences_without_receipts],
         ['Integrations missing current receipts', result.integrity.integrations_without_receipts],
         ['Import checkpoint', result.import.status === 'no_checkpoint_in_served_partition' ? 'No checkpoint in the active partition' : 'Unverified'],
+        ['Hosted data export', result.hosted_export?.status === 'unverified' ? 'No verified provider export' : 'Unavailable'],
         ['Backup and restore', result.backup.status === 'unverified' ? 'Unverified by this Site' : 'Unavailable'],
+        ['Retention controls', result.retention?.controls === 'deployment_managed' ? 'Managed outside this Site' : 'Unavailable'],
+        ['GitHub detail cache', result.retention && 'Latest ' + result.retention.github_detail_cache_entries + ' entries'],
+        ['Worker heartbeat cleanup', result.retention &&
+          'Pulses older than ' + result.retention.worker_liveness_max_age_ms / 3_600_000 + ' hours are removed on the next pulse in this scope'],
       ]}/>
+      {result.scope && <button type="button" className="quiet-button" disabled={Boolean(request)} onClick={() => downloadFile(
+        new Blob([JSON.stringify({ format: 'ecc-data-check/1', ...result }, null, 2) + '\n'], { type: 'application/json' }),
+        result.scope.application_id + '-data-check.json',
+      )}>Download data check receipt</button>}
     </div>}
     {revision && <a href={'https://github.com/Kgray44/Engineering-Command-Core/blob/' + revision + '/docs/operations.md#troubleshooting-and-recovery'}>Backup and recovery runbook</a>}
   </section>;

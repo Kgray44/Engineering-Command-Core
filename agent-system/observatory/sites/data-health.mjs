@@ -1,3 +1,6 @@
+import { githubDetailCacheEntries } from './github-cache.mjs';
+import { workerLivenessMaxAgeMs } from './task-engine.mjs';
+
 const inspectedObjects = new Map([
   ['application_partition', 'table'],
   ['migration_receipt', 'table'],
@@ -21,7 +24,7 @@ const inspectedObjects = new Map([
   ['project_milestone_gate_removed', 'trigger'],
 ]);
 
-export async function readDataHealth(db, owner, namespace) {
+export async function readDataHealth(db, { owner, namespace, applicationId, revision }) {
   const names = [...inspectedObjects.keys()];
   const { results } = await db.prepare(
     'SELECT name, type FROM sqlite_schema WHERE name IN (' + names.map(() => '?').join(', ') + ')',
@@ -32,7 +35,13 @@ export async function readDataHealth(db, owner, namespace) {
     observed.get('project_task_moved_out') === 'trigger' ? '0019_project_task_move_history' : null;
   const schema = { status: missing.length ? 'incomplete' : 'current', checked_objects: names.length, missing,
     ...(marker ? { observed_migration_marker: marker } : {}) };
-  const base = { schema, backup: { status: 'unverified' }, import: { status: 'no_checkpoint_in_served_partition' } };
+  const base = {
+    scope: { application_id: applicationId, namespace: namespace === 'live' ? 'live' : 'verification', source_revision: revision ?? null },
+    schema, backup: { status: 'unverified' }, import: { status: 'no_checkpoint_in_served_partition' },
+    hosted_export: { status: 'unverified' },
+    retention: { controls: 'deployment_managed', github_detail_cache_entries: githubDetailCacheEntries,
+      worker_liveness_max_age_ms: workerLivenessMaxAgeMs },
+  };
   if (missing.length) return { ...base, checked_at: new Date().toISOString(), integrity: { status: 'unverified' } };
 
   const counts = await db.prepare(`

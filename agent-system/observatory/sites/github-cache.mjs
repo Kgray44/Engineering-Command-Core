@@ -9,6 +9,7 @@ const PENDING_CONFLICT_RETRY_MS = 10 * 1000;
 const LEASE_MS = 30 * 1000;
 const MISSING = 'GitHub read credential unavailable';
 const UNCERTAIN = 'GitHub read credential awaiting verification';
+export const githubDetailCacheEntries = 128;
 
 const apiStatus = authentication => ({ authentication, remaining: null, limit: null, reset_at: null, observed_at: null });
 const unavailable = reason => ({ status: 'unavailable', reason, items: [] });
@@ -227,8 +228,8 @@ export async function cachedGitHubDetail(db, fetcher, token, kind, id, now = Dat
   ).bind(cacheKey, key, retryAt || at + delay, at, JSON.stringify(payload),
     JSON.stringify(result.detail ? validators : sameCredential ? JSON.parse(row.validators) : {}), lease).run();
   await db.prepare(
-    'DELETE FROM github_details WHERE cache_key IN (SELECT cache_key FROM github_details ORDER BY stored_at DESC, cache_key LIMIT -1 OFFSET 128)'
-  ).bind().run();
+    'DELETE FROM github_details WHERE cache_key IN (SELECT cache_key FROM github_details ORDER BY stored_at DESC, cache_key LIMIT -1 OFFSET ?)'
+  ).bind(githubDetailCacheEntries).run();
   await db.prepare(
     'UPDATE github_snapshot SET lease_until = 0, rate_until = ?, rate_failures = ?,' +
     ' read_reject_key = CASE WHEN ? IS NULL THEN read_reject_key ELSE ? END,' +

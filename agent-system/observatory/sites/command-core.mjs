@@ -264,7 +264,9 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           const verification = request.headers.get('x-observatory-verification');
           if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
           const namespace = verification ? 'verification:' + verification : 'live';
-          return response(await readDataHealth(scoped.DB, owner, namespace));
+          return response(await readDataHealth(scoped.DB, {
+            owner, namespace, applicationId: originRuntime.application.id, revision: workerOptions.sourceRevision,
+          }));
         }
         if (url.pathname === '/api/settings/discovery') {
           if (request.method !== 'GET') return error('Method not allowed', 405);

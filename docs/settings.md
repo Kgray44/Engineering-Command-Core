@@ -38,7 +38,9 @@ Project card order persists independently from these preferences. **Projects** a
 | Protected integration authorization and repair grants | Deployment bindings and exact-candidate integration records |
 | Backup, import, and production custody | Deployment and operational runbooks |
 
-Under **Data & Backup**, run the scoped data checks to inspect expected schema objects, current Project, Task Engine, milestone, preference, and integration receipts. It also checks Project order references, Task links, and milestone gates. The check reports counts for the current owner and namespace. A served partition has passed the import-checkpoint fence. Backup and restore evidence comes from the deployment-side recovery runbook.
+Under **Data & Backup**, run the scoped data checks to inspect expected schema objects, current Project, Task Engine, milestone, preference, and integration receipts. It also checks Project order references, Task links, and milestone gates. **Download data check receipt** saves a JSON diagnostic with the observations, application, namespace type, runtime revision, and check time. It contains no database rows, owner IDs, verification IDs, or credential values. A served partition has passed the import-checkpoint fence. Hosted data export and recovery require separate evidence from the deployment-side runbook.
+
+The panel shows the GitHub detail cache limit and worker heartbeat cleanup enforced by the runtime. Record-retention controls are deployment-managed. The download leaves hosted export and recovery status as observed.
 
 Under **Connections**, choose **Verify connections** to read the current service revision and confirm the database partition responds for the signed-in application. On the canonical connector Site, the authenticated Settings route checks the server's MCP tool registry. The other Site links to the canonical check. The panel shows the latest success and failure in the current session. Use the connected ChatGPT plugin to verify its external transport and authorization separately. GitHub, worker, and telemetry rows retain the scope of the available source observations.
 

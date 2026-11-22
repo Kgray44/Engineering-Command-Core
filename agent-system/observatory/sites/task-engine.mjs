@@ -635,6 +635,7 @@ const workerOperations = new Set(['claim', 'report', 'worker_pulse', 'recover_wo
 const workerStates = new Set(['available', 'busy', 'claim_rejected', 'task_connection_unavailable',
   'storage_guard_timeout', 'storage_reserve_denied', 'storage_guard_unavailable']);
 const workerFreshnessMs = 60_000;
+export const workerLivenessMaxAgeMs = 86_400_000;
 
 export async function taskOperation({ db, owner, namespace, body, access, validate, revision, repository, projectId, projectAware = false, now = Date.now() }) {
   if (!body || !['list', 'get', 'register', 'command', ...workerOperations].includes(body.op)) return failure(400, 'Invalid Task operation');
@@ -654,7 +655,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
       return failure(400, 'Invalid worker observation');
     }
     await query('DELETE FROM task_worker_liveness WHERE owner_id = ? AND namespace = ? AND seen_at < ?',
-      owner, namespace, now - 86_400_000).run();
+      owner, namespace, now - workerLivenessMaxAgeMs).run();
     await query(`
       INSERT INTO task_worker_liveness (owner_id, namespace, worker_id, seen_at, state, task_scope, conversation_continuation,
         last_error, last_error_at)

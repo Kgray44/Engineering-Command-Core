@@ -666,6 +666,19 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   }
   await dataChecks.getByText('Unverified by this Site').waitFor();
   await dataChecks.getByText('Restores code only', { exact: true }).waitFor();
+  await dataChecks.getByText('No verified provider export', { exact: true }).waitFor();
+  await dataChecks.getByText('Managed outside this Site', { exact: true }).waitFor();
+  const [dataReceipt] = await Promise.all([
+    page.waitForEvent('download'), dataChecks.getByRole('button', { name: 'Download data check receipt' }).click(),
+  ]);
+  assert.equal(dataReceipt.suggestedFilename(), 'voyagewright-data-check.json');
+  const diagnostic = JSON.parse(await readFile(await dataReceipt.path(), 'utf8'));
+  assert.equal(diagnostic.format, 'ecc-data-check/1');
+  assert.equal(diagnostic.scope.application_id, 'voyagewright');
+  assert.equal(diagnostic.scope.namespace, 'live');
+  assert.equal(diagnostic.integrity.status, 'passed');
+  assert.equal(diagnostic.backup.status, 'unverified');
+  assert.doesNotMatch(JSON.stringify(diagnostic), /synthetic-staging-owner|synthetic-read-token|Release project/);
   await page.goto(stage.origin + '/#activity');
   await page.getByRole('heading', { name: 'Activity and attention' }).waitFor();
   const panel = name => page.locator('section.panel').filter({ has: page.getByRole('heading', { name, exact: true }) });
