@@ -20,11 +20,18 @@ test('Projects workspace performs live project and Task mutations through the sh
   t.after(() => stage.close());
   const browser = await chromium.launch({ headless: true, executablePath: process.env.OBSERVATORY_BROWSER_EXECUTABLE });
   t.after(() => browser.close());
-  const page = await browser.newPage({ reducedMotion: 'reduce', viewport: { width: 1080, height: 780 },
+  const page = await browser.newPage({ reducedMotion: 'no-preference', viewport: { width: 1080, height: 780 },
     extraHTTPHeaders: { authorization: 'Bearer ' + stage.proof } });
   page.setDefaultTimeout(7000);
   await page.goto(stage.origin);
+  const enteredWithBlur = page.waitForFunction(() => {
+    const card = document.querySelector('.project-portfolio .metric');
+    return card && getComputedStyle(card).filter.startsWith('blur(');
+  });
   await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  await enteredWithBlur;
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.project-portfolio .metric')).filter === 'none');
+  assert.equal(await page.locator('.sidebar').evaluate(node => getComputedStyle(node).backdropFilter), 'blur(22px)');
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
   await page.getByLabel('Objective', { exact: true }).fill('Prove a Project owns its newly registered Tasks');
