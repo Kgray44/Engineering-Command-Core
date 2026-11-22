@@ -31,6 +31,18 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('button', { name: 'Create project', exact: true }).click();
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   const projectHash = new URL(page.url()).hash;
+  const sectionNav = page.getByRole('navigation', { name: 'Jump to Project section' });
+  const historyHeading = page.locator('#project-history h2');
+  assert.equal(await historyHeading.count(), 1, 'Below-fold content mounts before scrolling');
+  const projectRequests = [];
+  const collectRequests = request => {
+    if (new URL(request.url()).pathname.startsWith('/api/projects')) projectRequests.push(request.url());
+  };
+  page.on('request', collectRequests);
+  await sectionNav.getByRole('button', { name: 'History' }).click();
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#project-history h2') && window.scrollY > 0);
+  page.off('request', collectRequests);
+  assert.equal(projectRequests.length, 0, 'Scrolling does not fetch additional Project data');
   const result = page.waitForResponse(response => response.url().endsWith('/api/projects') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Activate', exact: true }).click();
   assert.equal((await result).status(), 200);
@@ -53,5 +65,18 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByText('0 of 1 Tasks complete · 0 running · 0 blocked · 0 verifying', { exact: true }).waitFor();
   await page.getByRole('link', { name: 'All projects' }).click();
   await page.getByText('0/1 Tasks complete · 0 running · 0 blocked · 0/1 milestones accepted', { exact: true }).waitFor();
+  const explorer = page.getByRole('navigation', { name: 'Project activity views' });
+  const search = page.getByRole('searchbox', { name: 'Search projects' });
+  await explorer.getByRole('button', { name: /Archived/ }).click();
+  await page.getByText('No Projects match these filters.', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Reset filters' }).click();
+  await search.fill('wrong name');
+  await page.getByText('No Projects match these filters.', { exact: true }).waitFor();
+  await search.fill('synthetic');
+  await page.locator('.task-row').filter({ hasText: 'Synthetic browser project' }).waitFor();
+  const refresh = page.waitForResponse(response => response.url().endsWith('/api/projects') && response.request().method() === 'GET');
+  await page.getByRole('button', { name: 'Refresh records' }).click();
+  assert.equal((await refresh).status(), 200);
+  assert.equal(await search.inputValue(), 'synthetic');
   assert.equal(part.sqlite.prepare("SELECT count(*) AS count FROM proposals WHERE project_id IS NOT NULL").get().count, 1);
 });
