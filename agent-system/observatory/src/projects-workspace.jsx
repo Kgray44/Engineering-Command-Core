@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { ProjectAppearance, ProjectCardGrid, ProjectIcon } from './project-cards.jsx';
-import { orderProjects } from './project-presentation.mjs';
+import { orderBySavedIds } from './project-presentation.mjs';
 import { projectTemplates, templateMilestones } from './project-templates.mjs';
+import { ProjectDependencies } from './project-dependencies.jsx';
+import { ProjectTaskControls } from './project-task-controls.jsx';
 import { motion } from 'motion/react';
 import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useCardMotion } from './card-motion.jsx';
@@ -106,13 +108,13 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
     priority: (left, right) => priorities.indexOf(right.priority) - priorities.indexOf(left.priority),
     title: (left, right) => left.name.localeCompare(right.name),
   };
-  const ordered = filters.sort === 'manual' ? orderProjects(items, manualOrder.project_ids) : items.sort(sorters[filters.sort]);
+  const ordered = filters.sort === 'manual' ? orderBySavedIds(items, manualOrder.project_ids) : items.sort(sorters[filters.sort]);
   const manualView = filters.sort === 'manual' && filters.view === 'all' && filters.group === 'none' && !query && !filters.state;
   const reorder = (visibleIds, from, to) => {
     const moved = arrayMove(visibleIds, visibleIds.indexOf(from), visibleIds.indexOf(to));
     const visible = new Set(visibleIds);
     let index = 0;
-    const project_ids = orderProjects(projects, manualOrder.project_ids).map(({ id }) => visible.has(id) ? moved[index++] : id);
+    const project_ids = orderBySavedIds(projects, manualOrder.project_ids).map(({ id }) => visible.has(id) ? moved[index++] : id);
     onReorder({ op: 'reorder', project_ids, expected_version: manualOrder.version });
   };
   const groups = filters.group === 'none' ? [['Projects', ordered]]
@@ -164,7 +166,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, preferences, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, preferences, preferencesReady, workerAccess, workerDispatch, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort }));
@@ -173,12 +175,20 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
   const [addingMilestone, setAddingMilestone] = useState(null);
   const [taskQuery, setTaskQuery] = useState('');
   const [taskState, setTaskState] = useState('');
+  const [moveTaskId, setMoveTaskId] = useState('');
+  const [controlTaskId, setControlTaskId] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
   const [other, setOther] = useState(null);
   const [taskList, setTaskList] = useState([]);
   const createId = useRef(crypto.randomUUID());
   const pending = useRef(false);
   const readVersion = useRef(0);
+  const initialProjectSection = useRef(null);
+  useEffect(() => {
+    if (!preferencesReady || !projectId || data?.project?.id !== projectId || initialProjectSection.current === projectId) return;
+    initialProjectSection.current = projectId;
+    if (preferences.project_section !== 'overview') onJump('project-' + preferences.project_section);
+  }, [data?.project?.id, onJump, preferences.project_section, preferencesReady, projectId]);
   const load = async signal => {
     const version = ++readVersion.current;
     const next = await projectRequest(null, headers, { id: projectId, signal });
@@ -227,7 +237,12 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     }
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
-  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_milestones = [], artifacts = [], github = [], progress, integrations = [] } = data ?? {};
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifacts = [], github = [], progress, integrations = [] } = data ?? {};
+  const moveTask = tasks.find(item => item.id === moveTaskId);
+  const controlTask = tasks.find(item => item.id === controlTaskId);
+  const targetProjects = (taskList.projects ?? []).filter(item => item.id !== projectId && item.status !== 'archived');
+  const moveMilestone = (index, offset) => submit({ op: 'reorder_milestones', expected_version: project.version,
+    milestone_ids: arrayMove(milestones.map(item => item.id), index, index + offset) });
   return <div className="projects-workspace">
     {error && <p className="notice error" role="alert">{error}</p>}
     {!data && !error && <p role="status">Loading Projects…</p>}
@@ -300,6 +315,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         <ul className="project-list">{tasks.filter(task => (!taskState || task.state === taskState) &&
           task.title.toLowerCase().includes(taskQuery.trim().toLowerCase())).map(task => <li key={task.id}>
           <a className="text-button" href={taskHref(task.id)}>{task.title}</a> <Status value={task.state}/>
+          <button type="button" className="quiet-button" aria-label={'Execution controls for ' + task.title}
+            aria-expanded={controlTaskId === task.id} onClick={() => setControlTaskId(task.id === controlTaskId ? '' : task.id)}>Execution controls</button>
           {task.branch && <small>{task.branch}</small>}
           {task.blockers.map(item => <small key={item.type + ':' + item.id}>
             {item.type === 'milestone' ? dependencies.find(gate => gate.milestone_id === item.id)?.name ?? item.id :
@@ -308,6 +325,29 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           {task_milestones.filter(link => link.task_id === task.id).map(link => <small key={link.milestone_id}>{milestones.find(item => item.id === link.milestone_id)?.name}</small>)}
         </li>)}</ul>
         {!tasks.length && <p>No linked tasks.</p>}
+        {controlTask && <ProjectTaskControls key={controlTask.id} task={controlTask} tasks={tasks} headers={headers} Status={Status}
+          workerAccess={workerAccess} workerDispatch={workerDispatch} onClose={() => setControlTaskId('')}
+          onRefresh={() => load().catch(cause => setError(cause.message))}/>}
+        {tasks.length > 0 && targetProjects.length > 0 && <details><summary>Move a Task to another Project</summary>
+          <form className="form" onSubmit={event => {
+            event.preventDefault();
+            if (!moveTask) return;
+            const { destination } = object(event.currentTarget);
+            submit({ op: 'move_task', id: destination, source_project_id: project.id, task_id: moveTask.id,
+              expected_version: moveTask.version }, () => setMoveTaskId(''));
+          }}>
+            <label>Task to move <select required value={moveTaskId} onChange={event => setMoveTaskId(event.target.value)}>
+              <option value="">Select a Task</option>
+              {tasks.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
+            </select></label>
+            <label>Destination Project <select name="destination" required defaultValue="">
+              <option value="">Select a Project</option>
+              {targetProjects.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select></label>
+            <p className="low">Unadmitted or finished Tasks can move when they have no milestone links.</p>
+            <button className="quiet-button" disabled={busy || !moveTask}>Move Task</button>
+          </form>
+        </details>}
         {project.status !== 'archived' && <details><summary>Associate an existing Task</summary>
           <form className="form" onSubmit={event => {
             event.preventDefault();
@@ -322,9 +362,15 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       </Panel>
       <Panel id="project-milestones" title="Milestones" right={project.status !== 'archived' && <button className="quiet-button" aria-expanded={addingMilestone !== null} onClick={() => setAddingMilestone(addingMilestone === null ? '' : null)}>
         {addingMilestone !== null ? 'Close form' : 'New milestone'}</button>}>
-        {milestones.map(milestone => <details key={milestone.id}>
+        {milestones.map((milestone, index) => <details key={milestone.id}>
           <summary>{milestone.name} <Status value={milestone.status}/></summary>
           <p>{milestone.acceptance}</p>
+          {project.status !== 'archived' && milestones.length > 1 && <div className="project-actions">
+            <button type="button" className="quiet-button" aria-label={'Move ' + milestone.name + ' earlier'}
+              disabled={busy || index === 0} onClick={() => moveMilestone(index, -1)}>Move earlier</button>
+            <button type="button" className="quiet-button" aria-label={'Move ' + milestone.name + ' later'}
+              disabled={busy || index === milestones.length - 1} onClick={() => moveMilestone(index, 1)}>Move later</button>
+          </div>}
           {project.status !== 'archived' && <MilestoneForm key={milestone.version} milestone={milestone} busy={busy} onSave={fields => submit({ op: 'milestone', ...fields })}/>}
         </details>)}
         {!milestones.length && <p>No milestones recorded.</p>}
@@ -337,11 +383,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           onSave={fields => submit({ op: 'milestone', ...fields }, () => setAddingMilestone(null))}/>}
       </Panel>
       <Panel id="project-dependencies" title="Dependencies">
-        <ul className="project-list">{dependencies.map(item => <li key={item.task_id + item.milestone_id}>
-          <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>
-          <a className="text-button" href={'#projects/' + item.project_id}>{item.name}</a> <Status value={item.status}/>
-        </li>)}</ul>
-        {!dependencies.length && <p>No milestone gates recorded.</p>}
+        <ProjectDependencies tasks={tasks} prerequisites={task_prerequisites} gates={dependencies} Status={Status}/>
+        {!tasks.length && <p>Project Tasks will appear here with their prerequisites.</p>}
         {project.status !== 'archived' && tasks.length > 0 && <details><summary>Link a milestone</summary>
           <form className="form" onSubmit={event => {
             event.preventDefault();

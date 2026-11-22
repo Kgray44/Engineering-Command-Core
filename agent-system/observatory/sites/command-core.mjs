@@ -22,12 +22,14 @@ const toolSchema = {
   type: 'object', additionalProperties: false, required: ['application_id', 'request'],
   properties: { application_id: { type: 'string', pattern: applicationId.source }, verification: { type: 'string' },
     request: { type: 'object', required: ['op'], properties: {
-      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate', 'reorder'] },
+      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate', 'reorder', 'reorder_milestones', 'move_task'] },
       id: { type: 'string', format: 'uuid', description: 'Project UUID' },
       expected_version: { type: 'integer', minimum: 0, description: 'Current row version for optimistic updates' },
       project_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, description: 'Full Project order for the application' },
       status: { enum: ['planned', 'active', 'paused', 'archived', 'verified', 'integrated', 'accepted'] },
       milestone_id: { type: 'string', format: 'uuid' },
+      milestone_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      source_project_id: { type: 'string', format: 'uuid' },
       task_id: { type: 'string', description: 'Canonical Task ID' },
       operation_id: { type: 'string', format: 'uuid', description: 'Stable request UUID for Task registration' },
       name: { type: 'string', description: 'Milestone title' },
@@ -64,7 +66,14 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
     bindings.add(binding);
     repositories.add(repository.toLowerCase());
     const application = Object.freeze({ id, name, repository, portfolio_id: portfolio.id });
-    const worker = createWorker({ ...workerOptions, assets: config.assets ?? workerOptions.assets, application });
+    const appAssets = { ...(config.assets ?? workerOptions.assets) };
+    for (const assetPath of ['/', '/index.html']) {
+      const asset = appAssets[assetPath];
+      if (typeof asset?.content === 'string') {
+        appAssets[assetPath] = { ...asset, content: asset.content.replace('<html', '<html data-engineering-application="' + id + '"') };
+      }
+    }
+    const worker = createWorker({ ...workerOptions, assets: appAssets, application });
     const runtime = { application, worker, binding };
     byId.set(id, runtime);
     byOrigin.set(origin, runtime);

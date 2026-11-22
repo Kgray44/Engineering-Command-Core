@@ -7,7 +7,7 @@ export const projectIconGroups = {
 
 export const projectAccents = ['default', 'blue', 'violet', 'green', 'amber', 'rose'];
 
-export function orderProjects(projects, savedIds) {
+export function orderBySavedIds(projects, savedIds) {
   const byId = new Map(projects.map(project => [project.id, project]));
   const ordered = [];
   for (const id of savedIds) {

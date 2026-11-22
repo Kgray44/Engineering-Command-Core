@@ -8,7 +8,9 @@ Open a card to inspect the Project. Jump links lead to task, milestone, dependen
 
 ## Work and acceptance
 
-Use **New project task** for Task intake with the Project association. Filter the Project Task list by name or state. Open an individual Task for scheduling, prerequisites, execution controls, logs, attempt history, and reports. Moving an existing Task through the supported Project link operation keeps its canonical Task and attempt IDs. Task Engine policy controls which transitions are available in the current state.
+Use **New project task** for Task intake with the Project association. Filter the Project Task list by name or state. Expand **Execution controls** for scheduling, pause, resume, retry, and other actions available in the current Task state. Open the full Task Workspace for its specification editor, logs, attempt history, and reports. **Move a Task to another Project** preserves canonical Task and attempt IDs for eligible unadmitted or finished Tasks without milestone links. Both Projects retain a relationship event.
+
+Use **Move earlier** or **Move later** to change milestone order. In **Dependencies**, choose a Task to inspect its recorded prerequisites, milestone gates, and dependent Tasks in this Project.
 
 A milestone is an explicit acceptance gate. Link Tasks to a milestone to show related work, or set another Project's milestone as a prerequisite where the scoped engine permits it. The engine checks dependency, milestone, and Project conditions before dispatch. The completion counts summarize work. Review and accept milestones separately after checking the stated evidence.
 

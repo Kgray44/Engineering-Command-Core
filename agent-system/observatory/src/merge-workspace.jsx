@@ -51,6 +51,39 @@ export function IntegrationTaskStatus({ runs, loading, error, attemptId, taskId 
   </div>;
 }
 
+const blockerActions = {
+  rate_limited: 'Wait for the GitHub request budget to reset, then refresh evidence.',
+  permission: 'Review the staging credential scopes in GitHub settings.',
+  repository_or_credential: 'Check the repository binding and read credential in Settings.',
+  transport: 'Refresh once the GitHub service is reachable.',
+  identity: 'Open the pull request and verify its repository and target branch.',
+  head_drift: 'Refresh pull request source and inspect the new head as a separate candidate.',
+  base_drift: 'Refresh GitHub evidence and review the newly observed base.',
+  pr_state: 'Open the pull request to confirm it is ready for review.',
+  merge_conflict: 'Resolve the conflict in the source branch, then inspect the resulting head.',
+  policy: 'Open the pull request to inspect its reviews and branch requirements.',
+  stale_checks: 'Refresh to read checks for the exact candidate revision.',
+  missing_checks: 'Check the required workflow or refresh once GitHub reports its result.',
+  ci_infrastructure: 'Open the failed job. Use a rerun control if this exact job is eligible.',
+  ci_failure: 'Open the failed check and resolve the cause. Use a repair control when authorized.',
+  merge_readback: 'Refresh to verify the landed revision after GitHub confirms it.',
+};
+
+function IntegrationReadiness({ run }) {
+  const reason = run.evidence?.reason;
+  if (run.state === 'checking') return <section aria-label="Integration readiness">
+    <h3>Waiting for verification</h3><p>Refresh after GitHub reports mergeability and the required checks finish.</p>
+  </section>;
+  if (!reason) return null;
+  return <section aria-label="Integration blocker">
+    <h3>What is blocking integration</h3>
+    <p>{run.evidence.detail ?? reason.replaceAll('_', ' ')}</p>
+    {blockerActions[reason] && <p>{blockerActions[reason]}</p>}
+    {['permission','repository_or_credential','transport','rate_limited'].includes(reason) && <a href="#settings/github">GitHub connection details</a>}
+    {Number.isSafeInteger(run.evidence.retry_at) && <p>Next provider retry after {new Date(run.evidence.retry_at).toLocaleString()}</p>}
+  </section>;
+}
+
 function Revisions({ run }) {
   return <dl className="integration-revisions">
     {run.original_head_sha && <div><dt>Original head</dt><dd><code>{run.original_head_sha}</code></dd></div>}
@@ -73,7 +106,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [confirm, setConfirm] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
   const observation = useRef({ id: null, polls: 0 });
   const reduce = useReducedMotion();
   const { runs, access, loading, error, reload } = useIntegrationRuns(headers, !demo);
@@ -89,6 +122,11 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
     return () => { active = false; };
   }, [selected, verification, runs]);
   const run = detail?.run.id === selected ? detail.run : runs.find(item => item.id === selected);
+  const approvalKey = kind => JSON.stringify([kind, run?.id, run?.version, run?.head_sha, run?.evidence?.base_sha]);
+  const confirmed = kind => confirmation === approvalKey(kind);
+  const confirmationInput = kind => ({
+    checked: confirmed(kind), onChange: event => setConfirmation(event.target.checked ? approvalKey(kind) : ''),
+  });
   const transientJobs = run?.evidence?.jobs?.filter(job => job.infrastructure) ?? [];
   const sourceRepair = run?.source_repairs?.at(-1);
   const sourceActive = ['queued','claimed','running','awaiting_review'].includes(sourceRepair?.status);
@@ -122,7 +160,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
     setMessage('');
     try {
       const result = await integrationRequest(headers, '', { operation_id: crypto.randomUUID(), ...body });
-      setConfirm(false);
+      setConfirmation('');
       setSelected(result.run.id);
       setDetail({ run: result.run, events: [] });
       reload();
@@ -148,7 +186,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
         </button>
       </div>
       {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs}
-        onRun={id => { setConfirm(false); setSelected(id); }}/>}
+        onRun={id => { setConfirmation(''); setSelected(id); }}/>}
       <form key={mode} onSubmit={event => {
         event.preventDefault();
         const fields = new FormData(event.currentTarget);
@@ -171,11 +209,11 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
       {loading && <p role="status">Loading integration runs…</p>}
       {!loading && !runs.length && <p className="muted">No integration runs recorded.</p>}
       <ul>{runs.map(item => <li key={item.id}><button className="quiet-button" aria-pressed={selected === item.id} onClick={() => {
-        setConfirm(false);
+        setConfirmation('');
         setSelected(item.id);
       }}>
         {item.pr_number ? 'PR #' + item.pr_number : 'Task candidate ' + item.head_sha.slice(0, 8)}
-        <span>{labels[item.id === run?.id ? run.state : item.state]}<small>{item.updated_at && new Date(item.updated_at).toLocaleString()}</small></span>
+        <span>{labels[item.id === run?.id ? run.state : item.state]}<small>{item.created_at && new Date(item.created_at).toLocaleString()}</small></span>
       </button></li>)}</ul>
     </section>
     <div role="status" aria-live="polite" className="integration-message">{message}</div>
@@ -193,7 +231,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
       <Revisions run={run}/>
       {run.evidence?.policy_observed && <p>{run.evidence.queue_required ? 'GitHub merge queue required' : 'GitHub branch protections observed'}
         {run.evidence.required_approvals > 0 && ' · ' + run.evidence.required_approvals + ' required approvals'}</p>}
-      {run.evidence?.detail && <p className="notice">{run.evidence.detail}</p>}
+      <IntegrationReadiness run={run}/>
       {run.publication && <p>PR publication <strong>{run.publication.status}</strong></p>}
       {run.transfer && <p>Candidate transfer <strong>{run.transfer.status}</strong></p>}
       {run.policy.auto_source_repair && <p>Automatic source repair <strong>{run.policy.auto_source_repair.status}</strong>
@@ -255,11 +293,11 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
       {!['merged', 'deployed'].includes(run.state) && <div className="integration-controls">
         {!run.pr_number && !run.stopped && (run.task || run.reviewed_source) && access.publish_enabled && <form onSubmit={event => {
           event.preventDefault();
-          change('publish', { head_sha: run.head_sha });
+          if (confirmed('publish')) change('publish', { head_sha: run.head_sha });
         }}>
-          <label className="task-check"><input type="checkbox" checked={confirm} onChange={event => setConfirm(event.target.checked)}/>
+          <label className="task-check"><input type="checkbox" {...confirmationInput('publish')}/>
             I approve publication of this exact candidate to GitHub.</label>
-          <button className="primary-button" disabled={busy || !confirm}>
+          <button className="primary-button" disabled={busy || !confirmed('publish')}>
             {run.publication && run.publication.status !== 'rejected' ? 'Reconcile publication' :
               run.transfer && !['verified','failed'].includes(run.transfer.status) ? 'Reconcile transfer' : 'Publish reviewed PR'}
           </button>
@@ -313,13 +351,15 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
           </form>}
         {sourceRepair?.status === 'awaiting_review' && <form onSubmit={event => {
           event.preventDefault();
-          change('review_repair', { repair_id: sourceRepair.id, candidate_sha: sourceRepair.candidate_sha, tree_sha: sourceRepair.tree_sha,
-            decision: event.nativeEvent.submitter?.value === 'reject' ? 'reject' : 'approve' });
+          const decision = event.nativeEvent.submitter?.value === 'reject' ? 'reject' : 'approve';
+          if (decision === 'reject' || confirmed('repair')) change('review_repair', {
+            repair_id: sourceRepair.id, candidate_sha: sourceRepair.candidate_sha, tree_sha: sourceRepair.tree_sha, decision,
+          });
         }}>
-          <label className="task-check"><input type="checkbox" checked={confirm} onChange={event => setConfirm(event.target.checked)}/>
+          <label className="task-check"><input type="checkbox" {...confirmationInput('repair')}/>
             I reviewed this exact repair commit and tree.</label>
           <div className="integration-actions">
-            <button className="primary-button" value="approve" disabled={busy || !confirm}>Approve repair for publication</button>
+            <button className="primary-button" value="approve" disabled={busy || !confirmed('repair')}>Approve repair for publication</button>
             <button className="quiet-button" value="reject" disabled={busy}>Reject repair</button>
           </div>
         </form>}
@@ -342,15 +382,15 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
         {run.state === 'merge_ready' && (access.merge_enabled && (run.evidence.queue_required || run.evidence.strict_base)
           ? <form onSubmit={event => {
             event.preventDefault();
-            change('merge', { method: new FormData(event.currentTarget).get('method') ?? 'merge',
+            if (confirmed('merge')) change('merge', { method: new FormData(event.currentTarget).get('method') ?? 'merge',
               head_sha: run.head_sha, base_sha: run.evidence.base_sha });
           }}>
             {!run.evidence.queue_required && <label>Merge method<select name="method">
               <option value="merge">Merge commit</option><option value="squash">Squash</option><option value="rebase">Rebase</option>
             </select></label>}
-            <label className="task-check"><input type="checkbox" checked={confirm} onChange={event => setConfirm(event.target.checked)}/>
+            <label className="task-check"><input type="checkbox" {...confirmationInput('merge')}/>
               I approve merging this exact pull request head into main.</label>
-            <button className="primary-button" disabled={busy || !confirm}>{run.evidence.queue_required ? 'Submit to merge queue' : 'Request protected merge'}</button>
+            <button className="primary-button" disabled={busy || !confirmed('merge')}>{run.evidence.queue_required ? 'Submit to merge queue' : 'Request protected merge'}</button>
           </form> : <p className="muted">Protected merge write authorization or strict base protection is unavailable.</p>)}
       </div>}
       {!!detail?.events?.length && detail.run.id === run.id && <section><h3>Audit history</h3>

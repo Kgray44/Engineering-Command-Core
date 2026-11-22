@@ -10,6 +10,9 @@ All editable values below are enum strings. The server validates the allowed val
 |---|---|---|
 | Landing page | Overview | Overview, Projects, Task Control Center, Activity, Merge Control Center |
 | Panel density | Comfortable | Comfortable, Compact |
+| Sidebar | Expanded | Expanded or icon-only on desktop |
+| Default Task sort | Newest first | Newest, oldest, priority, title |
+| Project entry section | Overview | Overview, Tasks, Milestones, Dependencies, GitHub, Telemetry, Artifacts, History |
 | Project layout | Card grid | Card grid, List |
 | Default Project sort | Manual order | Manual order, newest, oldest, priority, title |
 | Default Project priority | Normal | Low, Normal, High, Urgent |

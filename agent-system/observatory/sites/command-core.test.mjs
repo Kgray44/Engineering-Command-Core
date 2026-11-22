@@ -362,3 +362,45 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal(reset.body.preferences.values.density, 'compact');
   assert.equal((await call(0, path)).body.audit.length, 2);
 });
+
+test('Project milestone ordering and eligible Task moves preserve canonical records', async t => {
+  const { call } = setup(t);
+  const projects = '/api/projects';
+  const from = crypto.randomUUID();
+  const to = crypto.randomUUID();
+  const fields = { name: 'Project', objective: 'Verify scope' };
+  for (const id of [from, to]) {
+    assert.equal((await call(0, projects, { op: 'create', id, fields })).status, 201);
+  }
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  const peer = crypto.randomUUID();
+  for (const [id, milestone_id] of [[from, first], [from, second], [to, peer]]) {
+    assert.equal((await call(0, projects, { op: 'milestone', id, milestone_id, name: 'Milestone',
+      acceptance: 'Review evidence', status: 'planned' })).status, 201);
+  }
+  const reorder = { op: 'reorder_milestones', id: from, expected_version: 1, milestone_ids: [second, first] };
+  assert.equal((await call(0, projects, { ...reorder, milestone_ids: [second, peer] })).status, 400);
+  assert.equal((await call(0, projects, reorder)).status, 200);
+  assert.equal((await call(0, projects, reorder)).status, 409);
+  const readFrom = () => call(0, projects + '/' + from);
+  assert.deepEqual((await readFrom()).body.milestones.map(item => item.id), [second, first]);
+
+  const parent = await call(0, projects, { op: 'register_task', id: from, operation_id: crypto.randomUUID(), fields: taskFields });
+  const child = await call(0, projects, { op: 'register_task', id: from, operation_id: crypto.randomUUID(),
+    fields: { ...taskFields, dependencies: [parent.body.task.id] } });
+  const task_id = child.body.task.id;
+  const source = await readFrom();
+  assert.ok(source.body.task_prerequisites.some(item => item.task_id === task_id && item.id === parent.body.task.id &&
+    item.status === 'unsatisfied'));
+  const move = { op: 'move_task', id: to, source_project_id: from, task_id, expected_version: child.body.version };
+  const result = await call(0, projects, move);
+  assert.equal(result.status, 200);
+  assert.equal((await call(0, projects, move)).status, 404);
+  const after = await call(0, projects + '/' + to);
+  assert.equal(after.body.tasks[0].id, task_id);
+  assert.equal(after.body.tasks[0].version, child.body.version);
+  assert.ok((await readFrom()).body.history.some(event => event.kind === 'task_moved_out' && event.task_id === task_id));
+  await call(0, projects, { op: 'milestone_link', id: to, milestone_id: peer, task_id });
+  assert.equal((await call(0, projects, { ...move, source_project_id: to, id: from })).status, 409);
+});

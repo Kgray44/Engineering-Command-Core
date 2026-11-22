@@ -35,7 +35,7 @@ async function browserStage(t, options = {}) {
   return { stage, page, part };
 }
 
-test('Projects workspace performs live project and Task mutations through the shared worker', async t => {
+test('Projects workspace performs live project and Task mutations through the shared worker', { timeout: 90_000 }, async t => {
   const { stage, page, part } = await browserStage(t);
   await page.goto(stage.origin);
   const enteredWithBlur = page.waitForFunction(() => {
@@ -86,7 +86,11 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('button', { name: 'Create Task', exact: true }).click();
   await page.waitForURL(/#tasks\/task_/, { timeout: 7000 });
   await page.goto(stage.origin + '/' + projectHash);
-  await page.getByRole('link', { name: 'Synthetic browser task', exact: true }).waitFor();
+  await page.getByRole('link', { name: 'Synthetic browser task', exact: true }).first().waitFor();
+  await page.getByRole('button', { name: 'Execution controls for Synthetic browser task' }).click();
+  await page.getByRole('navigation', { name: 'Task actions' }).waitFor();
+  await page.getByRole('button', { name: 'Close execution controls' }).click();
+  await page.getByRole('combobox', { name: 'Focus on a Task' }).waitFor();
   await page.getByText('0 of 1 Tasks complete · 0 running · 0 blocked · 0 verifying', { exact: true }).waitFor();
   await page.getByRole('link', { name: 'All projects' }).click();
   await page.getByText('0/1 Tasks complete · 0 running · 0 blocked · 0/1 milestones accepted', { exact: true }).waitFor();
@@ -113,6 +117,17 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('heading', { name: 'Second synthetic project', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Draft Define the question' }).click();
   assert.equal(await page.getByLabel('Milestone name').inputValue(), 'Define the question');
+  const secondHash = new URL(page.url()).hash;
+  await page.goto(stage.origin + '/' + projectHash);
+  await page.getByText('Move a Task to another Project', { exact: true }).click();
+  await page.getByRole('combobox', { name: 'Task to move' }).selectOption({ label: 'Synthetic browser task' });
+  await page.getByRole('combobox', { name: 'Destination Project' }).selectOption({ label: 'Second synthetic project' });
+  const moved = page.waitForResponse(response => response.url().endsWith('/api/projects') && response.request().method() === 'POST' &&
+    response.request().postDataJSON().op === 'move_task');
+  await page.getByRole('button', { name: 'Move Task', exact: true }).click();
+  assert.equal((await moved).status(), 200);
+  await page.goto(stage.origin + '/' + secondHash);
+  await page.getByRole('link', { name: 'Synthetic browser task', exact: true }).first().waitFor();
   await page.getByRole('link', { name: 'All projects' }).click();
 
   const titles = page.locator('.project-card-name');
@@ -170,7 +185,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.equal(part.sqlite.prepare("SELECT count(*) AS count FROM proposals WHERE project_id IS NOT NULL").get().count, 1);
 });
 
-test('Voyagewright mobile Settings and Merge discovery use the shared scoped API', async t => {
+test('Voyagewright mobile Settings and Merge discovery use the shared scoped API', { timeout: 60_000 }, async t => {
   const repository = 'synthetic/voyagewright';
   const head = 'b'.repeat(40);
   const base = 'a'.repeat(40);

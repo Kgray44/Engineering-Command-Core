@@ -14,9 +14,9 @@ The Voyagewright site-side mirror and Aetherwake canonical Site mirror matched t
 
 ## Verification and open acceptance
 
-- The local canonical Worker build passed. Local runs passed 130 Sites tests, 69 Observatory tests, 12 journal tests, and five Edge workspace tests. A separate Chrome run passed both staging browser scenarios.
+- The local canonical Worker build passed. Local runs passed 131 Sites tests, 69 Observatory tests, and 12 journal tests on the follow-up. Chrome passed the five main browser workflows and the separate regression for clearing approval when the reviewed source changes.
 - Browser fixture coverage includes Project creation, icon and accent selection, milestone creation and template suggestions, a linked Task, keyboard cancellation, pointer and keyboard reorder with reload, and mobile Settings and Merge discovery. PR inspection in the fixture reached the existing protected engine with the exact selected head.
 - Hosted Voyagewright PR #899 returned an unavailable GitHub read credential while the feed was rate-limited. Independent repository-scoped credentials for both staging applications remain necessary to qualify actual PR detail and required-check data.
-- The full brief calls for further Project detail controls, including direct Task lifecycle controls, milestone ordering, and an interactive dependency graph. This candidate uses the existing Task Workspace for lifecycle controls and the Project dependency and milestone lists for source records. Settings exposes supported preferences and observed operational facts, with deployment policies still managed by the original source owners.
+- The follow-up adds in-Project execution controls, milestone ordering, an interactive prerequisite view, and version-fenced Task moves. The Task Workspace remains the route for full specification editing and evidence inspection. Settings exposes supported preferences and observations. Deployment policies remain managed by their original source owners.
 - The scroll test exercised mounted history and verified the settled blur behavior. The previously reported horizontal bands still need a reproducible hosted case and performance evidence.
 - Production Phase 1B migration, protected integration acceptance, and owner acceptance are open. This staging work retained the live Observatory, database, connector, and worker assignments.

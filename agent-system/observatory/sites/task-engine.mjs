@@ -95,6 +95,10 @@ function waitState(task,lifecycle,rows,now,checks) {
   return {state:blockers.length?'blocked':lifecycle.start_at>now?'scheduled':'ready',blockers};
 }
 
+export function storedTaskPrerequisites(row, rows) {
+  return prerequisiteStatus(record(row), details(row), rows);
+}
+
 export function storedTaskDispatch(row, rows, now) {
   return waitState(record(row), details(row), rows, now);
 }

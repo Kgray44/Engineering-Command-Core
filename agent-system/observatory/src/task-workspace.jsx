@@ -54,7 +54,7 @@ export function TaskRows({ tasks, controls, related, activityFor, Status, overvi
   </ul>;
 }
 
-export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,onCreate,loading,filters,setFilters,work,workActivity}) {
+export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,onCreate,loading,filters,defaults=defaultTaskFilters,setFilters,work,workActivity}) {
   const interaction=useCardMotion(true);
   const groups=useMemo(()=>organizeTasks(tasks,{...filters,work},controls,workActivity.byTask),[tasks,filters,controls,work,workActivity]);
   const queueViews=['all','active','waiting','review','issues','accepted','archived'];
@@ -98,7 +98,7 @@ export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,on
     </div>
     <div className="task-result-bar">
       <span role="status"><Filter size={14} aria-hidden="true"/> {count} of {tasks.length} Tasks</span>
-      {(filters!==defaultTaskFilters||work!=='all')&&<a className="text-button" href={taskHref()} onClick={()=>setFilters(defaultTaskFilters)}>Reset filters</a>}
+      {(filters!==defaults||work!=='all')&&<a className="text-button" href={taskHref()} onClick={()=>setFilters(defaults)}>Reset filters</a>}
     </div>
     {!loading && !count && <p>{tasks.length ? 'No Tasks match these filters.' : 'No Tasks in the current feed.'}</p>}
     {groups.map(([label, items]) => <section key={label} className="task-group" aria-label={labels(label)}>

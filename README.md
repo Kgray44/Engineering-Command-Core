@@ -34,4 +34,5 @@ Set `OBSERVATORY_ENGINE_E2E=1` to exercise the full Task browser workflow. Set `
 - [Merge Control Center, GitHub, and CI](docs/integration.md)
 - [Settings, configuration registry, and diagnostics](docs/settings.md)
 - [Developer checks, troubleshooting, backups, and recovery](docs/operations.md)
+- [Phase 2 review evidence](PHASE2-REVIEW.md)
 - [Phase 1 review record](PHASE1.md), [Phase 1B Sites runbook](PHASE1B-SITES.md), and [original Observatory contract guide](agent-system/observatory/README.md)

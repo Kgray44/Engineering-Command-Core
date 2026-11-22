@@ -569,3 +569,22 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 .attention-items { list-style: none; margin: 0; padding: 0; }
 .attention-items li { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; padding-block: .6rem; border-top: 1px solid rgb(255 255 255 / 8%); }
 .attention-items a { overflow-wrap: anywhere; }
+
+.project-dependency-graph { display: grid; gap: .75rem; }
+.project-dependency-graph > label { display: grid; gap: .35rem; max-width: 28rem; }
+.project-dependency-flow { display: grid; gap: .6rem; justify-items: start; }
+.project-dependency-flow h3 { margin: .5rem 0; }
+.project-dependency-flow > svg { color: var(--accent); margin-left: .7rem; }
+.project-dependency-nodes { padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: .6rem; list-style: none; }
+.project-dependency-nodes li,.project-dependency-current { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; padding: .65rem; border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 8px; }
+.project-dependency-current { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+@media (min-width: 801px) {
+  .app-shell[data-sidebar="compact"] { grid-template-columns: 5rem minmax(0, 1fr); }
+  [data-sidebar="compact"] .sidebar { padding-inline: .7rem; }
+  [data-sidebar="compact"] .sidebar :is(.brand > div,.rail-caption,.sidebar-bottom) { display: none; }
+  [data-sidebar="compact"] .sidebar .nav-link { justify-content: center; }
+  [data-sidebar="compact"] .nav-link-label {
+    position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+}
