@@ -181,12 +181,12 @@ test('keyboard, reduced motion, versioned edits, dependency admission and reload
   const detailUrl = page.url();
   const id = new URL(detailUrl).hash.split('/').at(-1);
   const editor = page.getByRole('form', { name: 'Edit proposed task' });
+  await editor.getByText('Execution options',{exact:true}).click();
   await editor.getByLabel('Prerequisite Task IDs').fill(id);
   await page.getByText('A Task cannot be its own prerequisite.').waitFor();
   assert.equal(await editor.getByRole('button', { name: 'Save proposal' }).isDisabled(), true);
   await editor.getByLabel('Prerequisite Task IDs').fill('unknown-prerequisite');
   await editor.getByLabel('Task title').fill(editTitle);
-  await editor.getByText('Execution options',{exact:true}).click();
   await editor.getByLabel('Priority').selectOption('urgent');
   await editor.getByText('Inputs and deliverables',{exact:true}).click();
   await editor.getByLabel('Planned deliverables').fill('Implementation PR with checked output');
