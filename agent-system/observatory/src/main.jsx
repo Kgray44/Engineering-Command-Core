@@ -369,9 +369,16 @@ const resetMetricFilters=event=>{
 };
 const chart=useMemo(()=>{
   const now=new Date();
+  const counts=new Map();
+  for(const task of tasks){
+    const timestamp=Date.parse(task.created_at);
+    if(!Number.isFinite(timestamp))continue;
+    const date=new Date(timestamp).toISOString().slice(0,10);
+    counts.set(date,(counts.get(date)??0)+1);
+  }
   return Array.from({length:14},(_,i)=>{
     const date=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-13+i)).toISOString().slice(0,10);
-    return {date,count:tasks.filter(task=>String(task.created_at).slice(0,10)===date).length};
+    return {date,count:counts.get(date)??0};
   });
 },[tasks]);
 const traceCoverage=useMemo(()=>page==='overview'&&!demo

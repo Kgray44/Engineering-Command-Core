@@ -464,6 +464,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.reload();
   const currentWork = page.locator('#project-current-work');
   await currentWork.getByText('No recorded integrations', { exact: true }).waitFor();
+  await currentWork.getByRole('progressbar', { name: 'Task progress' }).waitFor();
+  await currentWork.getByRole('progressbar', { name: 'Milestone progress' }).waitFor();
   const upstream = page.getByRole('region', { name: 'Upstream prerequisites' });
   await upstream.getByText('Remove prerequisite', { exact: true }).click();
   await upstream.getByText(/Remove Release readiness as a requirement for Release review/).waitFor();
@@ -866,6 +868,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.ok(historyBounds.height <= 200 && historyBounds.height < sourceBounds.height / 2,
     'Empty integration history should remain compact beside a long candidate inspection');
   assert.ok(sourceBounds.width > historyBounds.width, 'Inspecting the source gets the wider desktop column');
+  await desktop.setViewportSize({ width: 1600, height: 1000 });
+  const picker = await desktop.getByRole('region', { name: 'Find pull requests' }).boundingBox();
+  const inspector = await desktop.getByRole('region', { name: 'Selected pull request' }).boundingBox();
+  assert.ok(inspector.x >= picker.x + picker.width, 'The selected source should sit beside the results at wide widths');
+  assert.ok(Math.abs(inspector.y - picker.y) < 2);
+  assert.ok(await desktop.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await capture(desktop, 'voyagewright-merge-source.png');
   await desktop.close();
   const inspection = page.waitForResponse(response => response.url().endsWith('/api/integrations/v1') && response.request().method() === 'POST');
