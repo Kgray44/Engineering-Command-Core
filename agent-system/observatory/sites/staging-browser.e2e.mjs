@@ -542,6 +542,34 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.locator('#integration-detail-title').waitFor();
 });
 
+test('the Project Library footer stays stable while a slow portfolio request completes', { timeout: 45_000 }, async t => {
+  const { stage, page } = await browserStage(t, { browser: { viewport: { width: 1440, height: 1000 } } });
+  const seeded = await stage.run('/api/projects', { op: 'create', id: crypto.randomUUID(),
+    fields: { name: 'Slow portfolio Project', objective: 'Observe Projects layout during a delayed read' } });
+  assert.equal(seeded.status, 201);
+  await page.goto(stage.origin + '/#settings');
+  await page.getByRole('heading', { name: 'Engineering settings', exact: true }).waitFor();
+
+  const release = Promise.withResolvers();
+  await page.route('**/api/projects', async route => {
+    await release.promise;
+    await route.continue();
+  }, { times: 1 });
+  const footerTop = () => page.locator('main footer').evaluate(footer => footer.getBoundingClientRect().top);
+  let loadingPosition;
+  try {
+    const reading = page.waitForRequest('**/api/projects');
+    await page.getByRole('button', { name: 'Projects', exact: true }).click();
+    await reading;
+    loadingPosition = await footerTop();
+  } finally {
+    release.resolve();
+  }
+
+  await page.getByRole('link', { name: /Slow portfolio Project/ }).waitFor();
+  assert.ok(Math.abs((await footerTop()) - loadingPosition) <= 1, 'The footer moved after the portfolio read');
+});
+
 test('an open tab recovers when a workspace asset is replaced during rollout', { timeout: 45_000 }, async t => {
   const { stage, page } = await browserStage(t);
   await page.goto(stage.origin + '/#settings');

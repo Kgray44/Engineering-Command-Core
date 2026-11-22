@@ -38,6 +38,10 @@ On November 22, 2026, a foreground Microsoft Edge session opened each owner-priv
 
 Visual inspection of six sampled frames per application found no blank bands. History was still reachable and focused through the Voyagewright section control. The probe sampled a settled Project workspace in one browser configuration. Brief artifacts between samples, the owner's exact display and browser conditions, and other routes remain outside this observation. Screens from private staging were used for inspection only. If the symptom recurs, record the route, browser zoom, viewport, and scroll action for a targeted capture.
 
+### Project Library navigation
+
+During foreground Edge 157 navigation on Windows, the first Voyagewright Project Library load on staging revision `ba359a7` displaced the footer by 432 CSS pixels 643 ms after the click. The layout shift score was 0.0143. Layout Instability attributed the shift to the footer as the portfolio completed. The Project Library now reserves viewport height for the main column while the portfolio loads. A browser regression holds the Projects API response and compares the footer position before and after the cards render.
+
 ### Settings confirmation and live Task updates
 
 On Windows Chrome 157.0.8103.80 at 1,440 × 900, three local SQLite-backed runs measured the in-page Settings reset confirmation and three measured a remote worker claim with the Project Tasks panel in view. The probe captured animation-frame intervals within 250 ms of the first rendered change, plus Layout Instability and long-task observations. Each run began with settled navigation and a fresh scoped fixture.
