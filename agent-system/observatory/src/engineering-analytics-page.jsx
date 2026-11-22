@@ -1,3 +1,5 @@
+import {motion} from 'motion/react';
+import {MotionBar,useWorkspaceMotion} from './workspace-motion.jsx';
 import {StickySectionAside} from './sticky-section-aside.jsx';
 import {SectionNavigation} from './section-navigation.jsx';
 import React, { useMemo, useState } from 'react';
@@ -38,6 +40,7 @@ const trends = {
 };
 
 function TrendChart({ days }) {
+  const chartMotion = useWorkspaceMotion();
   const [mode, setMode] = useState('delivery');
   const [selectedDay, setSelectedDay] = useState(null);
   const series = trends[mode].series;
@@ -57,13 +60,13 @@ function TrendChart({ days }) {
           return <button key={row.date} type="button" className="analytics-day" disabled={!enabled}
             aria-pressed={active?.date === row.date} aria-label={description} title={description} onClick={() => setSelectedDay(row.date)}>
             {series.map(([key], index) => Number.isFinite(row[key]) && row[key] > 0 &&
-              <span key={key} className={'analytics-bar color-' + index} style={{height: (100 * row[key] / maximum) + '%'}}/>)}
+              <MotionBar key={key} className={'analytics-bar color-' + index} style={{height: (100 * row[key] / maximum) + '%'}}/>)}
           </button>;
         })}
       </div>
       <div className="analytics-day-labels"><span>{day(days[0].date)} UTC</span><span>{day(days.at(-1).date)} UTC</span></div>
       <div className="analytics-day-readout" aria-live="polite">
-        <strong>{day(active.date)} UTC</strong>
+        <motion.strong key={mode+active.date} {...chartMotion} className="workspace-readout">{day(active.date)} UTC</motion.strong>
         {series.map(([key, title], index) => <span key={key}>
           <i className={'color-' + index} aria-hidden="true"/> {title} · {count(active[key])}
         </span>)}
@@ -87,7 +90,7 @@ function Counts({ entries, empty }) {
   return rows.length ? <dl className="analytics-distribution">
     {rows.map(([key, value]) => <div key={key}>
       <dt>{label(key)}</dt><dd>{count(value)}
-        <span className="workspace-meter" aria-hidden="true"><span style={{inlineSize:(100*value/rows[0][1])+'%'}}/></span>
+        <span className="workspace-meter" aria-hidden="true"><MotionBar horizontal style={{inlineSize:(100*value/rows[0][1])+'%'}}/></span>
       </dd>
     </div>)}
   </dl> : <p className="low">{empty}</p>;
@@ -106,7 +109,7 @@ function PhaseTable({ trace }) {
     <div className="analytics-caption">Matched wall-clock coverage {spanTime(trace.coveredMs)} · {count(trace.complete)} matched spans · {count(trace.incomplete)} incomplete</div>
     {phases.length ? <ul className="analytics-phases">{phases.map(row => <li key={row.phase}>
       <div><strong>{label(row.phase)}</strong><small>{count(row.spans)} matched spans</small></div>
-      <span className="analytics-phase-track" aria-hidden="true"><span style={{width: (100 * row.coveredMs / max) + '%'}}/></span>
+      <span className="analytics-phase-track" aria-hidden="true"><MotionBar horizontal style={{width: (100 * row.coveredMs / max) + '%'}}/></span>
       <strong>{spanTime(row.coveredMs)}</strong>
     </li>)}</ul> : <p className="low">Matched phase timings are unavailable.</p>}
     <small>Overlapping spans are counted once within a phase. Operation dependencies are required to measure the critical path.</small>

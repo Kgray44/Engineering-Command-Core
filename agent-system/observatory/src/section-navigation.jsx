@@ -1,7 +1,10 @@
+import {motion} from 'motion/react';
+import {useCardMotion} from './card-motion.jsx';
 import {useEffect,useRef,useState} from 'react';
 
 export function SectionNavigation({label, sections, onJump}) {
   const nav = useRef(null);
+  const interaction = useCardMotion(true);
   const [active, setActive] = useState(null);
   const enabledIds = sections.filter(section => !section.disabled).map(section => section.id).join(' ');
 
@@ -39,8 +42,8 @@ export function SectionNavigation({label, sections, onJump}) {
   }, [enabledIds]);
 
   return <nav ref={nav} className="task-section-nav workspace-section-nav" aria-label={label}>
-    {sections.map(section => <button key={section.id} type="button" className="quiet-button"
+    {sections.map(section => <motion.button {...(section.disabled ? {} : interaction)} key={section.id} type="button" className="quiet-button"
       disabled={section.disabled} aria-current={active === section.id ? 'location' : undefined}
-      onClick={() => onJump(section.id)}>{section.label}</button>)}
+      onClick={() => onJump(section.id)}>{section.label}</motion.button>)}
   </nav>;
 }

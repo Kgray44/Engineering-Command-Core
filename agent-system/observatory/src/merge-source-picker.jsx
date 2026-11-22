@@ -1,3 +1,4 @@
+import {MotionRow,useWorkspaceMotion} from './workspace-motion.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { preferenceFields } from './workspace-preferences.mjs';
@@ -222,6 +223,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
   const githubUrl = detail?.url ?? summary?.url;
   const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
   const inspectorHeading = useRef(null);
+  const sourceMotion = useWorkspaceMotion();
   return <div className="merge-discovery">
     <div className="merge-source-browser" role="region" aria-label="Find pull requests">
     <div className="merge-discovery-filters">
@@ -257,18 +259,18 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         const reviewStatus = pullReviewRequestStatus(pull);
         const reviewCount = pull.requested_review_count;
         const work = links.get(id);
-        return <li key={id}><button type="button" className="quiet-button" aria-pressed={id === number} onClick={() => onSelect(id)}>
+        return <MotionRow key={id}><button type="button" className="quiet-button" aria-pressed={id === number} onClick={() => onSelect(id)}>
           <strong>#{id} {pull.title}</strong><small>{activityState('pulls', pull)}{' · ' + evidence}</small>
           {reviewStatus === 'requested' && <small>{reviewCount} review {reviewCount === 1 ? 'request' : 'requests'}</small>}
           {reviewStatus === 'unknown' && <small>Review requests unavailable</small>}
           {work?.length > 0 && <small>{work[0]}{work.length > 1 && ' · +' + (work.length - 1)}</small>}
-        </button></li>;
+        </button></MotionRow>;
       })}
     </ul>
     {!pulls.length && <p className="low">No pull requests match the current view.</p>}
     </div>
     {number ? <motion.section key={number} className="merge-source-detail" aria-label="Selected pull request"
-      initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .18 }}>
+      {...sourceMotion}>
       <h3 ref={inspectorHeading} tabIndex={-1}>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>
       <p role="status">{!source ? 'Reading GitHub source…' : source.reason || source.error ||
         (source.observed_at ? 'GitHub observed ' + new Date(source.observed_at).toLocaleString() : 'GitHub observation unavailable')}</p>
