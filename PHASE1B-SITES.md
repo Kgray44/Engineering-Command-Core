@@ -2,6 +2,39 @@
 
 The Aetherwake staging Site serves its frontend, the shared Task and Projects engine, and the sole staging ChatGPT connector. The Voyagewright staging Site forwards its authenticated frontend traffic to that engine. Each Site has a separate platform-provisioned D1. The Voyagewright Site exposes its database to the shared engine through a private service route. Both Site profiles must be built from the same exact Command Core source commit.
 
+## Hosted verification on November 21, 2026
+
+Both private Sites published and served signed-in requests from their pinned ChatGPT owner identities. The two application status APIs reported the same engine revision, [`7bd3ffda`](https://github.com/Kgray44/Engineering-Command-Core/commit/7bd3ffdaae7dbd791eb93dbc73337c2393f8a6b4). Deployment initially reproduced a Voyagewright bridge error. Reconstructing the forwarded request with explicit method, headers and body and using manual redirect handling restored hosted traffic. The revised profiles were published and verified against the actual Sites runtime.
+
+Both qualification Projects were created and activated in Edge. Each has two milestones with recorded acceptance requirements. Aetherwake paused and resumed from its hosted Project controls. Both Projects and their milestones were visible after their Site was republished. Cross-application Project reads returned Project not found on both origins. Real service probes passed discovery on each application's worker endpoint. The peer Site credential received HTTP 401, the peer executor key received HTTP 403, and an explicit peer application ID received HTTP 403. A Site service credential alone received HTTP 403 on the owner Projects API. The Voyagewright D1 service returned its own partition identity. These hosted checks used scoped staging credentials.
+
+The production Aetherwake Site continued to serve version 74 with the same URL and connector. The production connector returned the same 19 visible canonical Task IDs before and after staging work. Production's signed-in browser showed its existing worker online. The current and staging overview shared the same computed heading typography, text color, and sidebar styling in Edge. Staging included the Projects navigation item introduced in Phase 1A. Phase 1B did not edit the React UI or CSS.
+
+The local Observatory, Sites/Worker, journal and Chromium suites passed after rebuilding the frontend. Browser coverage includes the Task Workspace, Merge Workspace and Project operations. Hosted Projects and storage evidence were collected separately from the fixtures.
+
+## Phase 1B acceptance status
+
+| Gate | Status | Evidence or remaining work |
+| --- | --- | --- |
+| A. Hosted deployment | PASS | Two private Sites, authenticated status, separate D1 bindings, persisted Project records across publication. |
+| B. Two applications | PASS | Each Site serves its configured application through the same deployed engine revision. |
+| C. Repository integration | BLOCKED | Authenticated GitHub CLI reads verified identities, default branches, open PRs, workflows and branch protection. Both hosted GitHub readers reported an anonymous rate limit. The staging engine requires two separate scoped GitHub credentials for the end-to-end run. |
+| D. Project management | BLOCKED | Hosted Project creation, activation, pause/resume, milestones and persistence were observed. Tasks and dependency qualification require an observable repository revision. |
+| E. Aetherwake Codex Task | BLOCKED | A real registration request stopped with “Known repository revision required.” No Task, Attempt, candidate or PR receipt exists. |
+| F. Voyagewright Codex Task | BLOCKED | The hosted GitHub reader also reported an anonymous rate limit. No Task, Attempt, candidate or PR receipt exists. |
+| G. Isolation | NOT VERIFIED | Hosted Project reads, Site authorization, executor authentication and request-scope negatives passed. Live Task edits, claim leases, attempt telemetry and repository mutations remain to be qualified. |
+| H. Execution and telemetry | BLOCKED | Worker discovery is live. Real managed execution, CI linkage and usage attribution need the registered Tasks. |
+| I. Project-centered UI | NOT VERIFIED | Browser verified real Projects and milestones. Live Task linkage, dependency state and CI progress are outstanding. |
+| J. Migration rehearsal | BLOCKED | The available production Sites and Observatory interfaces expose deployment and Task inventory, with no consistent database export. No authoritative dataset was exported or imported. |
+| K. Production preservation | PASS | Observed before and after through the deployed Site and Task connector. Production deployment and connector metadata stayed the same. |
+| L. Owner-review readiness | PASS | [PR #1](https://github.com/Kgray44/Engineering-Command-Core/pull/1), this report and the cutover proposal identify verified behavior and outstanding permissions. Full Phase 1B acceptance is pending. |
+
+Sites provisioned the staging MCP connection and the install surface reported its plugin already installed. This session did not expose the stage tools for an authenticated tool call. Use the staging plugin in a chat where it is available to exercise the scoped operations.
+
+The next Aetherwake candidate Task is a focused calendar-date validation correction in `scripts/agent/validate-record.mjs`, covered by `tests/agent-contracts.test.mjs`. The Voyagewright candidate targets malformed frontmatter lines in the existing documentation validator. Both require the current GitHub revision to be read by the hosted engine before admission.
+
+## Repository identity
+
 The engine binds applications to the repositories below. GitHub identity and branch protection were verified using the GitHub CLI account during Phase 1B discovery.
 
 | Application | GitHub repository | Repository ID | Default branch |
@@ -19,7 +52,7 @@ The engine binds applications to the repositories below. GitHub identity and bra
 
 ## Execute the repository acceptance Tasks
 
-Configure each application with an independent repository-scoped GitHub credential. Verify the configured repository identity and credential grants against GitHub before enabling writes. Read the default branch, relevant open PRs, rules and check workflows. Keep repository authentication outside the model execution process.
+Configure each application with an independent repository-scoped GitHub credential. The engine reads `AETHERWAKE_GITHUB_READ_TOKEN` and `VOYAGEWRIGHT_GITHUB_READ_TOKEN` from the canonical Site's runtime secrets. Verify the configured repository identity and credential grants against GitHub before enabling writes. Read the default branch, relevant open PRs, rules and check workflows. Keep repository authentication outside the model execution process.
 
 Store independent stage-only `AETHERWAKE_OBSERVATORY_TASK_WORKER_KEY` and `VOYAGEWRIGHT_OBSERVATORY_TASK_WORKER_KEY` secrets on the engine Site. Give each worker its own private configuration and checkout root, the corresponding Site's service credential via `COMMAND_CORE_SITE_SERVICE_TOKEN`, and the matching executor key via `AADS_TASK_WORKER_KEY`. Set `worker_mcp_url` to the application's own Site origin plus `/worker/mcp`. Use an explicit worker UUID, exact Task ID allowlist, and the qualified standalone Codex App Server. Follow the existing worker storage, branch and artifact safeguards. Report each attempted claim, failure, recovery and usage measure from the source receipts.
 
