@@ -1,7 +1,13 @@
 const inspectedObjects = new Map([
   ['application_partition', 'table'],
+  ['migration_receipt', 'table'],
+  ['private_projection', 'table'],
+  ['task_telemetry', 'table'],
+  ['task_engine_events', 'table'],
   ['projects', 'table'],
   ['project_events', 'table'],
+  ['project_manual_order', 'table'],
+  ['project_relationship_events', 'table'],
   ['milestones', 'table'],
   ['project_milestone_events', 'table'],
   ['project_task_milestones', 'table'],
@@ -39,6 +45,22 @@ export async function readDataHealth(db, owner, namespace) {
       (SELECT COUNT(*) FROM proposals t WHERE t.owner_id = ?1 AND t.namespace = ?2 AND t.project_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM projects p WHERE p.owner_id = t.owner_id AND p.namespace = t.namespace AND p.id = t.project_id
       )) AS tasks_without_projects,
+      (SELECT COUNT(*) FROM proposals t WHERE t.owner_id = ?1 AND t.namespace = ?2
+        AND t.engine IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM task_engine_events e WHERE e.owner_id = t.owner_id AND e.namespace = t.namespace
+            AND e.task_id = t.task_id AND e.operation_id = json_extract(t.engine, '$.event.operation_id')
+            AND e.event = json_extract(t.engine, '$.event')
+        )
+      ) AS tasks_without_engine_receipts,
+      (SELECT COUNT(*) FROM (
+        SELECT item.type, item.value
+        FROM project_manual_order saved JOIN json_each(saved.project_ids) item
+        WHERE saved.owner_id = ?1 AND saved.namespace = ?2
+        GROUP BY item.type, item.value
+        HAVING item.type <> 'text' OR COUNT(*) > 1 OR NOT EXISTS (
+          SELECT 1 FROM projects p WHERE p.owner_id = ?1 AND p.namespace = ?2 AND p.id = item.value
+        )
+      )) AS invalid_project_order_references,
       (SELECT COUNT(*) FROM project_task_milestones link WHERE link.owner_id = ?1 AND link.namespace = ?2 AND NOT EXISTS (
         SELECT 1 FROM proposals t JOIN milestones m ON m.owner_id = t.owner_id AND m.namespace = t.namespace AND m.project_id = t.project_id
         WHERE t.owner_id = link.owner_id AND t.namespace = link.namespace AND t.task_id = link.task_id

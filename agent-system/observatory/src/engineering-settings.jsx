@@ -181,6 +181,8 @@ function DataChecks({ headers, revision }) {
         ['Projects missing current receipts', result.integrity.projects_without_receipts],
         ['Milestones missing current receipts', result.integrity.milestones_without_receipts],
         ['Tasks missing their Project', result.integrity.tasks_without_projects],
+        ['Tasks missing their current engine receipt', result.integrity.tasks_without_engine_receipts],
+        ['Invalid or duplicate saved Project order references', result.integrity.invalid_project_order_references],
         ['Invalid milestone links', result.integrity.invalid_milestone_links],
         ['Invalid milestone gates', result.integrity.invalid_milestone_gates],
         ['Preferences missing current receipts', result.integrity.preferences_without_receipts],

@@ -668,10 +668,15 @@ test('Settings data checks validate the active scoped Project history', async t 
   const runId = crypto.randomUUID();
   one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, NULL, NULL, ?, 14, 'checking', 1, ?, '{}', ?)")
     .run('synthetic-owner', runId, 'd'.repeat(40), new Date().toISOString(), JSON.stringify({ operation_id: crypto.randomUUID() }));
+  const task = await call(0, '/api/projects', { op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  assert.equal(task.status, 201);
   const first = await call(0, path);
   assert.equal(first.status, 200);
   assert.equal(first.body.schema.status, 'current');
   assert.equal(first.body.schema.observed_migration_marker, '0019_project_task_move_history');
+  assert.equal(first.body.schema.checked_objects, 19);
+  assert.equal(first.body.integrity.tasks_without_engine_receipts, 0);
+  assert.equal(first.body.integrity.invalid_project_order_references, 0);
   assert.equal(first.body.integrity.status, 'passed');
   assert.equal(first.body.integrity.projects_without_receipts, 0);
   assert.equal(first.body.integrity.invalid_milestone_gates, 0);
@@ -681,6 +686,9 @@ test('Settings data checks validate the active scoped Project history', async t 
   assert.ok(Date.parse(first.body.checked_at) > 0);
   assert.doesNotMatch(JSON.stringify(first.body), /one-fixture|a{64}|synthetic-owner/);
   one.sqlite.prepare('DELETE FROM project_events WHERE project_id = ?').run(id);
+  one.sqlite.prepare('DELETE FROM task_engine_events WHERE task_id = ?').run(task.body.task.id);
+  one.sqlite.prepare("INSERT INTO project_manual_order VALUES (?, 'live', 1, ?)")
+    .run('synthetic-owner', JSON.stringify([id, id, crypto.randomUUID()]));
   one.sqlite.prepare("UPDATE workspace_preference_events SET preferences = '{}' WHERE namespace = 'live'").run();
   one.sqlite.prepare('DELETE FROM integration_events WHERE integration_id = ?').run(runId);
   one.sqlite.exec('PRAGMA foreign_keys = OFF');
@@ -689,6 +697,8 @@ test('Settings data checks validate the active scoped Project history', async t 
   const affected = await call(0, path);
   assert.equal(affected.body.integrity.status, 'issues_found');
   assert.equal(affected.body.integrity.projects_without_receipts, 1);
+  assert.equal(affected.body.integrity.tasks_without_engine_receipts, 1);
+  assert.equal(affected.body.integrity.invalid_project_order_references, 2);
   assert.equal(affected.body.integrity.invalid_milestone_gates, 1);
   assert.equal(affected.body.integrity.preferences_without_receipts, 1);
   assert.equal(affected.body.integrity.integrations_without_receipts, 1);
