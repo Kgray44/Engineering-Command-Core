@@ -30,13 +30,29 @@ function forwardHeaders(request) {
 }
 
 function serviceRequest(url, request, headers) {
-  return new Request(new Request(url, request), { headers });
+  return new Request(url, { method: request.method, headers,
+    ...(request.body ? { body: request.body, duplex: 'half' } : {}) });
+}
+
+async function fetchBridge(fetcher, label, input, init) {
+  try {
+    const reply = await fetcher(input, { ...init, redirect: 'manual' });
+    if (reply.status >= 300 && reply.status < 400) {
+      await reply.body?.cancel();
+      throw Error('Unexpected upstream redirect (' + reply.status + ')');
+    }
+    if (!reply.ok) console.warn('Command Core staging bridge HTTP status', label, reply.status);
+    return reply;
+  } catch (cause) {
+    console.warn('Command Core staging bridge transport failed', label, cause.name, String(cause.message).slice(0, 160));
+    throw cause;
+  }
 }
 
 function databaseBridge(origin, env, fetcher) {
   return { prepare: sql => ({ bind: (...values) => Object.fromEntries([...methods].map(method => [method, async () => {
-    const reply = await fetcher(origin + partitionPath, {
-      method: 'POST', redirect: 'error',
+    const reply = await fetchBridge(fetcher, 'Voyagewright database', origin + partitionPath, {
+      method: 'POST',
       headers: { ...serviceHeaders(env.ECC_VOYAGEWRIGHT_SITE_SERVICE_TOKEN, env.ECC_STORAGE_BRIDGE_KEY),
         'content-type': 'application/json' },
       body: JSON.stringify({ sql, values, method }),
@@ -106,7 +122,7 @@ export function createSitesStage({ role, applications, portfolio = { id: 'engine
           headers.set(key, value);
         }
         const forwarded = serviceRequest(target, request, headers);
-        return await fetcher(forwarded, { redirect: 'error', signal: AbortSignal.timeout(25_000) });
+        return await fetchBridge(fetcher, 'canonical frontend', forwarded, { signal: AbortSignal.timeout(25_000) });
       }
       let effective = request;
       const worker = url.pathname === '/worker/mcp' && !user;
