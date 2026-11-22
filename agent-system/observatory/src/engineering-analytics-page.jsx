@@ -147,7 +147,7 @@ function TokenAccounting({ accounting, receipts, ready, headers }) {
   const {pricing} = useOpenAIPricing(finalAttempts,ready,headers);
   const estimates = new Map(estimateOpenAIReference(finalAttempts,pricing,Date.now()).attempts.map(row=>[row.attemptId,row]));
   return <>
-    <label>Task <select value={selected?.taskId ?? ''} onChange={event => setTaskId(event.target.value)}>
+    <label className="analytics-task-picker">Task <select value={selected?.taskId ?? ''} onChange={event => setTaskId(event.target.value)}>
       <option value="">All loaded Tasks</option>
       {accounting.byTask.map(row => <option key={row.taskId} value={row.taskId}>{row.taskId}</option>)}
     </select></label>

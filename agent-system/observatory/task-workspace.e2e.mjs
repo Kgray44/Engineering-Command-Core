@@ -831,6 +831,17 @@ test('owner schedules an engine Task, observes blockers and controls the queue',
   await page.getByText('Attempt breakdown',{exact:true}).click();
   await page.getByRole('link',{name:'$0.000146',exact:true}).waitFor();
   await page.locator('.analytics-counts > div').filter({hasText:'Observed session-only tokens'}).getByText('137',{exact:true}).waitFor();
+  await page.setViewportSize({ width: 320, height: 720 });
+  const phoneLayout = await page.evaluate(() => {
+    const picker = document.querySelector('.analytics-task-picker select');
+    const table = [...document.querySelectorAll('details[open] .analytics-table')].find(element => element.offsetWidth);
+    return {
+      documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      pickerFits: picker && picker.getBoundingClientRect().right <= document.documentElement.clientWidth,
+      tableContained: table && table.getBoundingClientRect().right <= document.documentElement.clientWidth,
+    };
+  });
+  assert.deepEqual(phoneLayout, { documentFits: true, pickerFits: true, tableContained: true });
 });
 
 test('protected merge approval clears when refreshed evidence replaces the reviewed source', { timeout: 60_000 }, async t => {
