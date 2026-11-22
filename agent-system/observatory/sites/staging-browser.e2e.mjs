@@ -177,7 +177,8 @@ test('Projects workspace performs live project and Task mutations through the sh
   const taskPanel = page.getByRole('region', { name: 'Project Task execution' });
   await taskPanel.getByText('Task editor', { exact: true }).click({ timeout: 5_000 });
   const projectTaskEditor = taskPanel.getByRole('form', { name: 'Edit proposed task' });
-  await projectTaskEditor.locator('select[name="priority"]').selectOption('urgent');
+  await projectTaskEditor.getByText('Execution options', { exact: true }).click();
+  await projectTaskEditor.getByRole('combobox', { name: 'Priority', exact: true }).selectOption('urgent');
   await projectTaskEditor.locator('textarea[name="objective"]').fill('Update the canonical Task specification from its Project.');
   await projectTaskEditor.getByRole('button', { name: 'Save proposal', exact: true }).click();
   await projectTaskEditor.getByText('Task saved.', { exact: true }).waitFor();
@@ -780,6 +781,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByText('Settings saved.', { exact: true }).waitFor();
   await workspaceMenu.click();
   await navigation.getByRole('button', { name: 'New task', exact: true }).click();
+  assert.equal(await page.locator('.task-intake').getByRole('textbox').count(), 3);
+  await page.getByText('Execution options', { exact: true }).click();
   assert.equal(await page.getByRole('combobox', { name: 'Priority', exact: true }).inputValue(), 'urgent');
   await page.goto(stage.origin + '/#settings/integration');
   await page.getByLabel('Default repair limit for new integrations').selectOption('2');
