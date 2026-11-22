@@ -1,11 +1,22 @@
 export const projectTemplates = [
-  { id: 'feature', label: 'Software feature', milestones: ['Confirm scope', 'Implement and verify', 'Review delivery'] },
-  { id: 'bug', label: 'Bug repair', milestones: ['Confirm reproduction', 'Verify the repair', 'Review regression evidence'] },
-  { id: 'integration', label: 'Integration', milestones: ['Confirm interfaces', 'Verify the integration', 'Review rollout'] },
-  { id: 'maintenance', label: 'Maintenance', milestones: ['Inventory affected components', 'Verify the maintenance change', 'Review recovery steps'] },
-  { id: 'research', label: 'Research', milestones: ['Define the question', 'Collect and review evidence', 'Record the recommendation'] },
+  { id: 'feature', label: 'Software feature',
+    scope: 'Define the user journey, affected components, and boundaries of the feature.',
+    acceptance: 'Demonstrate the user journey and record regression results for existing behavior.',
+    milestones: ['Confirm scope', 'Implement and verify', 'Review delivery'] },
+  { id: 'bug', label: 'Bug repair',
+    scope: 'Record the reproduction, affected versions, and behavior that should recover.',
+    acceptance: 'Verify the repair against the original reproduction and record regression results.',
+    milestones: ['Confirm reproduction', 'Verify the repair', 'Review regression evidence'] },
+  { id: 'integration', label: 'Integration',
+    scope: 'Identify the systems, interfaces, and authorization boundaries involved.',
+    acceptance: 'Verify the end-to-end flow, access boundaries, and recovery from a failed operation.',
+    milestones: ['Confirm interfaces', 'Verify the integration', 'Review rollout'] },
+  { id: 'maintenance', label: 'Maintenance',
+    scope: 'List the affected components and the operating constraints for this change.',
+    acceptance: 'Verify existing workflows after the change and document the recovery steps.',
+    milestones: ['Inventory affected components', 'Verify the maintenance change', 'Review recovery steps'] },
+  { id: 'research', label: 'Research',
+    scope: 'State the research question, evidence sources, and constraints.',
+    acceptance: 'Share the findings, supporting evidence, and unresolved uncertainties.',
+    milestones: ['Define the question', 'Collect and review evidence', 'Record the recommendation'] },
 ];
-
-export function templateMilestones(id) {
-  return projectTemplates.find(template => template.id === id)?.milestones ?? [];
-}

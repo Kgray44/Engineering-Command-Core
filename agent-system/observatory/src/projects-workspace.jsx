@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { ProjectAppearance, ProjectCardGrid, ProjectIcon } from './project-cards.jsx';
 import { orderBySavedIds } from './project-presentation.mjs';
-import { projectTemplates, templateMilestones } from './project-templates.mjs';
+import { projectTemplates } from './project-templates.mjs';
 import { ProjectDependencies } from './project-dependencies.jsx';
 import { ProjectTaskControls } from './project-task-controls.jsx';
 import { motion } from 'motion/react';
@@ -33,15 +33,36 @@ function Options({ values }) {
 }
 
 function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
-  const [suggestions, setSuggestions] = useState((project.milestone_suggestions ?? []).join('\n'));
+  const [draft, setDraft] = useState(() => ({
+    scope: project.scope ?? '',
+    acceptance: project.acceptance ?? '',
+    milestone_suggestions: (project.milestone_suggestions ?? []).join('\n'),
+  }));
+  const edited = useRef(new Set());
+  const editField = event => {
+    const { name, value } = event.currentTarget;
+    edited.current.add(name);
+    setDraft(previous => ({ ...previous, [name]: value }));
+  };
+  const applyTemplate = id => {
+    const template = projectTemplates.find(item => item.id === id);
+    const defaults = {
+      scope: template?.scope ?? '',
+      acceptance: template?.acceptance ?? '',
+      milestone_suggestions: template?.milestones.join('\n') ?? '',
+    };
+    setDraft(previous => ({ ...previous, ...Object.fromEntries(
+      Object.entries(defaults).filter(([field]) => !edited.current.has(field)),
+    ) }));
+  };
   return <form className="form" onSubmit={event => {
     event.preventDefault();
-    const { participants, ...fields } = object(event.currentTarget);
+    const { participants, milestone_suggestions, ...fields } = object(event.currentTarget);
     onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean),
-      milestone_suggestions: suggestions.split('\n').map(value => value.trim()).filter(Boolean) });
+      milestone_suggestions: milestone_suggestions.split('\n').map(value => value.trim()).filter(Boolean) });
   }}>
     {!project.id && <label>Project template
-      <select defaultValue="" onChange={event => setSuggestions(templateMilestones(event.target.value).join('\n'))}>
+      <select defaultValue="" onChange={event => applyTemplate(event.target.value)}>
         <option value="">Blank project</option>
         {projectTemplates.map(template => <option key={template.id} value={template.id}>{template.label}</option>)}
       </select>
@@ -49,10 +70,10 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
     <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
     <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
     <label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
-    <label>Scope <textarea name="scope" defaultValue={project.scope} maxLength={16000}/></label>
-    <label>Acceptance requirements <textarea name="acceptance" defaultValue={project.acceptance} maxLength={16000}/></label>
+    <label>Scope <textarea name="scope" value={draft.scope} onChange={editField} maxLength={16000}/></label>
+    <label>Acceptance requirements <textarea name="acceptance" value={draft.acceptance} onChange={editField} maxLength={16000}/></label>
     <label>Suggested milestones
-      <textarea value={suggestions} onChange={event => setSuggestions(event.target.value)}
+      <textarea name="milestone_suggestions" value={draft.milestone_suggestions} onChange={editField}
         placeholder="One milestone per line" rows={3} maxLength={1812}/>
     </label>
     <ProjectAppearance project={project}/>
