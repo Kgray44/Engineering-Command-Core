@@ -212,6 +212,7 @@ test('GitHub integration correlates jobs with required checks and rejects log ev
   let baseDrift = false;
   let downloaded = false;
   let infrastructure = true;
+  let missing = false;
   let checkUrl = 'https://api.github.com/repos/'+repo.full_name+'/check-runs/55';
   const logReads = [];
   const path = 'src/service.mjs';
@@ -229,7 +230,8 @@ test('GitHub integration correlates jobs with required checks and rejects log ev
     if (endpoint==='git/ref/heads/main') return Response.json({ref:'refs/heads/main',
       object:{sha:baseDrift&&downloaded?merged:base,type:'commit'}});
     if (endpoint==='rules/branches/main') return Response.json([{type:'required_status_checks',
-      parameters:{required_status_checks:[{context:'test',integration_id:9}]}}]);
+      parameters:{required_status_checks:[{context:'test',integration_id:9},
+        ...(missing ? [{ context: 'build', integration_id: 9 }] : [])]}}]);
     if (endpoint==='branches/main/protection') return new Response(null,{status:404});
     if (endpoint==='commits/'+head+'/check-runs') return Response.json({total_count:1,check_runs:[
       {id:55,head_sha:head,name:'test',app:{id:9},conclusion:'failure'},
@@ -262,10 +264,20 @@ test('GitHub integration correlates jobs with required checks and rejects log ev
   assert.equal(preview.reason, 'base_drift');
   assert.equal(preview.checks[0].state, 'failed');
   assert.equal(preview.jobs[0].required_check, true);
+  assert.deepEqual(preview.jobs[0].required_check_contexts, ['test']);
   assert.equal((await github.preview({ ...integration, head_sha: merged })).checks, undefined);
   pr.base.sha = base;
+  missing = true;
+  const mixed = await github.preview(integration);
+  assert.equal(mixed.reason, 'missing_checks');
+  assert.deepEqual(mixed.checks.map(check => check.state), ['failed', 'missing']);
+  assert.deepEqual(mixed.jobs.map(job => job.job_id), [19]);
+  assert.equal((await github.inspect(integration)).jobs, undefined);
+  missing = false;
   checkUrl = 'https://api.github.com/repos/'+repo.full_name+'/check-runs/56';
-  assert.equal((await github.inspect(integration)).jobs[0].required_check,false);
+  const unrelated = await github.inspect(integration);
+  assert.equal(unrelated.jobs[0].required_check,false);
+  assert.equal(unrelated.reason, 'ci_failure');
   infrastructure=false;
   assert.equal((await github.repairSource(integration,{includeLogs:true})).jobs[0].steps[0].log,undefined);
   checkUrl = 'https://api.github.com/repos/'+repo.full_name+'/check-runs/55';

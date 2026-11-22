@@ -151,14 +151,27 @@ function PullCheckPreview({ number, head, headers }) {
     <button type="button" className="quiet-button" disabled={loading} onClick={read}>Preview required checks</button>
     {loading && <p role="status">Reading GitHub checks…</p>}
     {result && <>
-      <p>Selected head <code>{head.slice(0, 12)}</code></p>
+      <dl className="integration-revisions">
+        <div><dt>Selected head</dt><dd><code title={head}>{head.slice(0, 12)}</code></dd></div>
+        {result.observed_head && result.observed_head !== head && <div><dt>Observed PR head</dt>
+          <dd><code title={result.observed_head}>{result.observed_head.slice(0, 12)}</code></dd></div>}
+        <div><dt>Observed main</dt><dd>{result.base_sha
+          ? <code title={result.base_sha}>{result.base_sha.slice(0, 12)}</code> : 'Unavailable'}</dd></div>
+      </dl>
       {result.detail && <p role="status">{result.detail}</p>}
       {result.check_error && <p>{result.check_error}</p>}
       {result.checks?.length ? <ul className="integration-evidence">{result.checks.map(check => <li key={JSON.stringify([check.context, check.app, check.source])}>
         <span>{check.context}</span><strong>{check.state}</strong>
       </li>)}</ul> : <p>No required check evidence available for this head.</p>}
       {!!result.jobs?.length && <ul className="integration-evidence">{result.jobs.map(job => <li key={job.job_id}>
-        <a href={job.url}>{job.name ?? 'Failed job ' + job.job_id}</a><strong>{job.conclusion}</strong>
+        <span>
+          <a href={job.url}>{job.name ?? 'Failed job ' + job.job_id}</a>
+          <small>Run {job.run_id} · Attempt {job.attempt}</small>
+          <small>{job.required_check_contexts?.length
+            ? 'Required check · ' + job.required_check_contexts.join(', ')
+            : 'Required check relationship unverified'}</small>
+        </span>
+        <strong>{job.conclusion}</strong>
       </li>)}</ul>}
     </>}
   </section>;

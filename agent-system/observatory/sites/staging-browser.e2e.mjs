@@ -345,7 +345,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       if (url.pathname.endsWith('/commits')) return Response.json([]);
       if (url.pathname.endsWith('/git/ref/heads/main')) return Response.json({ ref: 'refs/heads/main', object: { sha: 'd'.repeat(40), type: 'commit' } });
       if (url.pathname.endsWith('/rules/branches/main')) return Response.json([{ type: 'required_status_checks',
-        parameters: { required_status_checks: [{ context: 'Verification', integration_id: 9 }] } }]);
+        parameters: { required_status_checks: [{ context: 'Verification', integration_id: 9 },
+          { context: 'Packaging', integration_id: 9 }] } }]);
       if (url.pathname.endsWith('/check-runs')) return Response.json({ total_count: 1, check_runs: [
         { id: 77, name: 'Verification', head_sha: head, app: { id: 9 }, conclusion: 'failure' },
       ] });
@@ -358,8 +359,10 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
           { id: 88, head_sha: 'c'.repeat(40), name: 'Unrelated revision CI', status: 'completed', conclusion: 'success' });
         return Response.json({ total_count: workflow_runs.length, workflow_runs });
       }
-      if (url.pathname.endsWith('/actions/runs/8/attempts/1/jobs')) return Response.json({ total_count: 1, jobs: [
-        { id: 15, run_id: 8, head_sha: head, status: 'completed', conclusion: 'failure', name: 'Failed verification', steps: [] },
+      if (url.pathname.endsWith('/actions/runs/8/attempts/1/jobs')) return Response.json({ total_count: 2, jobs: [
+        { id: 15, run_id: 8, head_sha: head, status: 'completed', conclusion: 'failure', name: 'Failed verification', steps: [],
+          check_run_url: 'https://api.github.com/repos/' + repository + '/check-runs/77' },
+        { id: 16, run_id: 8, head_sha: head, status: 'completed', conclusion: 'failure', name: 'Optional example', steps: [] },
       ] });
       return Response.json({}, { status: 404 });
     },
@@ -754,8 +757,14 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await preview.getByRole('button', { name: 'Preview required checks' }).click();
   await preview.getByText('The observed main revision changed. Inspect the new base before proceeding.', { exact: true }).waitFor();
   await preview.getByText('Verification', { exact: true }).waitFor();
+  assert.equal(await preview.locator('code[title="' + head + '"]').textContent(), head.slice(0, 12));
+  assert.equal(await preview.locator('code[title="' + 'd'.repeat(40) + '"]').textContent(), 'd'.repeat(12));
+  await preview.getByRole('listitem').filter({ hasText: 'Packaging' }).getByText('missing', { exact: true }).waitFor();
   assert.equal(await preview.getByRole('link', { name: 'Failed verification' }).getAttribute('href'),
     'https://github.com/' + repository + '/actions/runs/8/job/15');
+  await preview.getByRole('listitem').filter({ hasText: 'Failed verification' }).getByText('Required check · Verification', { exact: true }).waitFor();
+  await preview.getByRole('listitem').filter({ hasText: 'Optional example' }).getByText('Required check relationship unverified', { exact: true }).waitFor();
+  assert.equal(await preview.getByText('Run 8 · Attempt 1', { exact: true }).count(), 2);
   await page.getByText('No integration runs recorded.', { exact: true }).waitFor();
   await page.getByText('Changed files', { exact: true }).click();
   await page.getByText('guide.md', { exact: true }).waitFor();

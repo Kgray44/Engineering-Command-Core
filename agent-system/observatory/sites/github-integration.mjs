@@ -139,7 +139,7 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken, repo
       evidence.required_approvals = Math.max(0, protection?.required_pull_request_reviews?.required_approving_review_count ?? 0,
         ...rules.filter(rule => rule.type === 'pull_request').map(rule => rule.parameters?.required_approving_review_count ?? 0));
       evidence.policy_observed = Boolean(protection || rules.length);
-      const failedRequiredCheckURLs = new Set();
+      const failedRequiredChecks = new Map();
       evidence.checks = required.filter((check, index) => normalizedName(check.context) &&
         required.findIndex(other => other.context === check.context && other.app === check.app && other.source === check.source) === index)
         .map(({ context, app, source }) => {
@@ -152,7 +152,9 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken, repo
           for (const check of checkRuns) {
             if (positive(check.id) && !passing.has(check.conclusion ?? check.status) &&
                 !pending.has(check.conclusion ?? check.status)) {
-              failedRequiredCheckURLs.add('https://api.github.com/repos/' + repository + '/check-runs/' + check.id);
+              const url = 'https://api.github.com/repos/' + repository + '/check-runs/' + check.id;
+              if (!failedRequiredChecks.has(url)) failedRequiredChecks.set(url, new Set());
+              failedRequiredChecks.get(url).add(context);
             }
           }
           return { context, app: app ?? null, source, state };
@@ -166,10 +168,12 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken, repo
         created_at: observedTime(run.created_at), run_started_at: observedTime(run.run_started_at), updated_at: observedTime(run.updated_at),
       }));
       if (!evidence.policy_observed) return finish(blocked('policy', 'No active merge protections were visible.', evidence));
-      if (!evidence.checks.length || evidence.checks.some(check => check.state === 'missing')) {
+      const missing = !evidence.checks.length || evidence.checks.some(check => check.state === 'missing');
+      const hasFailed = evidence.checks.some(check => check.state === 'failed');
+      if (missing && (!preview || !hasFailed)) {
         return finish(blocked('missing_checks', 'Required check evidence is missing for this revision.', evidence));
       }
-      if (evidence.checks.some(check => check.state === 'failed')) {
+      if (hasFailed) {
         const failed = evidence.workflows.filter(run => run.status === 'completed' && run.conclusion &&
           !passing.has(run.conclusion)).slice(0, 3);
         evidence.jobs = (await Promise.all(failed.map(async run => {
@@ -179,19 +183,24 @@ export function githubIntegration(fetcher, token, mergeToken, publishToken, repo
             return result.jobs.filter(job => positive(job.id) && job.run_id === run.run_id &&
               (job.run_attempt === undefined || job.run_attempt === run.attempt) &&
               job.head_sha === head && job.status === 'completed' &&
-              ['failure', 'timed_out', 'startup_failure'].includes(job.conclusion) && Array.isArray(job.steps)).slice(0, 8).map(job => ({
-              job_id: job.id, run_id: run.run_id, attempt: run.attempt, workflow_id: run.workflow_id,
-              name: normalizedName(job.name), conclusion: job.conclusion, head_sha: head,
-              url: run.url + '/job/' + job.id,
-              required_check: run.same_repository && failedRequiredCheckURLs.has(job.check_run_url),
-              infrastructure: ['startup_failure', 'stale'].includes(run.conclusion) &&
-                !(job.steps ?? []).some(step => step.conclusion === 'failure'),
-              failed_steps: (job.steps ?? []).filter(step => step.conclusion === 'failure' && positive(step.number))
-                .slice(0, 8).map(step => ({ number: step.number, name: normalizedName(step.name) })),
-            }));
+              ['failure', 'timed_out', 'startup_failure'].includes(job.conclusion) && Array.isArray(job.steps)).slice(0, 8).map(job => {
+              const contexts = run.same_repository ? [...(failedRequiredChecks.get(job.check_run_url) ?? [])] : [];
+              return {
+                job_id: job.id, run_id: run.run_id, attempt: run.attempt, workflow_id: run.workflow_id,
+                name: normalizedName(job.name), conclusion: job.conclusion, head_sha: head,
+                url: run.url + '/job/' + job.id,
+                required_check: contexts.length > 0, ...(preview && { required_check_contexts: contexts }),
+                infrastructure: ['startup_failure', 'stale'].includes(run.conclusion) &&
+                  !job.steps.some(step => step.conclusion === 'failure'),
+                failed_steps: job.steps.filter(step => step.conclusion === 'failure' && positive(step.number))
+                  .slice(0, 8).map(step => ({ number: step.number, name: normalizedName(step.name) })),
+              };
+            });
           } catch { return []; }
         }))).flat();
-        const transient = evidence.jobs.some(job => job.infrastructure) && !evidence.jobs.some(job => job.failed_steps.length);
+        if (missing) return finish(blocked('missing_checks', 'Required check evidence is missing for this revision.', evidence));
+        const requiredJobs = evidence.jobs.filter(job => job.required_check);
+        const transient = requiredJobs.length > 0 && requiredJobs.every(job => job.infrastructure);
         return finish(blocked(transient ? 'ci_infrastructure' : 'ci_failure', 'GitHub reports a failed required check.', evidence));
       }
       if (sourceBlocker) return finish(evidence);
