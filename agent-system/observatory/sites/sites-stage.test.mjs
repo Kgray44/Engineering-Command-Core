@@ -55,6 +55,10 @@ test('two private Sites share an engine and keep durable Projects in distinct da
   const discovery = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
   assert.ok((await (await call(0, '/mcp', discovery)).json()).result.tools.some(tool => tool.name === 'list_applications'));
   assert.equal((await call(1, '/mcp', discovery)).status, 404);
+  assert.ok((await (await call(0, '/api/settings/discovery')).json()).tools.includes('task_engine_v1'));
+  assert.equal((await call(1, '/api/settings/discovery')).status, 404);
+  assert.equal((await call(0, '/api/settings/discovery', discovery)).status, 405);
+  assert.equal((await call(0, '/api/settings/discovery', undefined, '')).status, 403);
   const created = await Promise.all(applications.map((app, i) => call(i, '/api/projects', {
     op: 'create', id: crypto.randomUUID(), fields: { name: app.name, objective: 'Qualify the staged integration' },
   })));

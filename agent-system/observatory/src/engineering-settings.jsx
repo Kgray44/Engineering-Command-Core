@@ -95,13 +95,11 @@ function ConnectionChecks({ settings, headers }) {
       if (body.status !== 'ready' || body.application?.id !== settings.application.id || !/^[0-9a-f]{40}$/.test(body.revision)) throw Error();
       return <>Ready for {settings.application.name} <code title={body.revision}>{body.revision.slice(0, 12)}</code></>;
     })]];
-    if (connector?.discovery_here) probes.push(['discovery', connectionProbe('/mcp', {
-      method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, signal: controller.signal,
-      body: JSON.stringify({ jsonrpc: '2.0', id: 'connection-discovery', method: 'tools/list' }),
+    if (connector?.discovery_here) probes.push(['discovery', connectionProbe('/api/settings/discovery', {
+      headers, signal: controller.signal,
     }, body => {
-      const names = new Set(body.result?.tools?.map(tool => tool.name));
-      if (body.jsonrpc !== '2.0' || body.id !== 'connection-discovery' ||
-          !['list_applications', 'task_engine_v1', 'projects_v1'].every(name => names.has(name))) throw Error();
+      const names = new Set(body.tools);
+      if (!['list_applications', 'task_engine_v1', 'projects_v1'].every(name => names.has(name))) throw Error();
       return 'Required tools discovered';
     })]);
     const outcomes = await Promise.all(probes.map(async ([key, probe]) => [key, await probe]));
@@ -122,7 +120,7 @@ function ConnectionChecks({ settings, headers }) {
         ['Deployed service and database', results.service?.latest ?? 'Awaiting probe'],
         ['Last successful service probe', date(results.service?.passedAt)],
         ['Last service probe failure', results.service?.failure ? results.service.failure + ' · ' + date(results.service.failedAt) : 'None observed in this session'],
-        ['Site MCP discovery', connector?.discovery_here ? results.discovery?.latest ?? 'Awaiting probe' :
+        ['Site MCP tool registry', connector?.discovery_here ? results.discovery?.latest ?? 'Awaiting probe' :
           connector?.connector_origin ? <a href={connector.connector_origin + '/#settings/connections'}>Verify on the shared connector Site</a> : 'Unavailable from this Site'],
         ...(connector?.discovery_here ? [
           ['Last successful discovery', date(results.discovery?.passedAt)],

@@ -44,6 +44,18 @@ const response = (body, status = 200) => Response.json(body, {
 });
 const error = (message, status) => response({ error: message }, status);
 
+async function listTools(runtime, scoped, request, message) {
+  const original = await (await runtime.worker.fetch(new Request(new URL('/mcp', request.url), {
+    method: 'POST', headers: request.headers, body: JSON.stringify(message),
+  }), scoped)).json();
+  const existing = original.result.tools.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
+    properties: { ...tool.inputSchema.properties, application_id: toolSchema.properties.application_id },
+  } }));
+  return [...existing, { name: 'projects_v1', description: 'List and manage scoped engineering Projects', inputSchema: toolSchema },
+    { name: 'list_applications', description: 'List engineering applications assigned to the authenticated caller',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} } }];
+}
+
 function scopedEnvironment(env, binding) {
   return Object.fromEntries(environmentKeys.map(key => [key, env[binding]?.[key] ?? env[binding + '_' + key]]));
 }
@@ -202,13 +214,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           }), scoped);
           if (message.method === 'tools/list') {
             const app = allowed[0];
-            const original = await (await forward(app, resolve(env, owner, app), message)).json();
-            const existing = original.result.tools.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
-              properties: { ...tool.inputSchema.properties, application_id: toolSchema.properties.application_id },
-            } }));
-            return rpc({ tools: [...existing, { name: 'projects_v1', description: 'List and manage scoped engineering Projects', inputSchema: toolSchema },
-              { name: 'list_applications', description: 'List engineering applications assigned to the authenticated caller',
-                inputSchema: { type: 'object', additionalProperties: false, properties: {} } }] });
+            return rpc({ tools: await listTools(app, resolve(env, owner, app), request, message) });
           }
           if (message.method !== 'tools/call') return forward(allowed[0], resolve(env, owner, allowed[0]), message);
           if (typeof args !== 'object' || !args || Array.isArray(args)) return reject(-32602, 'Invalid tool arguments');
@@ -256,6 +262,15 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
           const namespace = verification ? 'verification:' + verification : 'live';
           return response(await readDataHealth(scoped.DB, owner, namespace));
+        }
+        if (url.pathname === '/api/settings/discovery') {
+          if (request.method !== 'GET') return error('Method not allowed', 405);
+          if (connectorApplication && connectorApplication !== originRuntime.application.id) return error('Connector discovery is on the shared Site', 404);
+          const headers = new Headers(request.headers);
+          headers.set('content-type', 'application/json');
+          const discovery = new Request(request, { headers });
+          const tools = await listTools(originRuntime, scoped, discovery, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+          return response({ tools: tools.map(tool => tool.name) });
         }
         if (url.pathname === '/api/settings') {
           const verification = request.headers.get('x-observatory-verification');
