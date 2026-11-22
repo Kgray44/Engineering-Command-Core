@@ -40,7 +40,7 @@ Visual inspection of six sampled frames per application found no blank bands. Hi
 
 ### Project Library navigation
 
-During foreground Edge 157 navigation on Windows, the first Voyagewright Project Library load on staging revision `ba359a7` displaced the footer by 432 CSS pixels 643 ms after the click. The layout shift score was 0.0143. Layout Instability attributed the shift to the footer as the portfolio completed. The Project Library now reserves viewport height for the main column while the portfolio loads. A browser regression holds the Projects API response and compares the footer position before and after the cards render.
+During foreground Edge 157 navigation on Windows, the first Voyagewright Project Library load on staging revision `ba359a7` displaced the footer by 432 CSS pixels 643 ms after the click. The layout shift score was 0.0143. Layout Instability attributed the shift to the footer as the portfolio completed. The Project Library now reserves viewport height for the main column while the portfolio loads. A follow-up probe traced a separate 16-pixel movement to the loading paragraph margin collapsing through the workspace. The workspace now establishes its own formatting context to keep that margin inside it. A browser regression holds the Projects API response and compares both the workspace and footer positions before and after the cards render.
 
 ### Settings confirmation and live Task updates
 
