@@ -41,13 +41,22 @@ export function taskEvidenceHref(id) {
   return taskHref(id)+evidenceSuffix;
 }
 
+export function taskAttemptHref(id, attemptId) {
+  return taskHref(id) + '?attempt=' + encodeURIComponent(attemptId).replaceAll('%3A', ':');
+}
+
 export function parseTaskHref(hash) {
   if (hash === '#tasks') return { id: null };
   const work=/^#tasks\?work=([a-zA-Z]+)$/.exec(hash)?.[1];
   if(work&&Object.hasOwn(workLabels,work))return {id:null,work};
-  const evidence = hash.endsWith(evidenceSuffix);
-  const id = hash.startsWith('#tasks/') && hash.slice(7, evidence ? -evidenceSuffix.length : undefined);
-  return id && idPattern.test(id) ? { id, ...(evidence ? { section: 'evidence' } : {}) } : null;
+  const [path, query] = hash.split('?', 2);
+  const id = path.startsWith('#tasks/') && path.slice(7);
+  if (!id || !idPattern.test(id)) return null;
+  if (!hash.includes('?')) return { id };
+  if (hash === path + evidenceSuffix) return { id, section: 'evidence' };
+  const attemptId = query.startsWith('attempt=') && query.slice('attempt='.length);
+  return attemptId && idPattern.test(attemptId) && hash === path + '?attempt=' + attemptId
+    ? { id, attemptId } : null;
 }
 
 export function sortTasks(tasks, sort, priority = task => task.priority) {

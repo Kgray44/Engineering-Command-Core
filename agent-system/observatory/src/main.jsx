@@ -485,11 +485,14 @@ const jumpToSection=id=>{
   panel?.querySelector('h2,h3')?.focus({preventScroll:true});
   panel?.scrollIntoView({block:'start',behavior:reduce?'instant':'smooth'});
 };
+const requestedAttempt = taskRoute?.attemptId && taskAttempts.find(attempt => attempt.id === taskRoute.attemptId);
+const taskSection = taskRoute?.section === 'evidence' ? 'task-evidence'
+  : requestedAttempt ? 'task-attempt-' + requestedAttempt.id : null;
 useEffect(()=>{
-  if(taskRoute?.section!=='evidence'||!current?.id)return;
-  const frame=requestAnimationFrame(()=>jumpToSection('task-evidence'));
+  if(!taskSection||!current?.id)return;
+  const frame=requestAnimationFrame(()=>jumpToSection(taskSection));
   return ()=>cancelAnimationFrame(frame);
-},[taskRoute?.section,current?.id,reduce]);
+},[taskSection,current?.id,reduce]);
 const activityGroup=kind=>demo?null:kind==='pulls'?github?.pulls:github?.ci;
 const dispatchObservation=!demo&&watchingTasks&&engine.status==='available'&&
   <div className="notice"><Radio size={16}/><span>{dispatchStatus.label}{Number.isInteger(engine.workerDispatch?.total_slots)&&

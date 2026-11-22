@@ -328,9 +328,10 @@ export async function projectOperation({ db, owner, namespace, application, body
       for (const attempt of engine?.attempts ?? []) {
         telemetry.attempts++;
         if (['failed', 'orphaned'].includes(attempt.state)) telemetry.failures++;
-        projectAttempts.push(taskAttemptRecord(task, attempt));
         const elapsed = Date.parse(attempt.finished_at) - Date.parse(attempt.started_at);
-        if (Number.isFinite(elapsed) && elapsed >= 0) telemetry.execution_ms = (telemetry.execution_ms ?? 0) + elapsed;
+        const execution_ms = Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
+        projectAttempts.push({ ...taskAttemptRecord(task, attempt), recorded_state: attempt.state, execution_ms });
+        if (execution_ms !== null) telemetry.execution_ms = (telemetry.execution_ms ?? 0) + execution_ms;
       }
     }
     const ids = new Set(projectTasks.map(task => task.id));
@@ -345,6 +346,17 @@ export async function projectOperation({ db, owner, namespace, application, body
     Object.assign(telemetry, { measured_attempts: measured.byAttempt.filter(attempt => attempt.observed.totalTokens !== null).length,
       input_tokens: measured.observed.inputTokens, cached_input_tokens: measured.observed.cachedInputTokens,
       output_tokens: measured.observed.outputTokens });
+    const tokensByAttempt = new Map(measured.byAttempt.map(item => [item.attemptId, item]));
+    telemetry.recent_attempts = projectAttempts.sort((a, b) => b.started_at.localeCompare(a.started_at) || a.id.localeCompare(b.id))
+      .slice(0, 20).map(attempt => {
+        const tokens = tokensByAttempt.get(attempt.id);
+        return {
+          id: attempt.id, task_id: attempt.task_id, number: attempt.attempt_number,
+          state: attempt.recorded_state, started_at: attempt.started_at, execution_ms: attempt.execution_ms,
+          provider: attempt.provider, failure_category: attempt.failure_category,
+          observed_tokens: tokens?.observed.totalTokens ?? null, token_coverage: tokens?.coverage ?? 'unavailable',
+        };
+      });
     let previousReview = '';
     const projectHistory = history.results.flatMap(({ owner_review, ...event }) => {
       const review = owner_review ?? '';

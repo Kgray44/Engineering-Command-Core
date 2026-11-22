@@ -843,6 +843,14 @@ test('an open Project reflects a remote Task claim without a manual refresh or p
   await history.getByText('heartbeat', { exact: true }).waitFor();
   await history.getByRole('button', { name: 'Hide worker heartbeats' }).click();
   assert.equal(await history.getByText('heartbeat', { exact: true }).count(), 0);
+  const telemetry = page.locator('#project-telemetry');
+  await telemetry.getByText('Recent recorded attempts', { exact: true }).click({ timeout: 5_000 });
+  const attemptRow = telemetry.getByRole('listitem').filter({ hasText: 'Remote status probe' });
+  await attemptRow.getByText('running', { exact: true }).waitFor();
+  await attemptRow.getByText('Token total unavailable', { exact: true }).waitFor();
+  const attemptLink = attemptRow.getByRole('link', { name: 'Remote status probe, attempt 1', exact: true });
+  await attemptLink.click();
+  await page.waitForFunction(id => document.activeElement === document.getElementById('task-attempt-' + id)?.querySelector('h3'), claim.attempt.id);
 });
 
 test('touch reorders Project cards across mobile grid rows and reloads the order', { timeout: 60_000 }, async t => {

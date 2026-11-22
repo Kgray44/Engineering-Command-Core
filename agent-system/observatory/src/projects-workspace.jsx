@@ -10,7 +10,7 @@ import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldChec
 import { useCardMotion } from './card-motion.jsx';
 import { parseActivityHref, taskActivityHref } from './github-activity.mjs';
 import { StickySectionAside } from './sticky-section-aside.jsx';
-import { sortTasks, taskEvidenceHref, taskHref } from './task-workspace.mjs';
+import { sortTasks, taskAttemptHref, taskEvidenceHref, taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
 
 const stages = ['planned', 'active', 'paused', 'archived'];
@@ -641,7 +641,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           <dt>Attempts</dt><dd>{telemetry.attempts}</dd>
           <dt>Retries</dt><dd>{telemetry.retries}</dd>
           <dt>Failed or orphaned</dt><dd>{telemetry.failures}</dd>
-          <dt>Attempts with recorded token usage</dt><dd>{telemetry.measured_attempts}</dd>
+          <dt>Attempts with recorded CLI token usage</dt><dd>{telemetry.measured_attempts}</dd>
           <dt>Recorded attempt duration</dt><dd>{telemetry.execution_ms === null ? 'Unavailable' : number(Math.round(telemetry.execution_ms / 1000)) + ' s'}</dd>
           <dt>Execution cost</dt><dd>{number(telemetry.costs)}</dd>
           <dt>CI usage</dt><dd>{number(telemetry.ci_usage)}</dd>
@@ -649,6 +649,23 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           <dt>Cached input tokens</dt><dd>{number(telemetry.cached_input_tokens)}</dd>
           <dt>Output tokens</dt><dd>{number(telemetry.output_tokens)}</dd>
         </dl>
+        {telemetry.recent_attempts?.length > 0 && <details>
+          <summary>Recent recorded attempts</summary>
+          {telemetry.attempts > telemetry.recent_attempts.length && <p>Showing the latest {telemetry.recent_attempts.length} attempts.</p>}
+          <ol className="project-list">{telemetry.recent_attempts.map(attempt => {
+            const title = tasks.find(item => item.id === attempt.task_id)?.title ?? 'Task';
+            return <li key={attempt.id}>
+              <a href={taskAttemptHref(attempt.task_id, attempt.id)}>{title}, attempt {attempt.number}</a>
+              <Status value={attempt.state}/>
+              <time dateTime={attempt.started_at}>{new Date(attempt.started_at).toLocaleString()}</time>
+              {attempt.provider && <small>{attempt.provider}</small>}
+              {attempt.execution_ms !== null && <small>{number(Math.round(attempt.execution_ms / 1000))} s elapsed</small>}
+              {attempt.failure_category && <small>{attempt.failure_category.replaceAll('_', ' ')}</small>}
+              <small>{attempt.observed_tokens === null ? 'Token total unavailable'
+                : number(attempt.observed_tokens) + (attempt.token_coverage === 'complete' ? ' recorded CLI tokens' : ' observed CLI tokens · partial')}</small>
+            </li>;
+          })}</ol>
+        </details>}
       </Panel>
       <Panel id="project-history" title="History">
         {!!heartbeatCount && <button type="button" className="quiet-button" aria-pressed={showHeartbeats}
