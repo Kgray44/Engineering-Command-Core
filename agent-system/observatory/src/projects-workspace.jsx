@@ -290,7 +290,7 @@ const historyLabel = item => item.name ?? (item.source === 'integration' && item
   ? 'Integration started' : item.kind.replaceAll('_', ' '));
 const workerHeartbeat = item => item.source === 'task' && item.kind === 'heartbeat';
 
-function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaults, onSaveDefault, savingDefault, defaultMessage, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
+function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaults, onSaveDefault, savingDefault, defaultMessage, Panel, Status, Metric, editing, onEdit, onReorder, orderMessage, busy, children }) {
   const interaction = useCardMotion(true);
   const views = projectViews.map(([id, label, matches]) => [id, label, projects.filter(matches)]);
   const viewItems = views.find(([id]) => id === filters.view)[2];
@@ -359,12 +359,13 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
           {savingDefault ? 'Saving default view' : 'Save as default view'}
         </button>}
         {defaultMessage && <small role="status">{defaultMessage}</small>}
+        {orderMessage && <small role="status">{orderMessage}</small>}
       </div>
       {!items.length && <p>{projects.length ? 'No Projects match these filters.' : 'No Projects in the current feed.'}</p>}
       {filters.sort === 'manual' && !manualView && <small>To reorder cards, open Current Projects and clear search, state, and grouping.</small>}
       {groups.map(([label, rows]) => <section key={label} className="task-group" aria-label={label}>
         {filters.group !== 'none' && <h3>{label} <span>{rows.length}</span></h3>}
-        <ProjectCardGrid layout={layout} rows={rows} Status={Status} sortable={manualView && rows.length > 1} onMove={busy ? () => {} : reorder}/>
+        <ProjectCardGrid layout={layout} rows={rows} Status={Status} sortable={manualView && rows.length > 1} locked={busy} onMove={reorder}/>
       </section>)}
     </Panel>
   </>;
@@ -377,6 +378,7 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
   const [filters, setFilters] = useState(defaults);
   const [savingDefault, setSavingDefault] = useState(false);
   const [defaultMessage, setDefaultMessage] = useState('');
+  const [orderMessage, setOrderMessage] = useState('');
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [addingMilestone, setAddingMilestone] = useState(null);
@@ -442,14 +444,27 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
     setBusy(true);
     setError('');
     const linkingMilestone = ['milestone_gate', 'milestone_link'].includes(request.op);
+    const reordering = request.op === 'reorder';
     if (linkingMilestone) setGateError(null);
+    if (reordering) setOrderMessage('Saving project order…');
     try {
       const result = await projectRequest({ id: projectId, ...request }, headers);
       onSuccess?.(result);
-      if (request.op !== 'create') await load();
+      if (reordering) {
+        ++readVersion.current;
+        setData(previous => (previous?.manual_order?.version ?? 0) > result.manual_order.version
+          ? previous : { ...previous, manual_order: result.manual_order });
+        setOrderMessage('Project order saved.');
+      } else if (request.op !== 'create') await load();
     } catch (error) {
-      if (request.op === 'reorder' && error.status === 409 ||
-          ['link_task', 'remove_milestone_gate'].includes(request.op) && [404, 409].includes(error.status)) await load().catch(() => {});
+      if (reordering) {
+        setOrderMessage('');
+        if (error.status === 409 && await load().then(() => true, () => false)) {
+          setError('Project order changed. The latest saved order is shown.');
+          return;
+        }
+      }
+      if (['link_task', 'remove_milestone_gate'].includes(request.op) && [404, 409].includes(error.status)) await load().catch(() => {});
       if (linkingMilestone) setGateError(error);
       else setError(error.message);
     } finally {
@@ -508,7 +523,7 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
     {application && !projectId && <ProjectExplorer application={application} projects={projects} unassigned={data.unassigned_tasks}
       filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaults={defaults}
       onSaveDefault={settings ? saveDefaultView : undefined} savingDefault={savingDefault} defaultMessage={defaultMessage} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
-      manualOrder={data.manual_order ?? { version: 0, project_ids: [] }} onReorder={submit} busy={busy}>
+      manualOrder={data.manual_order ?? { version: 0, project_ids: [] }} onReorder={submit} orderMessage={orderMessage} busy={busy}>
       {edit && <div className="project-create"><ProjectForm busy={busy} defaultPriority={preferences.project_priority} customTemplates={preferences.project_templates} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
         window.location.hash = projectHref(result.project.id);
       })}/></div>}

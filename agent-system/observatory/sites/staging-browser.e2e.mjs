@@ -284,10 +284,29 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.deepEqual(await titles.allTextContents(), firstNames);
   const reorderReceipt = () => page.waitForResponse(response => response.url().endsWith('/api/projects') &&
     response.request().method() === 'POST' && response.request().postDataJSON().op === 'reorder');
+  const holdOrderSave = Promise.withResolvers();
+  await page.route('**/api/projects', async route => {
+    if (route.request().method() === 'POST' && route.request().postDataJSON().op === 'reorder') await holdOrderSave.promise;
+    return route.continue();
+  });
   const keyboardReceipt = reorderReceipt();
   await moveWithKeyboard();
   await page.keyboard.press('Space');
+  try {
+    await page.getByText('Saving project order…', { exact: true }).waitFor();
+    assert.equal(await handle.getAttribute('aria-disabled'), 'true');
+    assert.equal(await handle.evaluate(node => node === document.activeElement), true);
+    await page.keyboard.press('Space');
+    assert.equal(await page.locator('[data-dragging]').count(), 0);
+    assert.deepEqual(await titles.allTextContents(), firstNames);
+  } finally {
+    holdOrderSave.resolve();
+  }
   assert.equal((await keyboardReceipt).status(), 200);
+  await page.getByText('Project order saved.', { exact: true }).waitFor();
+  assert.equal(await handle.getAttribute('aria-disabled'), null);
+  assert.deepEqual(await titles.allTextContents(), [...firstNames].reverse());
+  await page.unroute('**/api/projects');
   await page.reload();
   await titles.first().waitFor();
   assert.deepEqual(await titles.allTextContents(), [...firstNames].reverse());
@@ -312,6 +331,16 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.deepEqual(await titles.allTextContents(), firstNames);
   await page.locator('.project-card-grid').scrollIntoViewIfNeeded();
   await capture(page, 'aetherwake-project-library.png');
+  const { manual_order: order } = (await stage.run('/api/projects')).body;
+  assert.equal((await stage.run('/api/projects', { op: 'reorder', project_ids: [...order.project_ids].reverse(),
+    expected_version: order.version })).status, 200);
+  const staleDrop = reorderReceipt();
+  await moveWithKeyboard();
+  await page.keyboard.press('Space');
+  assert.equal((await staleDrop).status(), 409);
+  await page.getByRole('alert').getByText('Project order changed. The latest saved order is shown.', { exact: true }).waitFor();
+  assert.deepEqual(await titles.allTextContents(), [...firstNames].reverse());
+  assert.equal(await page.getByText('Project order saved.', { exact: true }).count(), 0);
   assert.equal(part.sqlite.prepare("SELECT count(*) AS count FROM proposals WHERE project_id IS NOT NULL").get().count, 1);
 });
 

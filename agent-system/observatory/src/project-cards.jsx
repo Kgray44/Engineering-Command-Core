@@ -44,10 +44,10 @@ export function ProjectAppearance({ project }) {
   </details>;
 }
 
-function Card({ item, Status, sortable, keyboard }) {
+function Card({ item, Status, sortable, locked, keyboard }) {
   const reduced = useReducedMotion();
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging, isOver } =
-    useSortable({ id: item.id, disabled: !sortable });
+    useSortable({ id: item.id, disabled: !sortable || locked });
   const pickedUp = sortable && keyboard.drag?.id === item.id;
   const hovered = isOver || (sortable && keyboard.drag?.target === item.id);
   const dragging = isDragging || pickedUp;
@@ -69,8 +69,8 @@ function Card({ item, Status, sortable, keyboard }) {
       <span className="project-card-action">Open project <ChevronRight size={15} aria-hidden="true"/></span>
     </motion.a>
     {sortable && <button type="button" className="icon-button project-card-handle" ref={setActivatorNodeRef}
-      {...attributes} {...listeners} aria-label={'Reorder ' + item.name} aria-pressed={pickedUp}
-      onKeyDown={event => keyboard.onKey(event, item.id)} onBlur={() => keyboard.cancel(item.id)}>
+      {...attributes} {...listeners} aria-label={'Reorder ' + item.name} aria-pressed={pickedUp} aria-disabled={locked || undefined}
+      onKeyDown={event => { if (!locked) keyboard.onKey(event, item.id); }} onBlur={() => keyboard.cancel(item.id)}>
       <Grip size={18} aria-hidden="true"/>
     </button>}
   </li>;
@@ -100,7 +100,7 @@ function useKeyboardOrder(ids, title, onMove) {
         setDrag(null);
         if (drag.target !== id) onMove(ids, id, drag.target);
         setAnnouncement(drag.target === id ? 'Order unchanged' :
-          'Moved ' + title(id) + ' to position ' + (ids.indexOf(drag.target) + 1));
+          'Dropped ' + title(id) + ' at position ' + (ids.indexOf(drag.target) + 1));
       }
       return;
     }
@@ -120,7 +120,7 @@ function useKeyboardOrder(ids, title, onMove) {
   return { drag, announcement, onKey, cancel };
 }
 
-export function ProjectCardGrid({ rows, Status, sortable, onMove, layout }) {
+export function ProjectCardGrid({ rows, Status, sortable, locked, onMove, layout }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -129,20 +129,21 @@ export function ProjectCardGrid({ rows, Status, sortable, onMove, layout }) {
   const title = id => rows.find(item => item.id === id)?.name;
   const keyboard = useKeyboardOrder(ids, title, onMove);
   return <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
-    if (sortable && over && active.id !== over.id) onMove(ids, active.id, over.id);
+    if (sortable && !locked && over && active.id !== over.id) onMove(ids, active.id, over.id);
   }} accessibility={{
     screenReaderInstructions: { draggable: 'Press Space or Enter to pick up the card. Use the arrow keys to choose its position. Press Space or Enter to drop it, or Escape to cancel.' },
     announcements: {
       onDragStart: ({ active }) => 'Picked up ' + title(active.id),
       onDragOver: ({ over }) => over ? 'Over ' + title(over.id) : 'Outside the project grid',
       onDragEnd: ({ active, over }) => !over || active.id === over.id ? 'Order unchanged' :
-        'Moved ' + title(active.id) + ' to position ' + (ids.indexOf(over.id) + 1),
+        'Dropped ' + title(active.id) + ' at position ' + (ids.indexOf(over.id) + 1),
       onDragCancel: () => 'Reordering canceled',
     },
   }}>
     <span className="project-reorder-announcement" role="status" aria-live="polite">{keyboard.announcement}</span>
     <SortableContext items={ids} strategy={rectSortingStrategy}>
-      <ul className="project-card-grid" data-layout={layout}>{rows.map(item => <Card key={item.id} item={item} Status={Status} sortable={sortable} keyboard={keyboard}/>)}</ul>
+      <ul className="project-card-grid" data-layout={layout}>{rows.map(item =>
+        <Card key={item.id} item={item} Status={Status} sortable={sortable} locked={locked} keyboard={keyboard}/>)}</ul>
     </SortableContext>
   </DndContext>;
 }
