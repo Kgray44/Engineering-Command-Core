@@ -564,6 +564,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(receipt.request().postDataJSON().pr_number, 7);
   await page.goto(stage.origin + '/#merge?run=' + run.id + '&pr=7');
   await page.locator('#integration-detail-title').waitFor();
+  await page.getByText('Recorded run span', { exact: false }).waitFor();
+  assert.match(await page.getByRole('region', { name: 'Integration history' }).innerText(), /Recorded span \d+ s/);
 });
 
 test('the Project Library layout stays stable while a slow portfolio request completes', { timeout: 45_000 }, async t => {

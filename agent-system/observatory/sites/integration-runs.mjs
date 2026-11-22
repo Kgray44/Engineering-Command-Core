@@ -11,6 +11,7 @@ const taskId = value => typeof value === 'string' && value.startsWith('task_') &
 const positive = value => Number.isSafeInteger(value) && value > 0;
 const merged = run => ['merged', 'deployed'].includes(run.state);
 const decode = row => row ? JSON.parse(row.record) : null;
+const historyRun = row => ({ ...decode(row), updated_at: row.updated_at });
 const mergeMethods = new Set(['merge', 'squash', 'rebase']);
 const finishedRequests = new Set(['failed', 'rejected', 'unavailable']);
 const canSubmit = run => !run.merge_attempt || finishedRequests.has(run.merge_attempt.status);
@@ -201,17 +202,26 @@ export async function integrationOperation({ db, owner, namespace, github, acces
   }
   if (body?.op === 'list') {
     if (body.task_id !== undefined && !taskId(body.task_id)) return errors(400, 'Invalid Task identity');
-    const rows = await query(`SELECT record FROM integration_runs WHERE owner_id = ? AND namespace = ?
+    const rows = await query(`SELECT record, updated_at FROM integration_runs WHERE owner_id = ? AND namespace = ?
       AND (? IS NULL OR task_id = ?) ORDER BY updated_at DESC, id DESC LIMIT 100`,
     ...scope, body.task_id ?? null, body.task_id ?? null).all();
-    return success({ access, runs: rows.results.map(decode) });
+    return success({ access, runs: rows.results.map(historyRun) });
   }
   if (body?.op === 'get' && uuid(body.id)) {
-    const run = await get(body.id);
-    if (!run) return errors(404, 'Integration run not found');
-    const history = await query(`SELECT event FROM integration_events WHERE owner_id = ? AND namespace = ?
-      AND integration_id = ? ORDER BY version DESC LIMIT ?`, ...scope, run.id, maxEvents).all();
-    return success({ access, run, events: history.results.map(row => JSON.parse(row.event)).map(({ digest, ...event }) => event) });
+    const row = await query('SELECT record, updated_at FROM integration_runs WHERE owner_id = ? AND namespace = ? AND id = ?',
+      ...scope, body.id).first();
+    if (!row) return errors(404, 'Integration run not found');
+    const run = historyRun(row);
+    const [history, project] = await Promise.all([
+      query(`SELECT event FROM integration_events WHERE owner_id = ? AND namespace = ?
+        AND integration_id = ? ORDER BY version DESC LIMIT ?`, ...scope, run.id, maxEvents).all(),
+      run.task ? query(`SELECT p.id, json_extract(p.metadata, '$.name') AS name FROM proposals t JOIN projects p
+        ON p.owner_id = t.owner_id AND p.namespace = t.namespace AND p.id = t.project_id
+        WHERE t.owner_id = ? AND t.namespace = ? AND t.task_id = ? AND json_extract(t.record, '$.repository') = ?`,
+      ...scope, run.task.id, repository).first() : null,
+    ]);
+    return success({ access, run, project: project ?? null,
+      events: history.results.map(row => JSON.parse(row.event)).map(({ digest, ...event }) => event) });
   }
 
   const action = actionFor(body);

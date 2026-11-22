@@ -5,6 +5,16 @@ function elapsed(from, to) {
   return Number.isFinite(duration) && duration >= 0 ? duration : null;
 }
 
+export function integrationRunDuration(run) {
+  const ms = elapsed(run.created_at, run.updated_at);
+  if (ms === null) return 'Unavailable';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return seconds + ' s';
+  const minutes = Math.floor(seconds / 60);
+  return minutes < 60 ? minutes + ' min ' + seconds % 60 + ' s'
+    : Math.floor(minutes / 60) + ' h ' + minutes % 60 + ' min';
+}
+
 export function integrationLogFact(fact) {
   if (fact.kind === 'source_location') return [fact.path,fact.line,fact.column].filter(Boolean).join(':');
   if (fact.kind === 'exit_code') return 'Exit code ' + fact.code;

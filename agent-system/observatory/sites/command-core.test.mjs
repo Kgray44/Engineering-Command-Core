@@ -489,7 +489,7 @@ test('Project milestone ordering and eligible Task moves preserve canonical reco
 });
 
 test('Merge source discovery reads scoped Task and Project associations before an integration run exists', async t => {
-  const { call, task } = setup(t);
+  const { call, task, one } = setup(t);
   const projectId = crypto.randomUUID();
   const head = 'b'.repeat(40);
   const operationId = crypto.randomUUID();
@@ -528,6 +528,21 @@ test('Merge source discovery reads scoped Task and Project associations before a
   assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.associations, []);
   assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
   assert.equal((await call(0, '/api/integrations/v1?pr_number=81junk')).status, 400);
+  const runId = crypto.randomUUID();
+  const associatedTaskId = primary.body.associations[0].task.id;
+  const createdAt = '2026-11-22T00:00:00.000Z';
+  const updatedAt = '2026-11-22T00:02:15.000Z';
+  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, 81, 'blocked', 1, ?, ?, ?)")
+    .run('synthetic-owner', runId, associatedTaskId, crypto.randomUUID(), head, updatedAt,
+      JSON.stringify({ id: runId, repository: fixture[0].repository, state: 'blocked',
+        task: { id: associatedTaskId }, created_at: createdAt }),
+      JSON.stringify({ operation_id: crypto.randomUUID(), at: updatedAt }));
+  const history = await call(0, '/api/integrations/v1?id=' + runId);
+  assert.equal(history.body.run.updated_at, updatedAt);
+  assert.deepEqual(history.body.project, { id: projectId, name: 'Delivery project' });
+  assert.equal((await call(0, '/api/integrations/v1')).body.runs[0].updated_at, updatedAt);
+  assert.equal((await call(1, '/api/integrations/v1?id=' + runId)).status, 404);
+
 });
 
 test('Activity reads recent Project events from the current owner and verification namespace', async t => {

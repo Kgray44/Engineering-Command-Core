@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { GitMerge, GitPullRequest, RefreshCw } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { taskHref } from './task-workspace.mjs';
-import { integrationLogFact, integrationWorkflowTiming } from './integration-analytics.mjs';
+import { integrationLogFact, integrationRunDuration, integrationWorkflowTiming } from './integration-analytics.mjs';
 import { codexThreadHref } from './task-engine-client.mjs';
 import { MergeSourcePicker, useMergeSource, useMergeSourceContext } from './merge-source-picker.jsx';
 
@@ -125,6 +125,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
     return () => { active = false; };
   }, [selected, verification, runs]);
   const run = detail?.run.id === selected ? detail.run : runs.find(item => item.id === selected);
+  const currentProject = detail?.run.id === run?.id ? detail?.project : null;
   const approvalKey = kind => JSON.stringify([kind, run?.id, run?.version, run?.head_sha, run?.evidence?.base_sha]);
   const confirmed = kind => confirmation === approvalKey(kind);
   const confirmationInput = kind => ({
@@ -150,7 +151,8 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
         const result = privateOnlyPoll ? await integrationRequest(scope, '?id=' + encodeURIComponent(activeId)) :
           await integrationRequest(scope, '', { op: 'refresh', id: activeId,
             expected_version: activeVersion, operation_id: crypto.randomUUID() });
-        if (current) setDetail(previous => ({ run: result.run, events: result.events ?? previous?.events ?? [] }));
+        if (current) setDetail(previous => ({ run: result.run, events: result.events ?? previous?.events ?? [],
+          project: Object.hasOwn(result, 'project') ? result.project : previous?.project }));
       } catch (cause) {
         if (current) setMessage(cause.message);
       }
@@ -216,7 +218,8 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
         setSelected(item.id);
       }}>
         {item.pr_number ? 'PR #' + item.pr_number : 'Task candidate ' + item.head_sha.slice(0, 8)}
-        <span>{labels[item.id === run?.id ? run.state : item.state]}<small>{item.created_at && new Date(item.created_at).toLocaleString()}</small></span>
+        <span>{labels[item.id === run?.id ? run.state : item.state]}<small>{item.created_at && new Date(item.created_at).toLocaleString()}
+          {' · Recorded span ' + integrationRunDuration(item)}</small></span>
       </button></li>)}</ul>
     </section>
     <div role="status" aria-live="polite" className="integration-message">{message}</div>
@@ -225,6 +228,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
       <div className="integration-heading"><h2 id="integration-detail-title">{labels[run.state]}</h2>
         <div className="integration-actions">
           {run.task && <a href={taskHref(run.task.id)}>Implementation Task</a>}
+          {currentProject && <a href={'#projects/' + currentProject.id}>Project · {currentProject.name}</a>}
           {run.evidence?.url && run.pr_number && <>
             <a href={run.evidence.url}>PR #{run.pr_number} on GitHub</a>
             <a href={run.evidence.url + '/files'}>View changes</a>
@@ -232,6 +236,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
         </div>
       </div>
       <Revisions run={run}/>
+      <p>Recorded run span <strong>{integrationRunDuration(run)}</strong></p>
       {run.evidence?.policy_observed && <p>{run.evidence.queue_required ? 'GitHub merge queue required' : 'GitHub branch protections observed'}
         {run.evidence.required_approvals > 0 && ' · ' + run.evidence.required_approvals + ' required approvals'}</p>}
       <IntegrationReadiness run={run}/>
