@@ -19,6 +19,7 @@ The editable defaults in the table are enum strings. The server validates the al
 | Default Project sort | Manual order | Manual order, recently active, newest, oldest, priority, title |
 | Default Project priority | Normal | Low, Normal, High, Urgent |
 | Default pull request filter | Open | Open, Merged, Closed, All states |
+| Default review request filter | Any review request status | Any, Review requested, No outstanding requests, Review requests unavailable |
 | Default integration evidence filter | All evidence states | Checks passed at inspection, blocked, checking, repairing, refresh required, awaiting inspection, merged, all evidence states |
 | Default pull request sort | Recently updated | Recently updated, newest first, oldest first |
 | Default Task priority | Normal | Low, Normal, High, Urgent |

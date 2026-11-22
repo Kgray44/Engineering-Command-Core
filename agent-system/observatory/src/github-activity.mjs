@@ -42,6 +42,14 @@ export function activityState(kind, row) {
   return row.conclusion || row.status || row.state;
 }
 
+export function pullReviewRequestStatus(pull) {
+  const state = activityState('pulls', pull);
+  if (pull.draft === true || state === 'closed' || state === 'merged') return 'not_applicable';
+  if (state !== 'open' || pull.draft !== false ||
+      !Number.isSafeInteger(pull.requested_review_count) || pull.requested_review_count < 0) return 'unknown';
+  return pull.requested_review_count > 0 ? 'requested' : 'none';
+}
+
 export function activityGroup(kind, row) {
   return kind === 'pulls' ? row.base_ref : (row.workflow || row.label);
 }

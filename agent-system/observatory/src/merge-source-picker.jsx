@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { preferenceFields } from './workspace-preferences.mjs';
 import { taskHref } from './task-workspace.mjs';
-import { activityHref, activityId, activityState, searchActivity } from './github-activity.mjs';
+import { activityHref, activityId, activityState, pullReviewRequestStatus, searchActivity } from './github-activity.mjs';
 
 export function useMergeSource(number, headers) {
   const [result, setResult] = useState(null);
@@ -181,9 +181,11 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
   const [query, setQuery] = useState('');
   const [stateOverride, setState] = useState(null);
   const [sortOverride, setSort] = useState(null);
+  const [reviewOverride, setReview] = useState(null);
   const [readinessOverride, setReadiness] = useState(null);
   const state = stateOverride ?? preferences.merge_state;
   const sort = sortOverride ?? preferences.merge_sort;
+  const review = reviewOverride ?? preferences.merge_review_requests;
   const readiness = readinessOverride ?? preferences.merge_readiness;
   const reduced = useReducedMotion();
   const selection = (group?.items ?? []).map(item => activityId('pulls', item)).filter(Boolean).sort((a, b) => a - b).join(',');
@@ -212,7 +214,8 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     query, state: state === 'all' ? '' : state, oldest: sort === 'oldest',
     linkedText: pull => links.get(activityId('pulls', pull))?.join(' '),
   })
-    .filter(pull => readiness === 'all' || pullReadiness(pull, runs, group, main)[0] === readiness);
+    .filter(pull => (review === 'any' || pullReviewRequestStatus(pull) === review) &&
+      (readiness === 'all' || pullReadiness(pull, runs, group, main)[0] === readiness));
   if (sort === 'updated') pulls.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
   const detail = source?.detail;
   const summary = detail ? null : group?.items?.find(pull => activityId('pulls', pull) === number);
@@ -227,6 +230,9 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
       <label>Integration evidence<select value={readiness} onChange={event => setReadiness(event.target.value)}>
         {Object.entries(preferenceFields.merge_readiness.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
+      <label>Review requests<select value={review} onChange={event => setReview(event.target.value)}>
+        {Object.entries(preferenceFields.merge_review_requests.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>
       <label>Sort<select value={sort} onChange={event => setSort(event.target.value)}>
         {Object.entries(preferenceFields.merge_sort.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
@@ -239,9 +245,13 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         const id = activityId('pulls', pull);
         if (!id) return null;
         const [, evidence] = pullReadiness(pull, runs, group, main);
+        const reviewStatus = pullReviewRequestStatus(pull);
+        const reviewCount = pull.requested_review_count;
         const work = links.get(id);
         return <li key={id}><button type="button" className="quiet-button" aria-pressed={id === number} onClick={() => onSelect(id)}>
           <strong>#{id} {pull.title}</strong><small>{activityState('pulls', pull)}{' · ' + evidence}</small>
+          {reviewStatus === 'requested' && <small>{reviewCount} review {reviewCount === 1 ? 'request' : 'requests'}</small>}
+          {reviewStatus === 'unknown' && <small>Review requests unavailable</small>}
           {work?.length > 0 && <small>{work[0]}{work.length > 1 && ' · +' + (work.length - 1)}</small>}
         </button></li>;
       })}

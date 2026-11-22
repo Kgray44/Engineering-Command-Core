@@ -495,6 +495,7 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   const change = { op: 'save', expected_version: 0, values: {
     project_sort: 'priority', density: 'compact', task_group: 'category', merge_sort: 'oldest', merge_readiness: 'blocked',
     project_state: 'planned', project_group: 'state', attention_reviews: 'hide',
+    merge_review_requests: 'requested',
   } };
   assert.equal((await call(0, path, { ...change, values: { density: 'bad' } })).status, 400);
   assert.equal((await call(0, path, { ...change, values: { project_group: 'unknown' } })).status, 400);
@@ -514,6 +515,7 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal(current.body.preferences.values.task_group, 'category');
   assert.equal(current.body.preferences.values.merge_sort, 'oldest');
   assert.equal(current.body.preferences.values.merge_readiness, 'blocked');
+  assert.equal(current.body.preferences.values.merge_review_requests, 'requested');
   const peer = (await call(1, path)).body.preferences;
   assert.equal(peer.version, 0);
   assert.equal(peer.values.task_group, 'none');
@@ -521,6 +523,7 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
   assert.equal(peer.values.project_group, 'none');
   assert.equal(peer.values.merge_sort, 'updated');
   assert.equal(peer.values.merge_readiness, 'all');
+  assert.equal(peer.values.merge_review_requests, 'any');
   assert.equal(peer.values.attention_reviews, 'show');
   assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.version, 0);
   const reset = await call(0, path, { op: 'reset', expected_version: 1, keys: ['project_sort', 'attention_reviews'] });

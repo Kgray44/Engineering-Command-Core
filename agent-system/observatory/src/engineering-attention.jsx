@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
-import { activityHref, activityId } from './github-activity.mjs';
+import { activityHref, activityId, pullReviewRequestStatus } from './github-activity.mjs';
 import { taskAttemptHref, taskHref } from './task-workspace.mjs';
 
 const recent = rows => [...rows].sort((left, right) => (Date.parse(right.at) || 0) - (Date.parse(left.at) || 0)).slice(0, 12);
@@ -106,7 +106,7 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
     ['attention', 'Failed attempts', recent(attempts.filter(attempt => attempt.state === 'failed' && taskIndex.has(attempt.task_id))
       .map(attempt => ({ id: attempt.id, label: taskIndex.get(attempt.task_id).title, href: taskAttemptHref(attempt.task_id, attempt.id), state: attempt.state,
         detail: 'Attempt ' + attempt.attempt_number, at: attempt.finished_at ?? attempt.started_at }))), 'attention_failures'],
-    ['attention', 'Pull requests awaiting review', recent(openPulls.filter(item => !item.draft && item.requested_review_count > 0)
+    ['attention', 'Pull requests awaiting review', recent(openPulls.filter(item => pullReviewRequestStatus(item) === 'requested')
       .map(item => ({ ...pullRow(item), state: 'review requested' }))), 'attention_reviews'],
     ['attention', 'Failed or interrupted CI', recent((github?.ci?.items ?? []).filter(item => dispositions.has(item.conclusion) && activityId('runs', item))
       .map(item => ({ id: activityId('runs', item), label: item.title ?? item.workflow, state: item.conclusion,

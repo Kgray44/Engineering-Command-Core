@@ -352,9 +352,9 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const branch = (ref, sha) => ({ ref, sha, repo: providerRepository });
   const pull = {
     number: 7, title: 'Synthetic proposal for staging', body: 'Review the exact source revision.',
-    user: { login: 'synthetic-author' }, state: 'open', mergeable: true, changed_files: 1, additions: 5, deletions: 2,
+    user: { login: 'synthetic-author' }, state: 'open', draft: false, mergeable: true, changed_files: 1, additions: 5, deletions: 2,
     head: branch('codex/synthetic', head), base: branch('main', base),
-    requested_reviewers: [{ login: 'synthetic-reviewer' }], requested_teams: [],
+    requested_reviewers: [{ login: 'synthetic-reviewer' }], requested_teams: [{ slug: 'synthetic-team' }],
     html_url: 'https://github.com/' + repository + '/pull/7', created_at: '2026-11-20T00:00:00Z',
   };
   const { stage, page, part, browser } = await browserStage(t, {
@@ -364,7 +364,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       const url = new URL(input);
       if (!url.pathname.startsWith('/repos/' + repository + '/')) return Response.json({}, { status: 404 });
       if (url.pathname.endsWith('/pulls/7')) return Response.json(pull);
-      if (url.pathname.endsWith('/pulls')) return Response.json([pull]);
+      if (url.pathname.endsWith('/pulls')) return Response.json([
+        pull,
+        { ...pull, number: 21, title: 'No review request', requested_reviewers: [], requested_teams: [] },
+        { ...pull, number: 22, title: 'Review evidence missing', requested_teams: undefined },
+        { ...pull, number: 23, title: 'Draft with a request', draft: true },
+      ]);
       if (url.pathname.endsWith('/files')) return Response.json([{ filename: 'guide.md', status: 'modified', additions: 5, deletions: 2 }]);
       if (url.pathname.endsWith('/reviews')) return Response.json([
         { id: 32, user: { login: 'prior-reviewer' }, state: 'CHANGES_REQUESTED', commit_id: 'c'.repeat(40) },
@@ -764,6 +769,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await page.getByRole('combobox', { name: 'Priority', exact: true }).inputValue(), 'urgent');
   await page.goto(stage.origin + '/#settings/integration');
   await page.getByLabel('Default repair limit for new integrations').selectOption('2');
+  await page.getByRole('combobox', { name: 'Default review request filter', exact: true }).selectOption('requested');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByText('Settings saved.', { exact: true }).waitFor();
   await page.goto(stage.origin + '/#merge?pr=7');
@@ -772,6 +778,16 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const discovery = page.getByRole('searchbox', { name: 'Search pull requests' });
   const pullRow = page.getByRole('button', { name: /#7 Synthetic proposal for staging.*Release project.*Release review/ });
   await pullRow.waitFor();
+  const reviewRequests = page.getByRole('combobox', { name: 'Review requests', exact: true });
+  const discoveryRows = page.locator('.merge-source-list').first().getByRole('button');
+  assert.equal(await reviewRequests.inputValue(), 'requested');
+  await pullRow.getByText('2 review requests', { exact: true }).waitFor();
+  for (const [filter, expected] of [['requested', '#7'], ['none', '#21'], ['unknown', '#22']]) {
+    await reviewRequests.selectOption(filter);
+    assert.deepEqual((await discoveryRows.allTextContents()).map(text => text.split(' ')[0]), [expected]);
+  }
+  assert.equal(await discoveryRows.getByText('Review requests unavailable', { exact: true }).count(), 1);
+  await reviewRequests.selectOption('any');
   await discovery.fill('Release project');
   await pullRow.waitFor();
   await discovery.fill('Release review');
