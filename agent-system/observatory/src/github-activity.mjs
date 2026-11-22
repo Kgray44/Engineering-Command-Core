@@ -46,13 +46,13 @@ export function activityGroup(kind, row) {
   return kind === 'pulls' ? row.base_ref : (row.workflow || row.label);
 }
 
-export function searchActivity(kind, items, { query = '', state = '', group = '', oldest = false } = {}) {
+export function searchActivity(kind, items, { query = '', state = '', group = '', oldest = false, linkedText } = {}) {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const selected = items.filter(item => {
     if (state && activityState(kind, item) !== state) return false;
     if (group && activityGroup(kind, item) !== group) return false;
     const contents = [activityId(kind, item), item.label, item.title, item.author, item.head_ref,
-      item.base_ref, item.branch, item.workflow, item.event, activityState(kind, item), item.revision].join(' ').toLowerCase();
+      item.base_ref, item.branch, item.workflow, item.event, activityState(kind, item), item.revision, linkedText?.(item)].join(' ').toLowerCase();
     return terms.every(term => contents.includes(term));
   });
   const ordered = newestActivity(kind, selected);

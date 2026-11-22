@@ -8,7 +8,7 @@ import { publishProposal } from './github-proposals.mjs';
 import { changeProposal, operationId as UUID, proposalControl } from './proposal-controls.mjs';
 import { ciAccess, ciStatus, integrationCIRerunner, submitCI } from './ci-controls.mjs';
 import { integrationAccess, integrationOperation, integrationPath } from './integration-runs.mjs';
-import { readMergeSourceContext } from './merge-source-context.mjs';
+import { readMergeDiscoveryLinks, readMergeSourceContext } from './merge-source-context.mjs';
 import { githubIntegration } from './github-integration.mjs';
 import { combinedTelemetry, ingestTaskTelemetry, sha256, telemetryBaseline } from './task-telemetry.mjs';
 import { createOpenAIModelPricing } from './openai-pricing.mjs';
@@ -75,6 +75,12 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
 
     if (integrations) {
       if (owner !== env.OBSERVATORY_TASK_ENGINE_OWNER_ID) return error('Integration owner access required', 403);
+      if (readOnly && application && url.searchParams.has('linked_prs')) {
+        if (url.searchParams.size !== 1) return error('Invalid linked PR query', 400);
+        const result = await readMergeDiscoveryLinks({ db: env.DB, owner, namespace, repository,
+          query: url.searchParams.get('linked_prs') });
+        return json(result.body, result.status);
+      }
       if (readOnly && application && url.searchParams.has('pr_number')) {
         const number = url.searchParams.get('pr_number');
         if (!/^[1-9]\d*$/.test(number) || !Number.isSafeInteger(Number(number))) return error('Invalid pull request query', 400);

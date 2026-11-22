@@ -525,6 +525,14 @@ test('Merge source discovery reads scoped Task and Project associations before a
   const peer = (await call(1, path)).body.associations[0];
   assert.equal(peer.task.title, 'Peer review');
   assert.deepEqual(peer.prerequisites, []);
+  const discovery = '/api/integrations/v1?linked_prs=81,82';
+  const associated = (await call(0, discovery)).body;
+  assert.deepEqual(associated.matches, [{ number: 81, task: 'Source review', project: 'Delivery project' }]);
+  assert.deepEqual((await call(1, discovery)).body.matches, [{ number: 81, task: 'Peer review', project: 'Peer project' }]);
+  assert.deepEqual((await call(0, discovery, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.matches, []);
+  assert.equal((await call(0, discovery, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, '/api/integrations/v1?linked_prs=81,82&linked_prs=83')).status, 400);
+  assert.equal((await call(0, '/api/integrations/v1?linked_prs=81,invalid')).status, 400);
   assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.associations, []);
   assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
   assert.equal((await call(0, '/api/integrations/v1?pr_number=81junk')).status, 400);

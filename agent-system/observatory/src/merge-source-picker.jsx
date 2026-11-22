@@ -173,7 +173,32 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
   const sort = sortOverride ?? preferences.merge_sort;
   const readiness = readinessOverride ?? preferences.merge_readiness;
   const reduced = useReducedMotion();
-  const pulls = searchActivity('pulls', group?.items ?? [], { query, state: state === 'all' ? '' : state, oldest: sort === 'oldest' })
+  const selection = (group?.items ?? []).map(item => activityId('pulls', item)).filter(Boolean).sort((a, b) => a - b).join(',');
+  const [discovery, setDiscovery] = useState(null);
+  useEffect(() => {
+    if (!selection) return;
+    const controller = new AbortController();
+    fetch('/api/integrations/v1?' + new URLSearchParams({ linked_prs: selection }), {
+      headers, signal: controller.signal, cache: 'no-store',
+    }).then(async response => {
+      if (!response.ok) throw new Error('Linked work unavailable');
+      const data = await response.json();
+      if (!controller.signal.aborted) setDiscovery({ ...data, selection });
+    }).catch(() => {
+      if (!controller.signal.aborted) setDiscovery({ selection, unavailable: true });
+    });
+    return () => controller.abort();
+  }, [selection, headers, runs]);
+  const visibleDiscovery = discovery?.selection === selection ? discovery : null;
+  const links = new Map();
+  for (const match of visibleDiscovery?.matches ?? []) {
+    if (!links.has(match.number)) links.set(match.number, []);
+    links.get(match.number).push([match.project, match.task].filter(Boolean).join(' · '));
+  }
+  const pulls = searchActivity('pulls', group?.items ?? [], {
+    query, state: state === 'all' ? '' : state, oldest: sort === 'oldest',
+    linkedText: pull => links.get(activityId('pulls', pull))?.join(' '),
+  })
     .filter(pull => readiness === 'all' || pullReadiness(pull, runs, group, main)[0] === readiness);
   if (sort === 'updated') pulls.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
   const detail = source?.detail;
@@ -182,7 +207,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
   const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
   return <div className="merge-discovery">
     <div className="merge-discovery-filters">
-      <label>Search pull requests<input type="search" value={query} onChange={event => setQuery(event.target.value)}/></label>
+      <label>Search pull requests<input type="search" placeholder="Title, branch, Project, or Task" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <label>State<select value={state} onChange={event => setState(event.target.value)}>
         {Object.entries(preferenceFields.merge_state.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
@@ -194,13 +219,17 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
       </select></label>
     </div>
     {group?.status && group.status !== 'available' && <p role="status">Pull request feed {group.status}. {group.reason}</p>}
+    {visibleDiscovery?.unavailable && <p role="status">Linked Project and Task search is unavailable.</p>}
+    {visibleDiscovery?.truncated && <p role="status">Showing the first 200 linked records for the current pull request feed.</p>}
     <ul className="merge-source-list">
       {pulls.map(pull => {
         const id = activityId('pulls', pull);
         if (!id) return null;
         const [, evidence] = pullReadiness(pull, runs, group, main);
+        const work = links.get(id);
         return <li key={id}><button type="button" className="quiet-button" aria-pressed={id === number} onClick={() => onSelect(id)}>
           <strong>#{id} {pull.title}</strong><small>{activityState('pulls', pull)}{' · ' + evidence}</small>
+          {work?.length > 0 && <small>{work[0]}{work.length > 1 && ' · +' + (work.length - 1)}</small>}
         </button></li>;
       })}
     </ul>

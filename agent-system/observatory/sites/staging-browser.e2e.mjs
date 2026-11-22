@@ -510,6 +510,16 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.goto(stage.origin + '/#merge?pr=7');
   assert.equal(await page.getByLabel('Integration repair limit').inputValue(), '2');
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
+  const discovery = page.getByRole('searchbox', { name: 'Search pull requests' });
+  const pullRow = page.getByRole('button', { name: /#7 Synthetic proposal for staging.*Release project.*Release review/ });
+  await pullRow.waitFor();
+  await discovery.fill('Release project');
+  await pullRow.waitFor();
+  await discovery.fill('Release review');
+  await pullRow.waitFor();
+  await discovery.fill('Readiness project');
+  await page.getByText('No pull requests match the current view.', { exact: true }).waitFor();
+  await discovery.clear();
   const linkedWork = page.getByRole('region', { name: 'Linked engineering work' });
   await linkedWork.getByText('Earlier revision referenced').waitFor();
   await linkedWork.getByText('1 of 1 Task prerequisites open', { exact: true }).click();
