@@ -12,6 +12,15 @@ Each native worker is configured with a repository, application ID, connector na
 
 Use the owner-private staging MCP connection from the canonical Aetherwake staging Site. Start with the application list and pass its identifiers when calling Task and Project tools. Voyagewright staging forwards its authorized browser and worker requests to the canonical engine and exposes its own D1 over the private service bridge. Build both profiles from the same source revision and verify both origins after deployment. The [Phase 1B runbook](../PHASE1B-SITES.md) gives the deployment inputs, service bindings, custody, and rollback procedure.
 
+### Verify the installed staging connector
+
+Use the owner-private **Aetherwake Engineering Command Core — Staging** plugin from a connected client. Use **Settings → Connections → Verify connections** on the canonical Site as a separate check of the served build and its tool registry.
+
+1. Call `list_applications` and confirm that it returns the expected Aetherwake and Voyagewright repository bindings.
+2. For each returned `application_id`, call `projects_v1` with `request: { op: "list" }`, then use `request: { op: "get", id: "<project UUID>" }` with a returned Project ID.
+3. Call `task_engine_v1` with the same application ID and `request: { op: "list" }`. Read a listed Task with `request: { op: "get", task_id: "<Task ID>" }`. Copy the Task ID from `task.id` in the list response. Task reads use `task_id`, while Project reads use `id`.
+4. When the two scopes contain distinct records, repeat each detail read with the original record ID and the other value for `application_id`. Each cross-application read should return 404. These results verify external transport and record isolation without admitting Tasks or modifying Projects.
+
 ## Staging GitHub read credentials
 
 Create separate [fine-grained GitHub personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token). Select only the corresponding repository for each token and set an expiration appropriate for the qualification window.
