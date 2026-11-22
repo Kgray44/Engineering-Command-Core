@@ -42,7 +42,7 @@ export function GitHubFeed({ data }) {
     : null;
   return <div className="github-feed">
     <p><strong>{repository} · main</strong> · {main.revision
-      ? <a href={'https://github.com/Kgray44/Aetherwake/commit/' + main.revision}>{short(main.revision)}</a>
+      ? <a href={'https://github.com/' + repository + '/commit/' + main.revision}>{short(main.revision)}</a>
       : main.reason}</p>
     <p className="low">{checked_at ? 'Checked ' + timestamp(checked_at) + ' · ' : ''}GitHub activity is separate from v1 task outcomes and telemetry.</p>
     {(stale || retry_at) && <p className="low">{stale && 'Showing last successful data where available. '}{retry_at && 'Next GitHub retry after ' + timestamp(retry_at) + '.'}</p>}
@@ -59,7 +59,7 @@ export function GitHubFeed({ data }) {
       {records.truncated && <p>Repository scan reached its size or coverage limit.</p>}
       {records.provenance?.length > 0 && <details><summary>Record origins</summary>
         <ul>{records.provenance.map(({ id, type, path, blob }) => <li key={type + ':' + id}>
-          <a href={'https://github.com/Kgray44/Aetherwake/blob/' + records.revision + '/' + path.split('/').map(encodeURIComponent).join('/')}>{path}</a>
+          <a href={'https://github.com/' + repository + '/blob/' + records.revision + '/' + path.split('/').map(encodeURIComponent).join('/')}>{path}</a>
           {' · '}{type}{' · '}{id}{' · '}{short(blob)}
         </li>)}</ul>
       </details>}
@@ -68,7 +68,7 @@ export function GitHubFeed({ data }) {
       const activity = kind !== 'issues';
       const rows = activity ? newestActivity(kind, group.items).slice(0, 5) : group.items;
       return <section key={name}>
-        <h3><a href={activity ? activityHref(kind) : 'https://github.com/Kgray44/Aetherwake/issues'}>{name}</a></h3>
+        <h3><a href={activity ? activityHref(kind) : 'https://github.com/' + repository + '/issues'}>{name}</a></h3>
         <small>{coverage} {activity ? 'Up to 5 shown.' : 'First ' + page_size + ' results only.'}</small>
         {staleNote(group)}
         {group.status === 'unavailable' ? <p>{group.reason}</p> : !rows.length

@@ -120,6 +120,20 @@
       "when": 1795306000000,
       "tag": "0016_projects",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795310000000,
+      "tag": "0017_project_manual_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1795310100000,
+      "tag": "0018_workspace_preferences",
+      "breakpoints": true
     }
   ]
 }

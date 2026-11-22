@@ -5,6 +5,9 @@ import { MAX_SYNC_BYTES } from './sync.mjs';
 import { isTaskWorkerKey } from './task-engine.mjs';
 import { sha256 } from './task-telemetry.mjs';
 import { createWorker } from './worker.mjs';
+import { workspaceSettings } from './workspace-settings.mjs';
+import { integrationAccess } from './integration-runs.mjs';
+import { taskExecutionCapacity } from '../task-execution-capacity.mjs';
 
 const identityHeader = 'oai-authenticated-user-id';
 const stagingWorkerOps = new Set(['claim', 'report', 'worker_pulse', 'recover_worker_candidate']);
@@ -19,9 +22,10 @@ const toolSchema = {
   type: 'object', additionalProperties: false, required: ['application_id', 'request'],
   properties: { application_id: { type: 'string', pattern: applicationId.source }, verification: { type: 'string' },
     request: { type: 'object', required: ['op'], properties: {
-      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate'] },
+      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate', 'reorder'] },
       id: { type: 'string', format: 'uuid', description: 'Project UUID' },
-      expected_version: { type: 'integer', minimum: 1, description: 'Current row version for optimistic updates' },
+      expected_version: { type: 'integer', minimum: 0, description: 'Current row version for optimistic updates' },
+      project_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, description: 'Full Project order for the application' },
       status: { enum: ['planned', 'active', 'paused', 'archived', 'verified', 'integrated', 'accepted'] },
       milestone_id: { type: 'string', format: 'uuid' },
       task_id: { type: 'string', description: 'Canonical Task ID' },
@@ -226,6 +230,35 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
         if (!await checkPartition(env, originRuntime, scoped)) return error('Application partition unavailable', 503);
         if (url.pathname === '/api/status' && request.method === 'GET') {
           return response({ status: 'ready', application: originRuntime.application, revision: workerOptions.sourceRevision ?? null });
+        }
+        if (url.pathname === '/api/settings') {
+          const verification = request.headers.get('x-observatory-verification');
+          if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
+          const namespace = verification ? 'verification:' + verification : 'live';
+          let body;
+          if (request.method === 'POST') {
+            if (request.headers.get('origin') !== url.origin || ![null, 'same-origin'].includes(request.headers.get('sec-fetch-site'))) {
+              return error('Same-origin request required', 403);
+            }
+            if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+              return error('Expected JSON', 415);
+            }
+            try { body = JSON.parse(await readBounded(request.body, 4096)); }
+            catch { return error('Invalid settings payload', 400); }
+          } else if (request.method !== 'GET') return error('Method not allowed', 405);
+          const facts = {
+            application: originRuntime.application,
+            revision: workerOptions.sourceRevision ?? null,
+            database_verified_at: new Date().toISOString(),
+            connections: {
+              github: { credential_configured: Boolean(scoped.GITHUB_READ_TOKEN || scoped.GITHUB_PROPOSAL_TOKEN) },
+              codex: { credential_configured: isTaskWorkerKey(scoped.OBSERVATORY_TASK_WORKER_KEY) },
+            },
+            capacity: taskExecutionCapacity,
+            integration: integrationAccess(scoped, owner, namespace),
+          };
+          const result = await workspaceSettings({ db: scoped.DB, owner, namespace, body, facts });
+          return response(result.body, result.status);
         }
         if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {
           let body;

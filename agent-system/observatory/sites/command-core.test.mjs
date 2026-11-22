@@ -298,3 +298,67 @@ test('staging worker transport claims only in its own partition with both ingres
   const claimed = await worker.call({ request: claim, worker_key: 'never-sent-in-the-body' }, tool);
   assert.equal(claimed.claim.task.id, taskId);
 });
+
+test('Project presentation and manual order persist in the authorized scope', async t => {
+  const { call } = setup(t);
+  const projects = '/api/projects';
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  const peer = crypto.randomUUID();
+  const fields = { name: 'Project', objective: 'Verify library settings', icon: 'rocket', accent: 'violet' };
+  for (const [app, id] of [[0, first], [0, second], [1, peer]]) {
+    const created = await call(app, projects, { op: 'create', id, fields });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.project.icon, 'rocket');
+    assert.equal(created.body.project.accent, 'violet');
+  }
+  for (const badFields of [{ icon: 'arbitrary' }, { accent: 'url(example)' }]) {
+    assert.equal((await call(0, projects, { op: 'update', id: first, expected_version: 1, fields: badFields })).status, 400);
+  }
+  const order = { op: 'reorder', project_ids: [second, first], expected_version: 0 };
+  assert.equal((await call(0, projects, { ...order, project_ids: [second, peer] })).status, 400);
+  assert.equal((await call(0, projects, { ...order, project_ids: [second, second] })).status, 400);
+  assert.equal((await call(0, projects, order, 'unassigned')).status, 403);
+  assert.equal((await call(0, projects, order, undefined, { origin: fixture[1].origin })).status, 403);
+  const writes = await Promise.all([call(0, projects, order), call(0, projects, { ...order, project_ids: [first, second] })]);
+  assert.deepEqual(writes.map(write => write.status).sort(), [200, 409]);
+  const persisted = (await call(0, projects)).body.manual_order;
+  assert.deepEqual(persisted, writes.find(write => write.status === 200).body.manual_order);
+  assert.equal(persisted.version, 1);
+  assert.deepEqual((await call(1, projects)).body.manual_order, { version: 0, project_ids: [] });
+  const verification = { 'x-observatory-verification': crypto.randomUUID() };
+  assert.deepEqual((await call(0, projects, undefined, undefined, verification)).body.manual_order, { version: 0, project_ids: [] });
+  const third = crypto.randomUUID();
+  assert.equal((await call(0, projects, { op: 'create', id: third, fields })).status, 201);
+  assert.equal((await call(0, projects, { ...order, expected_version: 1 })).status, 409);
+  assert.deepEqual((await call(0, projects)).body.manual_order, persisted);
+});
+
+test('workspace settings persist, audit concurrent changes, and never reveal credentials', async t => {
+  const { call } = setup(t);
+  const path = '/api/settings';
+  const initial = await call(0, path);
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.preferences.version, 0);
+  assert.equal(initial.body.preferences.values.project_sort, 'manual');
+  assert.equal(initial.body.connections.github.credential_configured, true);
+  assert.doesNotMatch(JSON.stringify(initial.body), /one-fixture|a{64}/);
+  const change = { op: 'save', expected_version: 0, values: { project_sort: 'priority', density: 'compact' } };
+  assert.equal((await call(0, path, { ...change, values: { density: 'bad' } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { repository: 'peer/repo' } })).status, 400);
+  assert.equal((await call(0, path, change, 'unassigned')).status, 403);
+  assert.equal((await call(0, path, change, undefined, { origin: fixture[1].origin })).status, 403);
+  const saved = await call(0, path, change);
+  assert.equal(saved.status, 200);
+  assert.equal((await call(0, path, change)).status, 409);
+  const current = await call(0, path);
+  assert.equal(current.body.preferences.values.project_sort, 'priority');
+  assert.equal(current.body.audit[0].values.density, 'compact');
+  assert.equal((await call(1, path)).body.preferences.version, 0);
+  assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.version, 0);
+  const reset = await call(0, path, { op: 'reset', expected_version: 1, keys: ['project_sort'] });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.body.preferences.values.project_sort, 'manual');
+  assert.equal(reset.body.preferences.values.density, 'compact');
+  assert.equal((await call(0, path)).body.audit.length, 2);
+});

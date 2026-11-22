@@ -2,6 +2,9 @@ import { accountEngineeringTokens } from '../src/engineering-token-accounting.mj
 import { readTaskRows, storedTaskDispatch, taskAttemptRecord } from './task-engine.mjs';
 import { combinedTelemetry } from './task-telemetry.mjs';
 import { uuid } from './application-config.mjs';
+import { projectAccents, projectIconGroups } from '../src/project-presentation.mjs';
+
+const projectIcons = new Set(Object.values(projectIconGroups).flat());
 
 const statuses = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
@@ -25,6 +28,11 @@ function projectFields(fields, repository) {
       if (key.endsWith('_date') && value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
           !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)) throw Error('Invalid date');
       result[key] = value.trim();
+    } else if ((key === 'icon' && projectIcons.has(value)) || (key === 'accent' && projectAccents.includes(value))) {
+      result[key] = value;
+    } else if (key === 'milestone_suggestions' && Array.isArray(value) && value.length <= 12 &&
+        value.every(item => typeof item === 'string' && item.trim() && item.length <= 150)) {
+      result[key] = [...new Set(value.map(item => item.trim()))];
     } else if (key === 'priority' && priorities.includes(value)) {
       result[key] = value;
     } else if (key === 'participants' && Array.isArray(value) && value.length <= 30 &&
@@ -100,13 +108,37 @@ export async function projectOperation({ db, owner, namespace, application, body
       },
     };
   }
+  const orderPayload = row => row
+    ? { version: row.version, project_ids: JSON.parse(row.project_ids) }
+    : { version: 0, project_ids: [] };
+  const getOrder = () => scope('SELECT version, project_ids FROM project_manual_order WHERE owner_id = ? AND namespace = ?').first();
+  if (body.op === 'reorder') {
+    const { project_ids: ids, expected_version: version } = body;
+    if (!Array.isArray(ids) || !ids.every(isId) || new Set(ids).size !== ids.length ||
+        !Number.isSafeInteger(version) || version < 0) return fail(400, 'Invalid Project order');
+    const { results } = await scope('SELECT id FROM projects WHERE owner_id = ? AND namespace = ?').all();
+    const existing = new Set(results.map(row => row.id));
+    if (ids.some(id => !existing.has(id))) return fail(400, 'Project unavailable in this application');
+    if (ids.length !== existing.size) return fail(409, 'Projects changed. Refresh the library and reorder again.');
+    const row = await db.prepare(`
+      INSERT INTO project_manual_order (owner_id, namespace, version, project_ids)
+      SELECT ?1, ?2, ?3 + 1, ?4
+      WHERE COALESCE((SELECT version FROM project_manual_order WHERE owner_id = ?1 AND namespace = ?2), 0) = ?3
+        AND (SELECT COUNT(*) FROM projects WHERE owner_id = ?1 AND namespace = ?2) = ?5
+      ON CONFLICT (owner_id, namespace) DO UPDATE SET version = excluded.version, project_ids = excluded.project_ids
+      RETURNING version, project_ids
+    `).bind(owner, namespace, version, JSON.stringify(ids), ids.length).first();
+    return row ? success({ manual_order: orderPayload(row) }) : fail(409, 'Projects changed. Refresh the library and reorder again.');
+  }
   if (body.op === 'list') {
-    const [{ results }, view] = await Promise.all([
+    const [{ results }, view, order] = await Promise.all([
       scope('SELECT * FROM projects WHERE owner_id = ? AND namespace = ? ORDER BY updated_at DESC, id').all(),
       readProgress(),
+      getOrder(),
     ]);
     const projects = results.map(serialize);
     return success({ application, projects: projects.map(project => ({ ...project, progress: view.forProject(project).progress })),
+      manual_order: orderPayload(order),
       unassigned_tasks: view.taskRows.filter(row => !row.project_id).length });
   }
   if (!isId(body.id)) return fail(400, 'Invalid Project ID');

@@ -24,8 +24,8 @@ export function parseActivityHref(hash) {
   return { kind: matched[1] === routes.pulls ? 'pulls' : 'runs', id };
 }
 
-export function githubItemHref(kind, id) {
-  return 'https://github.com/Kgray44/Aetherwake/' + (kind === 'pulls' ? 'pull/' : 'actions/runs/') + id;
+export function githubItemHref(kind, id, repository = 'Kgray44/Aetherwake') {
+  return 'https://github.com/' + repository + '/' + (kind === 'pulls' ? 'pull/' : 'actions/runs/') + id;
 }
 
 export function newestActivity(kind, items) {

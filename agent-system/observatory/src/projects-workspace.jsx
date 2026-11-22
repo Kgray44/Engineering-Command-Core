@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { arrayMove } from '@dnd-kit/sortable';
+import { ProjectAppearance, ProjectCardGrid, ProjectIcon } from './project-cards.jsx';
+import { orderProjects } from './project-presentation.mjs';
+import { projectTemplates, templateMilestones } from './project-templates.mjs';
 import { motion } from 'motion/react';
-import { Activity, ArrowLeft, Boxes, ChevronRight, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
+import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useCardMotion } from './card-motion.jsx';
 import { StickySectionAside } from './sticky-section-aside.jsx';
 import { taskHref } from './task-workspace.mjs';
@@ -18,7 +22,7 @@ export async function projectRequest(body, headers = {}, { id, signal } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}), signal,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Error(data.error || 'Projects service unavailable');
+  if (!response.ok) throw Object.assign(Error(data.error || 'Projects service unavailable'), { status: response.status });
   return data;
 }
 
@@ -26,21 +30,34 @@ function Options({ values }) {
   return values.map(value => <option key={value} value={value}>{value}</option>);
 }
 
-function ProjectForm({ project = {}, onSave, busy }) {
+function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
+  const [suggestions, setSuggestions] = useState((project.milestone_suggestions ?? []).join('\n'));
   return <form className="form" onSubmit={event => {
     event.preventDefault();
     const { participants, ...fields } = object(event.currentTarget);
-    onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean) });
+    onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean),
+      milestone_suggestions: suggestions.split('\n').map(value => value.trim()).filter(Boolean) });
   }}>
+    {!project.id && <label>Project template
+      <select defaultValue="" onChange={event => setSuggestions(templateMilestones(event.target.value).join('\n'))}>
+        <option value="">Blank project</option>
+        {projectTemplates.map(template => <option key={template.id} value={template.id}>{template.label}</option>)}
+      </select>
+    </label>}
     <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
     <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
     <label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
     <label>Scope <textarea name="scope" defaultValue={project.scope} maxLength={16000}/></label>
     <label>Acceptance requirements <textarea name="acceptance" defaultValue={project.acceptance} maxLength={16000}/></label>
+    <label>Suggested milestones
+      <textarea value={suggestions} onChange={event => setSuggestions(event.target.value)}
+        placeholder="One milestone per line" rows={3} maxLength={1812}/>
+    </label>
+    <ProjectAppearance project={project}/>
     <div className="form-grid">
       <label>Start date <input type="date" name="start_date" defaultValue={project.start_date}/></label>
       <label>Target date <input type="date" name="target_date" defaultValue={project.target_date}/></label>
-      <label>Priority <select name="priority" defaultValue={project.priority ?? 'normal'}><Options values={priorities}/></select></label>
+      <label>Priority <select name="priority" defaultValue={project.priority ?? defaultPriority ?? 'normal'}><Options values={priorities}/></select></label>
       <label>Participants <input name="participants" defaultValue={project.participants?.join(', ')} placeholder="Comma-separated names"/></label>
       <label>Technical completion <select name="technical_state" defaultValue={project.technical_state ?? ''}><Options values={['', 'in_progress', 'verified', 'integrated', 'delivered']}/></select></label>
       <label>Owner review <select name="owner_review" defaultValue={project.owner_review ?? ''}><Options values={['', 'pending', 'accepted', 'declined']}/></select></label>
@@ -49,21 +66,21 @@ function ProjectForm({ project = {}, onSave, busy }) {
   </form>;
 }
 
-function MilestoneForm({ milestone, onSave, busy }) {
+function MilestoneForm({ milestone, suggestedName, onSave, busy }) {
   const operation = useRef(crypto.randomUUID());
   return <form className="form" onSubmit={event => {
     event.preventDefault();
     onSave({ ...object(event.currentTarget), milestone_id: milestone?.id ?? operation.current,
       ...(milestone ? { expected_version: milestone.version } : {}) });
   }}>
-    <label>Milestone name <input name="name" defaultValue={milestone?.name} required maxLength={150}/></label>
+    <label>Milestone name <input name="name" defaultValue={milestone?.name ?? suggestedName} required maxLength={150}/></label>
     <label>Acceptance evidence required <textarea name="acceptance" defaultValue={milestone?.acceptance} required maxLength={16000}/></label>
     <label>Milestone state <select name="status" defaultValue={milestone?.status ?? 'planned'}><Options values={milestoneStages}/></select></label>
     <button className="quiet-button" disabled={busy}>{milestone ? 'Save milestone' : 'Add milestone'}</button>
   </form>;
 }
 
-const defaultFilters = { view: 'all', query: '', state: '', sort: 'newest', group: 'none' };
+const defaultFilters = { view: 'all', query: '', state: '', sort: 'manual', group: 'none' };
 const projectViews = [
   ['all', 'Current Projects', project => project.status !== 'archived'],
   ['active', 'Active', project => project.status === 'active'],
@@ -75,7 +92,7 @@ const projectViews = [
 const projectHref = id => '#projects/' + id;
 const shortDate = value => value ? new Date(value).toLocaleDateString() : 'Unavailable';
 
-function ProjectExplorer({ application, projects, unassigned, filters, setFilters, Panel, Status, Metric, editing, onEdit, children }) {
+function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaultSort, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
   const interaction = useCardMotion(true);
   const views = projectViews.map(([id, label, matches]) => [id, label, projects.filter(matches)]);
   const viewItems = views.find(([id]) => id === filters.view)[2];
@@ -89,9 +106,17 @@ function ProjectExplorer({ application, projects, unassigned, filters, setFilter
     priority: (left, right) => priorities.indexOf(right.priority) - priorities.indexOf(left.priority),
     title: (left, right) => left.name.localeCompare(right.name),
   };
-  items.sort(sorters[filters.sort]);
-  const groups = filters.group === 'none' ? [['Projects', items]]
-    : stages.map(stage => [stage, items.filter(item => item.status === stage)]).filter(([, rows]) => rows.length);
+  const ordered = filters.sort === 'manual' ? orderProjects(items, manualOrder.project_ids) : items.sort(sorters[filters.sort]);
+  const manualView = filters.sort === 'manual' && filters.view === 'all' && filters.group === 'none' && !query && !filters.state;
+  const reorder = (visibleIds, from, to) => {
+    const moved = arrayMove(visibleIds, visibleIds.indexOf(from), visibleIds.indexOf(to));
+    const visible = new Set(visibleIds);
+    let index = 0;
+    const project_ids = orderProjects(projects, manualOrder.project_ids).map(({ id }) => visible.has(id) ? moved[index++] : id);
+    onReorder({ op: 'reorder', project_ids, expected_version: manualOrder.version });
+  };
+  const groups = filters.group === 'none' ? [['Projects', ordered]]
+    : stages.map(stage => [stage, ordered.filter(item => item.status === stage)]).filter(([, rows]) => rows.length);
   const field = ({ currentTarget: { name, value } }) => setFilters(previous => ({ ...previous, [name]: value }));
 
   return <>
@@ -118,7 +143,7 @@ function ProjectExplorer({ application, projects, unassigned, filters, setFilter
           <option value="">{filters.view === 'all' ? 'Current Projects' : 'Any state in view'}</option><Options values={stages}/>
         </select></label>
         <label>Sort <select name="sort" value={filters.sort} onChange={field}>
-          <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+          <option value="manual">Manual order</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option>
           <option value="priority">Highest priority</option><option value="title">Title</option>
         </select></label>
         <label>Group <select name="group" value={filters.group} onChange={field}>
@@ -127,34 +152,27 @@ function ProjectExplorer({ application, projects, unassigned, filters, setFilter
       </div>
       <div className="task-result-bar">
         <span role="status"><Filter size={14} aria-hidden="true"/> {items.length} of {projects.length} Projects</span>
-        {filters !== defaultFilters && <button type="button" className="text-button" onClick={() => setFilters(defaultFilters)}>Reset filters</button>}
+        {filters !== defaultFilters && <button type="button" className="text-button" onClick={() => setFilters({ ...defaultFilters, sort: defaultSort })}>Reset filters</button>}
       </div>
       {!items.length && <p>{projects.length ? 'No Projects match these filters.' : 'No Projects in the current feed.'}</p>}
+      {filters.sort === 'manual' && !manualView && <small>To reorder cards, open Current Projects and clear search, state, and grouping.</small>}
       {groups.map(([label, rows]) => <section key={label} className="task-group" aria-label={label}>
         {filters.group !== 'none' && <h3>{label} <span>{rows.length}</span></h3>}
-        <ul className="task-rows">{rows.map(item => <li key={item.id}>
-          <motion.a className="task-row" href={projectHref(item.id)} {...interaction}>
-            <span className="task-row-title"><strong>{item.name}</strong><small>{shortDate(item.created_at)}</small></span>
-            <span className="task-row-state"><small>Project state</small><Status value={item.status}/></span>
-            <span className="task-priority">{item.priority} priority</span>
-            <span className="task-counts">{item.progress && <small>
-              {item.progress.tasks.completed}/{item.progress.tasks.total} Tasks complete · {item.progress.tasks.active} running · {item.progress.tasks.blocked} blocked · {item.progress.milestones.accepted}/{item.progress.milestones.total} milestones accepted
-            </small>}{item.owner_review === 'pending' && <small>Owner review pending</small>}</span>
-            <span className="task-row-action">Manage<ChevronRight size={15} aria-hidden="true"/></span>
-          </motion.a>
-        </li>)}</ul>
+        <ProjectCardGrid layout={layout} rows={rows} Status={Status} sortable={manualView && rows.length > 1} onMove={busy ? () => {} : reorder}/>
       </section>)}
     </Panel>
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, demo }) {
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, preferences, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [filters, setFilters] = useState(defaultFilters);
+  const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort }));
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [addingMilestone, setAddingMilestone] = useState(false);
+  const [addingMilestone, setAddingMilestone] = useState(null);
+  const [taskQuery, setTaskQuery] = useState('');
+  const [taskState, setTaskState] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
   const [other, setOther] = useState(null);
   const [taskList, setTaskList] = useState([]);
@@ -201,6 +219,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       onSuccess?.(result);
       if (request.op !== 'create') await load();
     } catch (error) {
+      if (request.op === 'reorder' && error.status === 409) await load().catch(() => {});
       setError(error.message);
     } finally {
       pending.current = false;
@@ -213,8 +232,9 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     {error && <p className="notice error" role="alert">{error}</p>}
     {!data && !error && <p role="status">Loading Projects…</p>}
     {application && !projectId && <ProjectExplorer application={application} projects={projects} unassigned={data.unassigned_tasks}
-      filters={filters} setFilters={setFilters} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}>
-      {edit && <div className="project-create"><ProjectForm busy={busy} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
+      filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaultSort={preferences.project_sort} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
+      manualOrder={data.manual_order ?? { version: 0, project_ids: [] }} onReorder={submit} busy={busy}>
+      {edit && <div className="project-create"><ProjectForm busy={busy} defaultPriority={preferences.project_priority} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
         window.location.hash = projectHref(result.project.id);
       })}/></div>}
     </ProjectExplorer>}
@@ -237,6 +257,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       <div className="detail-layout">
         <div className="detail-left">
           <Panel id="project-overview" title={project.name} kicker={project.id} right={<Status value={project.status}/>}>
+            <span className="project-icon-preview" data-accent={project.accent ?? 'default'}><ProjectIcon id={project.icon}/></span>
             <div className="objective">{project.objective}</div>
             {project.description && <p className="objective">{project.description}</p>}
             {project.scope && <DetailLine name="Scope" value={project.scope}/>}
@@ -270,7 +291,14 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </StickySectionAside>
       </div>
       <Panel id="project-tasks" title="Tasks">
-        <ul className="project-list">{tasks.map(task => <li key={task.id}>
+        {tasks.length > 0 && <div className="form-grid">
+          <label>Filter Project Tasks <input type="search" value={taskQuery} onChange={event => setTaskQuery(event.target.value)}/></label>
+          <label>Task state <select value={taskState} onChange={event => setTaskState(event.target.value)}>
+            <option value="">All states</option><Options values={[...new Set(tasks.map(task => task.state))]}/>
+          </select></label>
+        </div>}
+        <ul className="project-list">{tasks.filter(task => (!taskState || task.state === taskState) &&
+          task.title.toLowerCase().includes(taskQuery.trim().toLowerCase())).map(task => <li key={task.id}>
           <a className="text-button" href={taskHref(task.id)}>{task.title}</a> <Status value={task.state}/>
           {task.branch && <small>{task.branch}</small>}
           {task.blockers.map(item => <small key={item.type + ':' + item.id}>
@@ -292,15 +320,21 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           </form>
         </details>}
       </Panel>
-      <Panel id="project-milestones" title="Milestones" right={project.status !== 'archived' && <button className="quiet-button" aria-expanded={addingMilestone} onClick={() => setAddingMilestone(!addingMilestone)}>
-        {addingMilestone ? 'Close form' : 'New milestone'}</button>}>
+      <Panel id="project-milestones" title="Milestones" right={project.status !== 'archived' && <button className="quiet-button" aria-expanded={addingMilestone !== null} onClick={() => setAddingMilestone(addingMilestone === null ? '' : null)}>
+        {addingMilestone !== null ? 'Close form' : 'New milestone'}</button>}>
         {milestones.map(milestone => <details key={milestone.id}>
           <summary>{milestone.name} <Status value={milestone.status}/></summary>
           <p>{milestone.acceptance}</p>
           {project.status !== 'archived' && <MilestoneForm key={milestone.version} milestone={milestone} busy={busy} onSave={fields => submit({ op: 'milestone', ...fields })}/>}
         </details>)}
         {!milestones.length && <p>No milestones recorded.</p>}
-        {addingMilestone && <MilestoneForm busy={busy} onSave={fields => submit({ op: 'milestone', ...fields }, () => setAddingMilestone(false))}/>}
+        {project.status !== 'archived' && project.milestone_suggestions?.filter(name => !milestones.some(item => item.name === name)).length > 0 &&
+          <div className="project-actions" role="group" aria-label="Suggested milestones">
+            {project.milestone_suggestions.filter(name => !milestones.some(item => item.name === name)).map(name =>
+              <button key={name} type="button" className="quiet-button" onClick={() => setAddingMilestone(name)}>Draft {name}</button>)}
+          </div>}
+        {addingMilestone !== null && <MilestoneForm key={addingMilestone} suggestedName={addingMilestone} busy={busy}
+          onSave={fields => submit({ op: 'milestone', ...fields }, () => setAddingMilestone(null))}/>}
       </Panel>
       <Panel id="project-dependencies" title="Dependencies">
         <ul className="project-list">{dependencies.map(item => <li key={item.task_id + item.milestone_id}>
@@ -329,6 +363,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         <ul className="project-list">{integrations.map(item => <li key={item.id}>
           {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <small>{item.head_sha.slice(0, 12)}</small>}
           <Status value={item.state}/>
+          {item.pr_number && <a className="text-button" href={'#merge?pr=' + item.pr_number}>Inspect integration</a>}
         </li>)}</ul>
         <ul className="project-list">{github.map((item, index) => <li key={item.task_id + item.uri + index}>
           <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>

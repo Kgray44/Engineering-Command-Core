@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { taskHref } from './task-workspace.mjs';
 import { integrationLogFact, integrationWorkflowTiming } from './integration-analytics.mjs';
 import { codexThreadHref } from './task-engine-client.mjs';
+import { MergeSourcePicker, useMergeSource } from './merge-source-picker.jsx';
 
 const endpoint = '/api/integrations/v1';
 const empty = { access: {}, runs: [], loading: true };
@@ -46,7 +47,7 @@ export function IntegrationTaskStatus({ runs, loading, error, attemptId, taskId 
     <GitMerge size={16} aria-hidden="true"/>
     <strong>{loading ? 'Loading merge status' : error ? 'Merge status unavailable' : labels[run?.state] ?? 'Merge not requested'}</strong>
     {run?.evidence?.merged_sha && <code className="integration-sha">{run.evidence.merged_sha}</code>}
-    <a href={'#merge?task=' + encodeURIComponent(taskId)}>Open Merge Workspace</a>
+    <a href={'#merge?task=' + encodeURIComponent(taskId)}>Open Merge Control Center</a>
   </div>;
 }
 
@@ -62,7 +63,11 @@ function Revisions({ run }) {
   </dl>;
 }
 
-export function MergeWorkspace({ headers, acceptedTasks, pulls, initialTask, demo }) {
+export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask, initialPull, defaultState, demo }) {
+  const [pull, setPull] = useState(() => /^[1-9]\d*$/.test(initialPull ?? '') && Number.isSafeInteger(Number(initialPull)) ? Number(initialPull) : null);
+  const { source, reload: reloadSource } = useMergeSource(demo ? null : pull, headers);
+  const reviewedHead = source?.status === 'available' && source.detail?.number === pull && source.detail.state === 'open' &&
+    !source.detail.draft && /^[a-f0-9]{40}$/.test(source.detail.head?.sha ?? '') ? source.detail.head.sha : null;
   const [mode, setMode] = useState(initialTask ? 'task' : 'pr');
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -133,38 +138,36 @@ export function MergeWorkspace({ headers, acceptedTasks, pulls, initialTask, dem
   if (error) return <p className="notice" role="alert">{error}</p>;
   return <div className="integration-workspace">
     <section className="panel integration-intake" aria-labelledby="integration-start-title">
-      <h2 id="integration-start-title">Start integration</h2>
+      <h2 id="integration-start-title">Integration sources</h2>
       <div className="integration-actions" role="group" aria-label="Integration source">
         <button type="button" className="quiet-button" aria-pressed={mode === 'pr'} onClick={() => setMode('pr')}>
-          <GitPullRequest size={16} aria-hidden="true"/> Merge PR
+          <GitPullRequest size={16} aria-hidden="true"/> Pull requests
         </button>
         <button type="button" className="quiet-button" aria-pressed={mode === 'task'} onClick={() => setMode('task')}>
           <GitMerge size={16} aria-hidden="true"/> Integrate Task
         </button>
       </div>
+      {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs}
+        onRun={id => { setConfirm(false); setSelected(id); }}/>}
       <form key={mode} onSubmit={event => {
         event.preventDefault();
         const fields = new FormData(event.currentTarget);
         const repair_limit = Number(fields.get('repair_limit'));
-        act(mode === 'task' ? { op: 'start', task_id: fields.get('task'), repair_limit } :
-          { op: 'start', pr_number: Number(fields.get('pr')), head_sha: fields.get('head').trim(), repair_limit });
+        if (mode === 'task') act({ op: 'start', task_id: fields.get('task'), repair_limit });
+        else if (reviewedHead) act({ op: 'start', pr_number: pull, head_sha: reviewedHead, repair_limit });
       }}>
         {mode === 'task' ? <label>Accepted Task<select name="task" required defaultValue={initialTask ?? ''}>
           <option value="">Select a Task</option>
           {acceptedTasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
-        </select></label> : <>
-          <label>Pull request number<input name="pr" inputMode="numeric" pattern="[1-9][0-9]*" list="integration-pulls" required/></label>
-          <datalist id="integration-pulls">{pulls.map(pr => <option key={pr.number} value={pr.number} label={pr.title}/>)}</datalist>
-          <label>Reviewed head SHA<input name="head" pattern="[0-9a-f]{40}" spellCheck={false} autoComplete="off" required/></label>
-        </>}
+        </select></label> : null}
         <label>Integration repair limit<select name="repair_limit" defaultValue="3">
           {[1, 2, 3, 4, 5].map(limit => <option key={limit} value={limit}>{limit}</option>)}
         </select></label>
-        <button className="primary-button" disabled={busy || loading}>Inspect source</button>
+        <button className="primary-button" disabled={busy || loading || (mode === 'pr' && !reviewedHead)}>Inspect source</button>
       </form>
     </section>
     <section className="panel integration-runs" aria-labelledby="integration-runs-title">
-      <h2 id="integration-runs-title">Integration runs</h2>
+      <h2 id="integration-runs-title">Integration history</h2>
       {loading && <p role="status">Loading integration runs…</p>}
       {!loading && !runs.length && <p className="muted">No integration runs recorded.</p>}
       <ul>{runs.map(item => <li key={item.id}><button className="quiet-button" aria-pressed={selected === item.id} onClick={() => {
@@ -172,7 +175,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pulls, initialTask, dem
         setSelected(item.id);
       }}>
         {item.pr_number ? 'PR #' + item.pr_number : 'Task candidate ' + item.head_sha.slice(0, 8)}
-        <span>{labels[item.id === run?.id ? run.state : item.state]}</span>
+        <span>{labels[item.id === run?.id ? run.state : item.state]}<small>{item.updated_at && new Date(item.updated_at).toLocaleString()}</small></span>
       </button></li>)}</ul>
     </section>
     <div role="status" aria-live="polite" className="integration-message">{message}</div>

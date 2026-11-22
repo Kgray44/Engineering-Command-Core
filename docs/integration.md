@@ -1,0 +1,9 @@
+# Merge Control Center
+
+Select **Pull requests** to search the configured repository's bounded feed. Choose a pull request to read its source head and base, author, changed files, and requested reviewers. The detail link opens GitHub and Actions evidence. If the provider snapshot is stale or unavailable, refresh the source before inspection. A PR from outside the current feed can be opened with the application's `#merge?pr=<number>` link.
+
+**Inspect source** sends the displayed GitHub head to the existing integration engine. The engine validates the candidate, checks the branch policy and source state, and records evidence, blockers, and required checks. A last observed integration state belongs to its stored SHA. Review the current GitHub head and the run evidence before authorizing an action. The **Integrate Task** view selects accepted Task candidates through the canonical Task path.
+
+Open a run in **Integration history** for the source, check state, prior repair attempts, action receipts, and verified landed revision when available. Failed workflow and job links open the check at GitHub. Rerun, repair, publication, and merge controls depend on current backend eligibility and authorization. The integration engine verifies exact source, review, checks, and landed ancestry. Branch protection remains authoritative.
+
+The two owner-private staging Sites support evidence inspection. Production GitHub mutation gates remain in the [Phase 1B runbook](../PHASE1B-SITES.md). Keep qualification PRs draft and use fixtures to exercise write controls.
