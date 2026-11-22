@@ -1,6 +1,6 @@
 # Phase 1 owner review
 
-The owner selected two private ChatGPT Sites for Phase 1B staging. The deployment uses one shared engine and one separate D1 per Site. The [Phase 1B report and runbook](PHASE1B-SITES.md) records hosted results, remaining acceptance gates, and migration prerequisites. The sections below retain Phase 1A evidence and its hosting investigation.
+The owner selected two private ChatGPT Sites for Phase 1B staging. The deployment uses one shared engine and one separate D1 per Site. The [Phase 1B report and runbook](PHASE1B-SITES.md) records hosted results, remaining acceptance gates, and migration prerequisites. The staging report also records the exact published application PRs, managed Voyagewright checkpoint recovery, and the remaining authenticated GitHub and production export gates. The sections below retain Phase 1A evidence and its hosting investigation.
 
 The candidate extracts Aetherwake Observatory and its local execution tools into Engineering Command Core. A single shared Worker serves configured application runtimes. Each runtime has an independent D1-compatible database, authenticated owner, repository mapping and worker credential. The original source is retained at the pinned Aetherwake revisions below. This candidate is for review and staging.
 
