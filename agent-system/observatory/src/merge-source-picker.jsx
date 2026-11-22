@@ -256,7 +256,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         </button></li>;
       })}
     </ul>
-    {!pulls.length && <p className="low">No pull requests match the current filters.</p>}
+    {!pulls.length && <p className="low">No pull requests match the current view.</p>}
     {number && <motion.section key={number} className="merge-source-detail"
       initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .18 }}>
       <h3>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>
