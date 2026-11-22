@@ -10,7 +10,7 @@ import { startStage } from './staging-fixture.mjs';
 import { applyMigrations, openPartition } from './sqlite-runtime.mjs';
 import { stageSnapshot } from './stage-snapshot.mjs';
 import { taskOperation } from './task-engine.mjs';
-import { verifyRestore } from './verify-restore.mjs';
+import { restoreCheckpoint, verifyRestore } from './verify-restore.mjs';
 
 const owner = 'synthetic-staging-owner';
 const workerKey = 'w'.repeat(64);
@@ -179,23 +179,28 @@ test('current application partitions restore from independent SQLite checkpoints
       await stage.close();
       source.sqlite.close();
     }
-    const checkpoint = new DatabaseSync(file(applicationId + '-checkpoint'), { readOnly: true });
-    try {
-      await backup(checkpoint, file(applicationId + '-restore'));
-    } finally {
-      checkpoint.close();
-    }
     const expected = { application: applicationId, repository: applicationRepository, portfolio: 'engineering' };
     const checkpointFile = file(applicationId + '-checkpoint');
     const restoredFile = file(applicationId + '-restore');
+    const beforeRestore = await readFile(checkpointFile);
+    await assert.rejects(restoreCheckpoint({ source: checkpointFile, destination: fileURLToPath(new URL('./unsafe-restore.sqlite',
+      import.meta.url)), ...expected }), /outside Git/);
+    await assert.rejects(restoreCheckpoint({ source: checkpointFile, destination: restoredFile, ...expected, application: 'peer' }), /identity/);
+    const verifier = fileURLToPath(new URL('./verify-restore.mjs', import.meta.url));
+    const restoredReceipt = JSON.parse(execFileSync(process.execPath, [verifier, '--create', checkpointFile, restoredFile,
+      expected.application, expected.repository, expected.portfolio], { encoding: 'utf8' }));
+    assert.equal(restoredReceipt.runtime_mode, 'offline');
+    assert.match(restoredReceipt.source_sha256, /^[0-9a-f]{64}$/);
+    await assert.rejects(restoreCheckpoint({ source: checkpointFile, destination: restoredFile, ...expected }), /already exists/);
+    assert.deepEqual(await readFile(checkpointFile), beforeRestore);
     const receipt = verifyRestore(checkpointFile, restoredFile, expected);
+    assert.equal(restoredReceipt.digest, receipt.digest);
     assert.equal(receipt.application, applicationId);
     assert.match(receipt.digest, /^[0-9a-f]{64}$/);
     assert.equal(receipt.tables.proposals, 1);
     assert.equal(receipt.tables.project_task_milestones, 1);
     assert.equal(receipt.tables.recovery_probe, 4);
     assert.doesNotMatch(JSON.stringify(receipt), /private fixture value/);
-    const verifier = fileURLToPath(new URL('./verify-restore.mjs', import.meta.url));
     assert.deepEqual(JSON.parse(execFileSync(process.execPath, [verifier, checkpointFile, restoredFile,
       expected.application, expected.repository, expected.portfolio], { encoding: 'utf8' })), receipt);
     assert.throws(() => verifyRestore(checkpointFile, file(applicationId + '-source'), expected), /workspace_preference_events/);

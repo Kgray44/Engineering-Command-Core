@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto';
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { backup, DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { applicationId, repositoryName } from './application-config.mjs';
 import { applyMigrations, journal } from './sqlite-runtime.mjs';
+import { checkpointFileDigest, publishPrivateCheckpoint, resolvePrivateCheckpointTarget } from './private-checkpoint.mjs';
 
 const schema = db => db.prepare(
   "SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE substr(name, 1, 7) <> 'sqlite_' ORDER BY type, name",
 ).all();
 const quoteIdentifier = name => '"' + name.replaceAll('"', '""') + '"';
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const hasSidecar = path => ['-journal', '-wal', '-shm'].some(suffix => existsSync(path + suffix));
 
 function currentObjects() {
   const db = new DatabaseSync(':memory:');
@@ -82,7 +84,7 @@ export function verifyRestore(source, restored, { application, repository, portf
   if (!first.isFile() || !second.isFile() || (first.dev === second.dev && first.ino === second.ino)) {
     throw Error('The checkpoint and restore must be separate files');
   }
-  if ([source, restored].some(path => ['-journal', '-wal', '-shm'].some(suffix => existsSync(path + suffix)))) {
+  if ([source, restored].some(hasSidecar)) {
     throw Error('Checkpoint and restore must be standalone SQLite files');
   }
   const expected = { application, repository, portfolio };
@@ -103,16 +105,45 @@ export function verifyRestore(source, restored, { application, repository, portf
   };
 }
 
+export async function restoreCheckpoint({ source, destination, application, repository, portfolio }) {
+  source = realpathSync(source);
+  if (!statSync(source).isFile() || hasSidecar(source)) throw Error('An immutable standalone SQLite checkpoint is required');
+  destination = await resolvePrivateCheckpointTarget(destination);
+  if (existsSync(destination)) throw Error('Offline restore destination already exists');
+  const sourceHash = await checkpointFileDigest(source);
+  try {
+    return await publishPrivateCheckpoint(destination, async prepared => {
+      const db = new DatabaseSync(source, { readOnly: true });
+      try {
+        await backup(db, prepared);
+      } finally {
+        db.close();
+      }
+      const receipt = verifyRestore(source, prepared, { application, repository, portfolio });
+      if (await checkpointFileDigest(source) !== sourceHash) throw Error('Source checkpoint changed during restore');
+      return { ...receipt, source_sha256: sourceHash, runtime_mode: 'offline' };
+    });
+  } catch (error) {
+    if (error.code === 'EEXIST') throw Error('Offline restore destination already exists');
+    throw error;
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const [source, restored, application, repository, portfolio] = process.argv.slice(2);
-  if (process.argv.length !== 7) {
-    process.stderr.write('Usage: verify-restore.mjs CHECKPOINT RESTORED APPLICATION REPOSITORY PORTFOLIO\n');
+  const args = process.argv.slice(2);
+  const create = args[0] === '--create';
+  if (create) args.shift();
+  const [source, restored, application, repository, portfolio] = args;
+  if (args.length !== 5) {
+    process.stderr.write('Usage: verify-restore.mjs [--create] CHECKPOINT RESTORED APPLICATION REPOSITORY PORTFOLIO\n');
     process.exitCode = 1;
   } else {
     try {
-      process.stdout.write(JSON.stringify(verifyRestore(source, restored, { application, repository, portfolio })) + '\n');
+      const receipt = create ? await restoreCheckpoint({ source, destination: restored, application, repository, portfolio }) :
+        verifyRestore(source, restored, { application, repository, portfolio });
+      process.stdout.write(JSON.stringify(receipt) + '\n');
     } catch (error) {
-      process.stderr.write((error.code ? 'Could not read both checkpoint and restored databases' : error.message) + '\n');
+      process.stderr.write((error.code ? 'Could not ' + (create ? 'create the offline restore' : 'read both databases') : error.message) + '\n');
       process.exitCode = 1;
     }
   }

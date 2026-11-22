@@ -80,11 +80,17 @@ Run `node --test --test-name-pattern "current application partitions" sites/stag
 
 Sites version rollback restores code only. The database inspection tools provide bounded views. A hosted recovery drill requires a consistent data export and any applicable file inventory from authorized custody, restoration into an isolated target, and verified record and file readback. Hosted backup, restore, and retention remain unverified. [Sites versions and saved data](https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites)
 
-After an authorized operator obtains a consistent current-schema checkpoint and restores it to a separate target, retain two standalone SQLite files in private custody. Run the verifier from the Observatory package at the source deployment revision. Use the source application, repository, and portfolio explicitly.
+After an authorized operator obtains a consistent current-schema SQLite checkpoint, run the tool from an Observatory checkout with migrations matching the source deployment. Keep the checkpoint and the offline restore outside Git. Use the source application, repository, and portfolio explicitly. Choose a new destination filename in an existing private directory.
+
+```text
+node sites/verify-restore.mjs --create SOURCE.sqlite RESTORED.sqlite aetherwake Kgray44/Aetherwake engineering
+node sites/verify-restore.mjs --create SOURCE.sqlite RESTORED.sqlite voyagewright Kgray44/treasurehuntSoT engineering
+```
+
+The command writes a private SQLite copy and verifies it before publishing the destination. It refuses to overwrite an existing path and emits a source file hash with the verification receipt. Keep the copy disconnected from active Sites and Task workers during the drill. For a restore already made in private custody, omit `--create` to run the same comparison without writing either file.
 
 ```text
 node sites/verify-restore.mjs SOURCE.sqlite RESTORED.sqlite aetherwake Kgray44/Aetherwake engineering
-node sites/verify-restore.mjs SOURCE.sqlite RESTORED.sqlite voyagewright Kgray44/treasurehuntSoT engineering
 ```
 
 The verifier opens both files read-only. It checks application identity, current schema objects, exact schema equality, SQLite integrity, foreign keys, and every table's typed rows, including any migration journal present in the checkpoint. The receipt contains counts and a digest instead of row payloads. Keep that receipt in private custody. Preserve the provider's export and migration receipts, check the file inventory and digests separately where applicable, and read restored identities through the isolated application before recording acceptance.

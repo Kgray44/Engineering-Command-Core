@@ -47,7 +47,7 @@ CI for the deployed candidate passed 69 Observatory checks, 142 Sites checks, 12
 
 - **Projects and dependencies.** Hosted Project overviews opened their pending owner reviews. Both staging origins opened the Dependencies section from direct links. An isolated Voyagewright browser test saved a prerequisite, attempted its inverse, and received an ordered cycle path. Following the path opened the original prerequisite. The rejected gate remained absent after navigation. Fixtures also verified audited withdrawal before admission and rejection of stale gate receipts.
 - **Checks and failed jobs.** The browser fixture showed the selected head and observed main, a failed required check beside a missing one, and the failed job's run and attempt. It distinguished a job whose relationship to a required check was unverified. The preview created no integration run.
-- **Data and recovery.** Both Sites reported migration `0020_project_milestone_gate_removal`. The verifier compared every typed row and the schema of isolated SQLite restores for both applications. It rejected a wrong application, changed schema, and changed row. Hosted recovery still needs the provider checkpoint.
+- **Data and recovery.** Both Sites reported migration `0020_project_milestone_gate_removal`. The offline restore tool created and verified independent SQLite copies for both application fixtures. It checked every typed row and the schema, emitted the source digest, and refused to overwrite an existing target. Hosted recovery still needs a consistent provider checkpoint. [Offline restore procedure](docs/operations.md#troubleshooting-and-recovery)
 
 ## Owner walkthrough
 
