@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
+import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { motion, useReducedMotion } from 'motion/react';
 import { Activity, Boxes, ChevronRight, Code, Flag, FlaskConical, GitBranch, Grip, Map, Milestone, Rocket, Search, Shield, Target, Wrench } from 'lucide-react';
@@ -66,11 +66,30 @@ function Card({ item, Status, sortable }) {
   </li>;
 }
 
+// Keyboard direction follows the list across rows. Use the measured target center so
+// uneven card sizes and viewport scrolling do not determine which item is selected.
+const keyboardDirection = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
+
+function projectKeyboardCoordinates(event, { context, active }) {
+  const offset = keyboardDirection[event.code];
+  if (!offset || !context.collisionRect) return;
+  event.preventDefault();
+  const origin = context.droppableContainers.get(context.over?.id ?? active)?.data.current?.sortable;
+  if (!origin) return;
+  const id = origin.items[origin.index + offset];
+  const rect = context.droppableRects.get(id);
+  if (!rect) return;
+  return {
+    x: rect.left + (rect.width - context.collisionRect.width) / 2,
+    y: rect.top + (rect.height - context.collisionRect.height) / 2,
+  };
+}
+
 export function ProjectCardGrid({ rows, Status, sortable, onMove, layout }) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, { coordinateGetter: projectKeyboardCoordinates }),
   );
   const ids = rows.map(item => item.id);
   const title = id => rows.find(item => item.id === id)?.name;

@@ -141,17 +141,13 @@ test('Projects workspace performs live project and Task mutations through the sh
   await titles.first().waitFor();
   assert.deepEqual(await titles.allTextContents(), firstNames);
   const handle = page.getByRole('button', { name: 'Reorder Second synthetic project' });
-  const cards = page.locator('.project-card');
   await page.setViewportSize({ width: 1240, height: 1160 });
   await handle.scrollIntoViewIfNeeded();
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.view')).transform === 'none');
-  const initial = await cards.first().boundingBox();
-  const target = await cards.last().boundingBox();
-  const direction = target.y > initial.y + 20 ? 'ArrowDown' : 'ArrowRight';
   async function moveWithKeyboard() {
     await handle.press('Space');
     await page.locator('[data-dragging][data-drag-over]').waitFor();
-    await page.keyboard.press(direction);
+    await handle.press('ArrowRight');
     await page.locator('[data-insertion]').waitFor();
   }
   await moveWithKeyboard();
