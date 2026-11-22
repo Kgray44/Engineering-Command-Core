@@ -1,3 +1,5 @@
+import { readTaskRows, storedTaskPrerequisites } from './task-engine.mjs';
+
 const positive = number => Number.isSafeInteger(number) && number > 0;
 const limit = 50;
 
@@ -27,8 +29,23 @@ export async function readMergeSourceContext({ db, owner, namespace, repository,
       ORDER BY updated_at DESC, id DESC LIMIT ?
     `).bind(...scope, number, repository, limit + 1).all(),
   ]);
+  const linked = tasks.results.slice(0, limit);
+  const linkedIds = linked.map(row => row.task_id);
+  const taskIds = [...new Set([...linkedIds, ...linked.flatMap(row => JSON.parse(row.record).prerequisites.task_ids)])];
+  const [dependencyRows, gates] = linked.length ? await Promise.all([
+    readTaskRows({ db, owner, namespace, taskIds, reconcileExpired: false }),
+    db.prepare(`
+      SELECT g.task_id, g.milestone_id, m.project_id, m.name, m.status
+      FROM project_task_gates g LEFT JOIN milestones m
+        ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id
+      WHERE g.owner_id = ? AND g.namespace = ? AND g.task_id IN (SELECT value FROM json_each(?))
+      ORDER BY g.task_id, g.milestone_id
+    `).bind(...scope, JSON.stringify(linkedIds)).all(),
+  ]) : [[], { results: [] }];
+  const rows = new Map(dependencyRows.filter(row => JSON.parse(row.record).repository === repository)
+    .map(row => [row.task_id, row]));
   const decoded = runs.results.slice(0, limit).map(row => ({ ...JSON.parse(row.record), updated_at: row.updated_at }));
-  const associations = tasks.results.slice(0, limit).map(row => {
+  const associations = linked.map(row => {
     const task = JSON.parse(row.record);
     const engine = JSON.parse(row.engine ?? '{}');
     const references = new Map();
@@ -42,7 +59,16 @@ export async function readMergeSourceContext({ db, owner, namespace, repository,
         references.set(run.head_sha, { revision: run.head_sha, uri, source: 'integration_run' });
       }
     }
+    const prerequisites = storedTaskPrerequisites(row, rows).map(check => {
+      const source = check.type === 'task' && rows.get(check.id);
+      return { ...check, ...(source ? { title: JSON.parse(source.record).title } : {}) };
+    });
+    for (const gate of gates.results.filter(item => item.task_id === row.task_id)) {
+      prerequisites.push({ type: 'milestone', id: gate.milestone_id, title: gate.name, project_id: gate.project_id,
+        state: gate.status ?? 'missing', status: gate.status === 'accepted' ? 'satisfied' : gate.status ? 'unsatisfied' : 'unverified' });
+    }
     return {
+      prerequisites,
       task: { id: row.task_id, title: task.title },
       project: row.project_id ? { id: row.project_id, name: JSON.parse(row.metadata).name } : null,
       references: [...references.values()],

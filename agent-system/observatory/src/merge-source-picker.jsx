@@ -90,6 +90,24 @@ function PullReviews({ detail, sourceStatus }) {
   </section>;
 }
 
+function TaskPrerequisites({ checks }) {
+  if (!checks) return null;
+  const open = checks.filter(check => check.status !== 'satisfied');
+  if (!open.length) return <small>{checks.length ? 'Task prerequisites satisfied' : 'No Task prerequisites recorded'}</small>;
+  return <details>
+    <summary>{open.length} of {checks.length} Task prerequisites open</summary>
+    <ul>{open.map(check => {
+      const title = check.title ?? check.id;
+      const path = check.type === 'task' && check.title ? taskHref(check.id)
+        : check.project_id ? '#projects/' + check.project_id : null;
+      return <li key={check.type + ':' + check.id}>
+        {path ? <a href={path}>{title}</a> : title}
+        {' · ' + (check.milestone === 'merged' ? 'verified merge required' : check.state.replaceAll('_', ' '))}
+      </li>;
+    })}</ul>
+  </details>;
+}
+
 function PullCheckPreview({ number, head, headers }) {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -215,7 +233,9 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         {context.data?.truncated && <p>Showing the first 50 records.</p>}
         {context.data?.associations.length > 0 && <ul className="integration-evidence">{context.data.associations.map(item => <li key={item.task.id}>
           <span><a href={taskHref(item.task.id)}>{item.task.title}</a>
-            {item.project && <small><a href={'#projects/' + item.project.id}>{item.project.name}</a></small>}</span>
+            {item.project && <small><a href={'#projects/' + item.project.id}>{item.project.name}</a></small>}
+            <TaskPrerequisites checks={item.prerequisites}/>
+          </span>
           <small>{!detail?.head?.sha ? 'PR association recorded' : item.references.some(ref => ref.revision === detail.head.sha)
             ? 'Current head referenced' : 'Earlier revision referenced'}</small>
         </li>)}</ul>}

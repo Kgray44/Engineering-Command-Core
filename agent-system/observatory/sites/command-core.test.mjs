@@ -493,12 +493,20 @@ test('Merge source discovery reads scoped Task and Project associations before a
   const projectId = crypto.randomUUID();
   const head = 'b'.repeat(40);
   const operationId = crypto.randomUUID();
+  let prerequisiteId;
   for (const app of [0, 1]) {
     const project = await call(app, '/api/projects', { op: 'create', id: projectId,
       fields: { name: app ? 'Peer project' : 'Delivery project', objective: 'Review source relationships' } });
     assert.equal(project.status, 201);
+    const prerequisite = app === 0 && await call(app, '/api/projects', { op: 'register_task', id: projectId,
+      operation_id: crypto.randomUUID(), fields: { ...taskFields, title: 'Review prerequisite' } });
+    if (prerequisite) {
+      assert.equal(prerequisite.status, 201);
+      prerequisiteId = prerequisite.body.task.id;
+    }
     const created = await call(app, '/api/projects', { op: 'register_task', id: projectId,
-      operation_id: operationId, fields: { ...taskFields, title: app ? 'Peer review' : 'Source review' } });
+      operation_id: operationId, fields: { ...taskFields, title: app ? 'Peer review' : 'Source review',
+        dependencies: prerequisite ? [prerequisiteId] : [] } });
     assert.equal(created.status, 201);
     const attached = await task(app, { op: 'command', task_id: created.body.task.id,
       expected_version: created.body.version, operation_id: crypto.randomUUID(),
@@ -511,7 +519,12 @@ test('Merge source discovery reads scoped Task and Project associations before a
   assert.deepEqual(primary.body.associations.map(item => ({
     title: item.task.title, project: item.project?.name, revisions: item.references.map(ref => ref.revision),
   })), [{ title: 'Source review', project: 'Delivery project', revisions: [head] }]);
-  assert.equal((await call(1, path)).body.associations[0].task.title, 'Peer review');
+  assert.deepEqual(primary.body.associations[0].prerequisites, [
+    { type: 'task', id: prerequisiteId, title: 'Review prerequisite', state: 'proposed', status: 'unsatisfied' },
+  ]);
+  const peer = (await call(1, path)).body.associations[0];
+  assert.equal(peer.task.title, 'Peer review');
+  assert.deepEqual(peer.prerequisites, []);
   assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.associations, []);
   assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
   assert.equal((await call(0, '/api/integrations/v1?pr_number=81junk')).status, 400);

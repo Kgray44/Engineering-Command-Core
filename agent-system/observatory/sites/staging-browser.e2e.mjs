@@ -321,6 +321,14 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     fields: { title: 'Release review', objective: 'Review the exact source', primary: 'backend', profile_id: 'backend', criteria: ['Verify the diff'] } });
   assert.equal(linkedTask.status, 201);
   const taskId = linkedTask.body.task.id;
+  const releaseGate = crypto.randomUUID();
+  const gateProject = crypto.randomUUID();
+  assert.equal((await stage.run('/api/projects', { op: 'create', id: gateProject,
+    fields: { name: 'Readiness project', objective: 'Own the release decision milestone' } })).status, 201);
+  assert.equal((await stage.run('/api/projects', { op: 'milestone', id: gateProject, milestone_id: releaseGate,
+    name: 'Release readiness', acceptance: 'Record the release decision', status: 'planned' })).status, 201);
+  assert.equal((await stage.run('/api/projects', { op: 'milestone_gate', id: projectId, task_id: taskId,
+    milestone_id: releaseGate })).status, 200);
   let referenceReceipt = await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
     expected_version: linkedTask.body.version, operation_id: crypto.randomUUID(),
     action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } });
@@ -504,6 +512,9 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
   const linkedWork = page.getByRole('region', { name: 'Linked engineering work' });
   await linkedWork.getByText('Earlier revision referenced').waitFor();
+  await linkedWork.getByText('1 of 1 Task prerequisites open', { exact: true }).click();
+  assert.equal(await linkedWork.getByRole('link', { name: 'Release readiness', exact: true }).getAttribute('href'), '#projects/' + gateProject);
+  await linkedWork.getByText(/planned/).waitFor();
   assert.equal(await linkedWork.getByRole('link', { name: 'Release project' }).getAttribute('href'), '#projects/' + projectId);
   assert.equal(await linkedWork.getByRole('link', { name: 'Release review' }).getAttribute('href'), '#tasks/' + taskId);
   await page.getByText(head, { exact: true }).waitFor();

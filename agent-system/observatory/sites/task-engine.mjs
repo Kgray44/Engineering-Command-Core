@@ -563,13 +563,15 @@ async function recoverWorkerCandidate(lifecycle, body, now) {
   return { lifecycle:{...lifecycle,state:'verifying',recovered_candidate:true}, previousFailure, previousFailureKind };
 }
 
-export async function readTaskRows({ db, owner, namespace, now = Date.now(), reconcileExpired = true }) {
+export async function readTaskRows({ db, owner, namespace, now = Date.now(), reconcileExpired = true, taskIds }) {
   const query = (sql, ...args) => db.prepare(sql).bind(...args);
-  const result = await query('SELECT * FROM proposals WHERE owner_id = ? AND namespace = ? ORDER BY created_at DESC, task_id DESC',
-    owner, namespace).all();
+  const constraint = taskIds ? ' AND task_id IN (SELECT value FROM json_each(?))' : '';
+  const scope = taskIds ? [owner, namespace, JSON.stringify(taskIds)] : [owner, namespace];
+  const result = await query('SELECT * FROM proposals WHERE owner_id = ? AND namespace = ?' + constraint +
+    ' ORDER BY created_at DESC, task_id DESC', ...scope).all();
   if (result.results.some(row => record(row).prerequisites?.merged_task_ids?.length)) {
     const verified = await query(`SELECT task_id, task_attempt_id, COALESCE(json_extract(record, '$.task.head_sha'), head_sha) AS head_sha FROM integration_runs
-      WHERE owner_id = ? AND namespace = ? AND task_id IS NOT NULL AND state IN ('merged', 'deployed')`, owner, namespace).all();
+      WHERE owner_id = ? AND namespace = ? AND task_id IS NOT NULL AND state IN ('merged', 'deployed')` + constraint, ...scope).all();
     const revisions = new Map();
     for (const { task_id, task_attempt_id, head_sha } of verified.results) {
       if (!revisions.has(task_id)) revisions.set(task_id, []);
