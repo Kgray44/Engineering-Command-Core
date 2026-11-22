@@ -4,10 +4,10 @@ import { createCommandCore } from './command-core.mjs';
 const owner = 'synthetic-staging-owner';
 const workerKey = 'w'.repeat(64);
 const proof = 'synthetic-transport-auth';
-const revision = 'a'.repeat(40);
+const fixtureRevision = 'a'.repeat(40);
 const appId = 'aetherwake';
 const repository = 'synthetic/observatory';
-export async function startStage(part, { assets = {} } = {}) {
+export async function startStage(part, { assets = {}, revision = fixtureRevision } = {}) {
   let core;
   let origin;
   const env = { FIRST: { DB: part.DB, OBSERVATORY_TASK_ENGINE_OWNER_ID: owner, OBSERVATORY_TASK_WORKER_KEY: workerKey } };
