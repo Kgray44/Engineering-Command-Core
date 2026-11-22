@@ -336,6 +336,10 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
     <a className="back" href="#settings">All settings</a>
     <h2>{active[1]}</h2>
     {settings && <Diagnostics {...{ category, settings, github, dispatch, worker, execution }} engineState={engine.status}/>}
+    {category === 'github' && /^[0-9a-f]{40}$/.test(settings?.revision ?? '') &&
+      <a href={'https://github.com/Kgray44/Engineering-Command-Core/blob/' + settings.revision + '/docs/deployment.md#staging-github-read-credentials'}>
+        GitHub credential setup and troubleshooting
+      </a>}
     {category === 'connections' && settings && <ConnectionChecks headers={headers} settings={settings}/>}
     {category === 'scheduling' && settings && <SchedulerObservations engine={engine}/>}
     {category === 'data' && settings && <DataChecks headers={headers} revision={settings.revision}/>}

@@ -242,7 +242,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
       <div className="integration-actions">
         <a href={activityHref('pulls', number)}>Pull request details</a>
         {githubUrl && <a href={githubUrl}>Open on GitHub</a>}
-        {source && source.status !== 'available' && <a href="#settings/connections">GitHub connection settings</a>}
+        {source && source.status !== 'available' && <a href="#settings/github">GitHub connection settings</a>}
         <button type="button" className="quiet-button" onClick={reload}>Refresh GitHub source</button>
       </div>
       {summary && <>

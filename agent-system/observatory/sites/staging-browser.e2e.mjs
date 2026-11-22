@@ -486,6 +486,10 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await custom.getByRole('button', { name: 'Confirm removal' }).click();
   await page.getByText('Custom templates saved.', { exact: true }).waitFor();
   assert.equal(await custom.getByRole('option', { name: 'Qualification template' }).count(), 0);
+  await page.goto(stage.origin + '/#settings/github');
+  const githubGuide = page.getByRole('link', { name: 'GitHub credential setup and troubleshooting' });
+  assert.equal(await githubGuide.getAttribute('href', { timeout: 5_000 }),
+    'https://github.com/Kgray44/Engineering-Command-Core/blob/' + 'a'.repeat(40) + '/docs/deployment.md#staging-github-read-credentials');
   await page.goto(stage.origin + '/#settings/connections');
   const probes = page.getByRole('region', { name: 'Connection checks' });
   await probes.getByRole('button', { name: 'Verify connections' }).click();
@@ -615,7 +619,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByText('GitHub read credential unavailable', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
   await page.getByText('Last observed repository feed', { exact: false }).waitFor();
-  assert.equal(await page.getByRole('link', { name: 'GitHub connection settings' }).getAttribute('href'), '#settings/connections');
+  assert.equal(await page.getByRole('link', { name: 'GitHub connection settings' }).getAttribute('href'), '#settings/github');
   assert.equal(await page.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href'), pull.html_url);
   assert.equal(await page.getByRole('button', { name: 'Inspect source', exact: true }).isDisabled(), true);
   assert.equal(await page.getByRole('button', { name: 'Preview required checks' }).count(), 0);
