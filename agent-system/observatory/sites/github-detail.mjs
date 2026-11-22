@@ -96,7 +96,8 @@ function pullFile(file) {
 
 function pullReview(review) {
   if (!positive(review?.id)) throw new Error('Invalid pull request review');
-  return { id: review.id, author: logins(review.user), state: text(review.state, 48), submitted_at: time(review.submitted_at) };
+  return { id: review.id, author: logins(review.user), state: text(review.state, 48), submitted_at: time(review.submitted_at),
+    revision: isRevision(review.commit_id) ? review.commit_id : null };
 }
 
 function pullCommit(commit) {
@@ -115,9 +116,11 @@ async function pullSections(reader, path, detail, previous, validators, next, no
     // These are observations of GitHub's live PR subcollections. The source
     // SHAs come from the core PR read and do not attest a submitted evidence set.
     const retained = (kind === 'reviews' || sameSource) && previous?.[kind + '_observed_at'] ? previous : null;
+    // Older cached reviews can be displayed, but their validators cannot recover the reviewed commit.
+    const currentProjection = kind !== 'reviews' || retained?.reviews?.every(review => Object.hasOwn(review, 'revision'));
+    const validator = retained && currentProjection ? validators[kind] : null;
     const outcome = await capture(async () => {
-      const response = await reader.get(path + '/' + kind + '?per_page=' + PULL_SECTION_LIMIT,
-        512 * 1024, retained ? validators[kind] : null);
+      const response = await reader.get(path + '/' + kind + '?per_page=' + PULL_SECTION_LIMIT, 512 * 1024, validator);
       if (!response.unchanged && (!Array.isArray(response.data) || response.data.length > PULL_SECTION_LIMIT)) {
         throw new Error('Invalid pull request section');
       }
@@ -143,7 +146,7 @@ async function pullSections(reader, path, detail, previous, validators, next, no
       if (outcome.reason) reasons.push(outcome.reason);
       else if (outcome.truncated) reasons.push('GitHub pull ' + kind + ' exceeded the display limit');
     }
-    if (outcome.status !== 'available' && retained) next[kind] = validators[kind];
+    if (outcome.status !== 'available' && validator) next[kind] = validator;
   }
   return { output, reason: reasons.find(value => !value.includes('exceeded the display limit')) ?? reasons[0] ?? null };
 }

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { cachedGitHub, cachedGitHubDetail, peekTaskGitHubDetails } from './github-cache.mjs';
+import { fetchGitHubDetail } from './github-detail.mjs';
 import { createWorker } from './worker.mjs';
 import { runItems } from './github.mjs';
 
@@ -118,7 +119,7 @@ test('owner-only GET validates the route and shares bounded PR detail between is
       { filename: 'another.txt', status: 'modified', additions: 10, deletions: 4 },
     ]);
     if (url === provider + '/pulls/12/reviews?per_page=20') return Response.json([
-      { id: 42, user: { login: 'reviewer' }, state: 'APPROVED', body: 'never-copy-private-provider-fields' },
+      { id: 42, user: { login: 'reviewer' }, state: 'APPROVED', commit_id: sha, body: 'never-copy-private-provider-fields' },
     ]);
     if (url === provider + '/pulls/12/commits?per_page=20') return Response.json([
       { sha, commit: { committer: { date:'2026-01-02T00:00:00Z' }, message:'never-copy-private-provider-fields' } },
@@ -143,7 +144,7 @@ test('owner-only GET validates the route and shares bounded PR detail between is
   assert.equal(first.detail.url, 'https://github.com/Kgray44/Aetherwake/pull/12');
   assert.equal(JSON.stringify(first).includes('never-copy-private-provider-fields'), false);
   assert.deepEqual(first.detail.files[0], { path: 'new.txt', status: 'renamed', additions: 3, deletions: 1, previous_path: 'old.txt' });
-  assert.deepEqual(first.detail.reviews[0], { id: 42, author: 'reviewer', state: 'APPROVED', submitted_at: null });
+  assert.deepEqual(first.detail.reviews[0], { id: 42, author: 'reviewer', state: 'APPROVED', submitted_at: null, revision: sha });
   assert.equal(first.detail.files_status, 'available');
   assert.equal(first.detail.reviews_status, 'available');
   const ref=uri=>({uri});
@@ -289,4 +290,19 @@ test('PR sections reuse validators and retain their own observation times on a p
   assert.equal(next.detail.reviews_status, 'stale');
   assert.deepEqual(next.detail.reviews, first.detail.reviews);
   assert.equal(next.detail.reviews_observed_at, first.detail.reviews_observed_at);
+});
+
+test('refreshes a cached review projection that predates reviewed revisions', async () => {
+  const revisionedReview = { id: 42, user: { login: 'reviewer' }, state: 'APPROVED', commit_id: sha };
+  const upstream = async url => url.includes('/reviews?')
+    ? Response.json([revisionedReview], { headers: { etag: '"reviews"' } })
+    : url.includes('/files?') ? Response.json([]) : Response.json(pull(12));
+  const initial = await fetchGitHubDetail(upstream, 'fixture-token', 'pulls', 12, { now: Date.now, validators: {} });
+  const previous = { ...initial.result.detail, reviews: [{ id: 42, author: 'reviewer', state: 'APPROVED', submitted_at: null }] };
+  const conditional = async (url, init) => url.includes('/reviews?') && init.headers['If-None-Match']
+    ? new Response(null, { status: 304, headers: { etag: '"reviews"' } }) : upstream(url);
+  const refreshed = await fetchGitHubDetail(conditional, 'fixture-token', 'pulls', 12, {
+    now: Date.now, validators: initial.validators, previous,
+  });
+  assert.equal(refreshed.result.detail.reviews[0].revision, sha);
 });

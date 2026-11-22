@@ -290,7 +290,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       if (url.pathname.endsWith('/pulls/7')) return Response.json(pull);
       if (url.pathname.endsWith('/pulls')) return Response.json([pull]);
       if (url.pathname.endsWith('/files')) return Response.json([{ filename: 'guide.md', status: 'modified', additions: 5, deletions: 2 }]);
-      if (url.pathname.endsWith('/reviews') || url.pathname.endsWith('/commits')) return Response.json([]);
+      if (url.pathname.endsWith('/reviews')) return Response.json([
+        { id: 32, user: { login: 'prior-reviewer' }, state: 'CHANGES_REQUESTED', commit_id: 'c'.repeat(40) },
+        { id: 33, user: { login: 'current-reviewer' }, state: 'APPROVED', commit_id: head },
+        { id: 34, user: { login: 'commenter' }, state: 'COMMENTED', commit_id: 'invalid-sha' },
+      ]);
+      if (url.pathname.endsWith('/commits')) return Response.json([]);
       if (url.pathname.endsWith('/git/ref/heads/main')) return Response.json({ ref: 'refs/heads/main', object: { sha: 'd'.repeat(40), type: 'commit' } });
       if (url.pathname.endsWith('/rules/branches/main')) return Response.json([{ type: 'required_status_checks',
         parameters: { required_status_checks: [{ context: 'Verification', integration_id: 9 }] } }]);
@@ -502,6 +507,13 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await linkedWork.getByRole('link', { name: 'Release project' }).getAttribute('href'), '#projects/' + projectId);
   assert.equal(await linkedWork.getByRole('link', { name: 'Release review' }).getAttribute('href'), '#tasks/' + taskId);
   await page.getByText(head, { exact: true }).waitFor();
+  const reviews = page.getByRole('region', { name: 'Submitted reviews' });
+  await reviews.getByText('prior-reviewer', { exact: true }).waitFor();
+  assert.match(await reviews.getByRole('listitem').filter({ hasText: 'prior-reviewer' }).innerText(), /Changes requested[\s\S]*Different reviewed commit/);
+  assert.match(await reviews.getByRole('listitem').filter({ hasText: 'current-reviewer' }).innerText(), /Approved[\s\S]*Matches displayed head/);
+  assert.match(await reviews.getByRole('listitem').filter({ hasText: 'commenter' }).innerText(), /Commented[\s\S]*Reviewed commit unavailable/);
+  assert.equal(await reviews.getByRole('link', { name: 'Review by prior-reviewer' }).getAttribute('href'), pull.html_url + '#pullrequestreview-32');
+
   const preview = page.getByRole('region', { name: 'Pull request check preview' });
   await preview.getByRole('button', { name: 'Preview required checks' }).click();
   await preview.getByText('The observed main revision changed. Inspect the new base before proceeding.', { exact: true }).waitFor();

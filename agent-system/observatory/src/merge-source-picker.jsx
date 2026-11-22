@@ -58,6 +58,38 @@ function pullReadiness(pull, runs, group, main) {
   return [run.state, labels[run.state] ?? 'Awaiting inspection'];
 }
 
+const reviewLabels = new Map([
+  ['APPROVED', 'Approved'], ['CHANGES_REQUESTED', 'Changes requested'], ['COMMENTED', 'Commented'],
+  ['DISMISSED', 'Dismissed'], ['PENDING', 'Pending'],
+]);
+
+function PullReviews({ detail, sourceStatus }) {
+  const stale = sourceStatus === 'stale' || detail.reviews_status === 'stale';
+  const reviews = detail.reviews ?? [];
+  return <section aria-label="Submitted reviews">
+    <h4>Submitted reviews</h4>
+    {stale && <p>Showing last observed reviews.</p>}
+    {detail.reviews_truncated && <p>Review list is limited. Open the pull request on GitHub to see all reviews.</p>}
+    {detail.reviews_reason && <p>{detail.reviews_reason}</p>}
+    {!reviews.length && <p>{detail.reviews_status === 'available' && !stale
+      ? 'No submitted reviews were returned.' : 'Submitted reviews are unavailable.'}</p>}
+    {reviews.length > 0 && <ul className="integration-evidence">{reviews.map(review => {
+      const author = review.author ?? 'Unknown reviewer';
+      const relationship = !review.revision ? 'Reviewed commit unavailable'
+        : review.revision === detail.head?.sha ? 'Matches displayed head' : 'Different reviewed commit';
+      return <li key={review.id}>
+        <span>{detail.url ? <a href={detail.url + '#pullrequestreview-' + review.id} aria-label={'Review by ' + author}>{author}</a> : author}
+          {review.submitted_at && <small><time dateTime={review.submitted_at}>{new Date(review.submitted_at).toLocaleString()}</time></small>}
+        </span>
+        <span><strong>{reviewLabels.get(review.state) ?? 'Unknown review state'}</strong><small>{relationship}
+          {review.revision && <> <code title={review.revision}>{review.revision.slice(0, 12)}</code></>}
+        </small></span>
+      </li>;
+    })}</ul>}
+    <p>Open the pull request on GitHub to see its review requirements.</p>
+  </section>;
+}
+
 function PullCheckPreview({ number, head, headers }) {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -171,6 +203,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         </dl>
         <p>{detail.changed_files ?? 'Unknown'} files · +{detail.additions ?? '?'} / −{detail.deletions ?? '?'}</p>
         {detail.requested_reviewers?.length > 0 && <p>Requested reviewers {detail.requested_reviewers.join(', ')}</p>}
+        <PullReviews detail={detail} sourceStatus={source.status}/>
         {detail.files?.length > 0 && <details><summary>Changed files</summary><ul>{detail.files.map(file => <li key={file.path}>{file.path}</li>)}</ul></details>}
         {source.status === 'available' && detail.state === 'open' && /^[0-9a-f]{40}$/.test(detail.head?.sha ?? '') &&
           <PullCheckPreview key={detail.head.sha} number={number} head={detail.head.sha} headers={headers}/>}
