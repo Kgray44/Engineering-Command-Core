@@ -55,6 +55,8 @@ If Projects or Settings report a scope error, check the caller's assignment, the
 
 Before rehearsing a migration, take a consistent export in private custody. Record the source digest, migration journal, row counts, and stable Project, Task, and attempt identities. Rehearse replay, failure recovery, stale leases, and rollback against a separate database. An imported snapshot remains fenced. Use the [Phase 1B steps](../PHASE1B-SITES.md) for worker handoff and Site rollback. Production service, data, and worker ownership remain subject to separate authorization.
 
+If a workspace section cannot load after a release, use **Reload page** to reopen the same route with the current assets. The navigation remains available, and Command Core leaves reload to the user so they can decide when to leave an open form. The staging browser regression tests this with a missing lazy-loaded Project asset.
+
 ### What the recovery checks cover
 
 Run `node --test --test-name-pattern "current application partitions" sites/staging.test.mjs` from the Observatory package. The test creates independently identified Aetherwake and Voyagewright fixture partitions, checkpoints each current schema with SQLite's backup API, advances the source settings, and restores the checkpoint into a separate file. It compares schema definitions and table contents, runs integrity and foreign-key checks, and reads back Project order, milestone links, the Task and attempt IDs, and the pre-checkpoint Settings. Serving a restored partition under the peer application must fail. The legacy import test separately checks the dispatch fence for copied in-flight leases.

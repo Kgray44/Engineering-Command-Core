@@ -526,6 +526,33 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.locator('#integration-detail-title').waitFor();
 });
 
+test('an open tab recovers when a workspace asset is replaced during rollout', { timeout: 45_000 }, async t => {
+  const { stage, page } = await browserStage(t);
+  await page.goto(stage.origin + '/#settings');
+  const settings = page.getByRole('heading', { name: 'Engineering settings', exact: true });
+  await settings.waitFor();
+
+  let missingRequests = 0;
+  await page.route('**/assets/projects-workspace-*.js', route => {
+    missingRequests++;
+    return route.fulfill({ status: 404, body: 'Not found' });
+  });
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  const recovery = page.getByRole('alert').filter({ hasText: 'This section could not load.' });
+  await recovery.waitFor();
+  assert.equal(missingRequests, 1);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await settings.waitFor();
+  await page.getByRole('button', { name: 'Projects', exact: true }).click();
+  await recovery.waitFor();
+
+  await page.unroute('**/assets/projects-workspace-*.js');
+  await page.getByRole('button', { name: 'Reload page' }).click();
+  await page.getByRole('heading', { name: 'Project explorer', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).hash, '#projects');
+  assert.equal(await recovery.count(), 0);
+});
+
 test('an open Project reflects a remote Task claim without a manual refresh or portfolio reload', { timeout: 60_000 }, async t => {
   const { stage, page } = await browserStage(t);
   const projectId = crypto.randomUUID();
