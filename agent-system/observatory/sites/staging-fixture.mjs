@@ -7,10 +7,11 @@ const proof = 'synthetic-transport-auth';
 const fixtureRevision = 'a'.repeat(40);
 const appId = 'aetherwake';
 const repository = 'synthetic/observatory';
-export async function startStage(part, { assets = {}, revision = fixtureRevision } = {}) {
+export async function startStage(part, { assets = {}, revision = fixtureRevision, applicationId = appId,
+  applicationRepository = repository, fetcher, githubToken } = {}) {
   let core;
   let origin;
-  const env = { FIRST: { DB: part.DB, OBSERVATORY_TASK_ENGINE_OWNER_ID: owner, OBSERVATORY_TASK_WORKER_KEY: workerKey } };
+  const env = { FIRST: { DB: part.DB, OBSERVATORY_TASK_ENGINE_OWNER_ID: owner, OBSERVATORY_TASK_WORKER_KEY: workerKey, GITHUB_READ_TOKEN: githubToken } };
   const server = createServer(async (incoming, outgoing) => {
     try {
       const method = incoming.method;
@@ -27,16 +28,19 @@ export async function startStage(part, { assets = {}, revision = fixtureRevision
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = 'http://127.0.0.1:' + server.address().port;
   core = createCommandCore({
-    legacyApplication: appId,
-    applications: [{ id: appId, name: 'Synthetic staging application', repository, origin, binding: 'FIRST' }],
+    legacyApplication: applicationId,
+    applications: [{ id: applicationId, name: 'Synthetic staging application', repository: applicationRepository, origin, binding: 'FIRST' }],
     trustedIdentity: request => request.headers.get('authorization') === 'Bearer ' + proof ? owner : null,
     validate: () => true, validateEvent: () => true, assets, sourceRevision: revision,
-    fetcher: async url => String(url).endsWith('/git/ref/heads/main')
-      ? Response.json({ ref: 'refs/heads/main', object: { sha: revision } }) : new Response('', { status: 404 }),
+    fetcher: fetcher ?? (async url => String(url).endsWith('/git/ref/heads/main')
+      ? Response.json({ ref: 'refs/heads/main', object: { sha: revision } }) : new Response('', { status: 404 })),
   });
   return {
     origin, proof,
-    close: () => new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())),
+    close: () => new Promise((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve());
+      server.closeAllConnections();
+    }),
     run: async (path, body, authenticated = true) => {
       const response = await fetch(origin + path, { method: body ? 'POST' : 'GET', headers: {
         origin, 'content-type': 'application/json', 'oai-authenticated-user-id': 'spoofed',

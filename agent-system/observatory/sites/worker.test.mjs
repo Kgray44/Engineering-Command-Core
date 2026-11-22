@@ -605,6 +605,7 @@ test('pull requests and cross-branch runs expose a bounded newest-created window
         state: 'closed', created_at: dateAt(index), updated_at: dateAt(200 - index),
         user: {login:'contributor'}, head: {ref:'feature',sha:rev}, base:{ref:'main'},
         draft: false, merged_at: index === 41 ? dateAt(46) : null,
+        ...(index === 40 ? { requested_reviewers: [{ login: 'reviewer' }], requested_teams: [{ slug: 'maintainers' }] } : {}),
       })));
     }
     if (path.startsWith('/actions/runs')) {
@@ -631,6 +632,7 @@ test('pull requests and cross-branch runs expose a bounded newest-created window
     head_ref:'feature', base_ref:'main', draft:false, merged:true, merged_at:dateAt(46),
   });
   assert.equal(snapshot.pulls.items[1].merged, false);
+  assert.equal(snapshot.pulls.items[1].requested_review_count, 2);
   assert.deepEqual(snapshot.ci.items[0], {
     id:2041, label:'Verification', title:'Run 41', state:'success',
     url:'https://github.com/Kgray44/Aetherwake/actions/runs/2041', revision:rev,

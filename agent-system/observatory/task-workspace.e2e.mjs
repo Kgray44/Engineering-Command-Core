@@ -831,4 +831,53 @@ test('owner schedules an engine Task, observes blockers and controls the queue',
   await page.getByText('Attempt breakdown',{exact:true}).click();
   await page.getByRole('link',{name:'$0.000146',exact:true}).waitFor();
   await page.locator('.analytics-counts > div').filter({hasText:'Observed session-only tokens'}).getByText('137',{exact:true}).waitFor();
+  await page.setViewportSize({ width: 320, height: 720 });
+  const phoneLayout = await page.evaluate(() => {
+    const picker = document.querySelector('.analytics-task-picker select');
+    const table = [...document.querySelectorAll('details[open] .analytics-table')].find(element => element.offsetWidth);
+    return {
+      documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      pickerFits: picker && picker.getBoundingClientRect().right <= document.documentElement.clientWidth,
+      tableContained: table && table.getBoundingClientRect().right <= document.documentElement.clientWidth,
+    };
+  });
+  assert.deepEqual(phoneLayout, { documentFits: true, pickerFits: true, tableContained: true });
+});
+
+test('protected merge approval clears when refreshed evidence replaces the reviewed source', { timeout: 60_000 }, async t => {
+  const { origin } = await start(t);
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.OBSERVATORY_BROWSER_EXECUTABLE });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ reducedMotion: 'reduce', viewport: { width: 1150, height: 850 } });
+  await page.clock.install();
+  const firstHead = 'e'.repeat(40);
+  const replacementHead = 'f'.repeat(40);
+  const base = 'a'.repeat(40);
+  const run = {
+    id: '00000000-0000-4000-8000-000000000042', version: 1, head_sha: firstHead, pr_number: 42,
+    state: 'merge_ready', policy: { repair_limit: 3, auto_ci_reruns: { status: 'armed' } },
+    evidence: { state: 'merge_ready', policy_observed: true, strict_base: true, base_sha: base },
+  };
+  const access = { merge_enabled: true };
+  const writes = [];
+  await page.route('**/api/integrations/v1**', async route => {
+    const request = route.request();
+    if (request.method() === 'POST') writes.push(request.postDataJSON());
+    const single = new URL(request.url()).searchParams.has('id');
+    await route.fulfill({ json: single ? { run, access, events: [] } : { runs: [run], access } });
+  });
+  await page.goto(origin + '/#merge');
+  const history = page.getByRole('region', { name: 'Integration history' });
+  await history.getByRole('button', { name: /PR #42/ }).click();
+  const approval = page.getByRole('checkbox', { name: /approve merging this exact pull request head/ });
+  const merge = page.getByRole('button', { name: 'Request protected merge' });
+  await approval.check();
+  assert.equal(await merge.isEnabled(), true);
+  run.head_sha = replacementHead;
+  run.version++;
+  await page.clock.fastForward(21_000);
+  await page.getByText(replacementHead, { exact: true }).waitFor();
+  assert.equal(await approval.isChecked(), false);
+  assert.equal(await merge.isEnabled(), false);
+  assert.deepEqual(writes, []);
 });

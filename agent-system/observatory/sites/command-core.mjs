@@ -5,6 +5,11 @@ import { MAX_SYNC_BYTES } from './sync.mjs';
 import { isTaskWorkerKey } from './task-engine.mjs';
 import { sha256 } from './task-telemetry.mjs';
 import { createWorker } from './worker.mjs';
+import { workspaceSettings } from './workspace-settings.mjs';
+import { integrationAccess } from './integration-runs.mjs';
+import { readPendingProjectReviews, readProjectActivity } from './project-activity.mjs';
+import { readDataHealth } from './data-health.mjs';
+import { taskExecutionCapacity } from '../task-execution-capacity.mjs';
 
 const identityHeader = 'oai-authenticated-user-id';
 const stagingWorkerOps = new Set(['claim', 'report', 'worker_pulse', 'recover_worker_candidate']);
@@ -19,11 +24,14 @@ const toolSchema = {
   type: 'object', additionalProperties: false, required: ['application_id', 'request'],
   properties: { application_id: { type: 'string', pattern: applicationId.source }, verification: { type: 'string' },
     request: { type: 'object', required: ['op'], properties: {
-      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate'] },
+      op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate', 'reorder', 'reorder_milestones', 'move_task'] },
       id: { type: 'string', format: 'uuid', description: 'Project UUID' },
-      expected_version: { type: 'integer', minimum: 1, description: 'Current row version for optimistic updates' },
+      expected_version: { type: 'integer', minimum: 0, description: 'Current row version for optimistic updates' },
+      project_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, description: 'Full Project order for the application' },
       status: { enum: ['planned', 'active', 'paused', 'archived', 'verified', 'integrated', 'accepted'] },
       milestone_id: { type: 'string', format: 'uuid' },
+      milestone_ids: { type: 'array', items: { type: 'string', format: 'uuid' } },
+      source_project_id: { type: 'string', format: 'uuid' },
       task_id: { type: 'string', description: 'Canonical Task ID' },
       operation_id: { type: 'string', format: 'uuid', description: 'Stable request UUID for Task registration' },
       name: { type: 'string', description: 'Milestone title' },
@@ -36,12 +44,24 @@ const response = (body, status = 200) => Response.json(body, {
 });
 const error = (message, status) => response({ error: message }, status);
 
+async function listTools(runtime, scoped, request, message) {
+  const original = await (await runtime.worker.fetch(new Request(new URL('/mcp', request.url), {
+    method: 'POST', headers: request.headers, body: JSON.stringify(message),
+  }), scoped)).json();
+  const existing = original.result.tools.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
+    properties: { ...tool.inputSchema.properties, application_id: toolSchema.properties.application_id },
+  } }));
+  return [...existing, { name: 'projects_v1', description: 'List and manage scoped engineering Projects', inputSchema: toolSchema },
+    { name: 'list_applications', description: 'List engineering applications assigned to the authenticated caller',
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} } }];
+}
+
 function scopedEnvironment(env, binding) {
   return Object.fromEntries(environmentKeys.map(key => [key, env[binding]?.[key] ?? env[binding + '_' + key]]));
 }
 
 export function createCommandCore({ applications, portfolio = { id: 'engineering', name: 'Engineering' },
-  legacyApplication, trustedIdentity, trustedWorkerIngress, ...workerOptions }) {
+  legacyApplication, connectorApplication, trustedIdentity, trustedWorkerIngress, ...workerOptions }) {
   if (typeof trustedIdentity !== 'function') throw Error('Verified request identity adapter required');
   if (!Array.isArray(applications) || !applications.length || !applicationId.test(portfolio.id)) throw Error('Invalid portfolio');
   const byId = new Map();
@@ -60,12 +80,20 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
     bindings.add(binding);
     repositories.add(repository.toLowerCase());
     const application = Object.freeze({ id, name, repository, portfolio_id: portfolio.id });
-    const worker = createWorker({ ...workerOptions, assets: config.assets ?? workerOptions.assets, application });
-    const runtime = { application, worker, binding };
+    const appAssets = { ...(config.assets ?? workerOptions.assets) };
+    for (const assetPath of ['/', '/index.html']) {
+      const asset = appAssets[assetPath];
+      if (typeof asset?.content === 'string') {
+        appAssets[assetPath] = { ...asset, content: asset.content.replace('<html', '<html data-engineering-application="' + id + '"') };
+      }
+    }
+    const worker = createWorker({ ...workerOptions, assets: appAssets, application });
+    const runtime = { application, worker, binding, origin };
     byId.set(id, runtime);
     byOrigin.set(origin, runtime);
   }
   if (legacyApplication !== undefined && !byId.has(legacyApplication)) throw Error('Unknown legacy application');
+  if (connectorApplication !== undefined && !byId.has(connectorApplication)) throw Error('Unknown connector application');
 
   function resolve(env, owner, runtime) {
     if (!runtime) return null;
@@ -186,13 +214,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           }), scoped);
           if (message.method === 'tools/list') {
             const app = allowed[0];
-            const original = await (await forward(app, resolve(env, owner, app), message)).json();
-            const existing = original.result.tools.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
-              properties: { ...tool.inputSchema.properties, application_id: toolSchema.properties.application_id },
-            } }));
-            return rpc({ tools: [...existing, { name: 'projects_v1', description: 'List and manage scoped engineering Projects', inputSchema: toolSchema },
-              { name: 'list_applications', description: 'List engineering applications assigned to the authenticated caller',
-                inputSchema: { type: 'object', additionalProperties: false, properties: {} } }] });
+            return rpc({ tools: await listTools(app, resolve(env, owner, app), request, message) });
           }
           if (message.method !== 'tools/call') return forward(allowed[0], resolve(env, owner, allowed[0]), message);
           if (typeof args !== 'object' || !args || Array.isArray(args)) return reject(-32602, 'Invalid tool arguments');
@@ -226,6 +248,71 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
         if (!await checkPartition(env, originRuntime, scoped)) return error('Application partition unavailable', 503);
         if (url.pathname === '/api/status' && request.method === 'GET') {
           return response({ status: 'ready', application: originRuntime.application, revision: workerOptions.sourceRevision ?? null });
+        }
+        if (url.pathname === '/api/activity') {
+          if (request.method !== 'GET') return error('Method not allowed', 405);
+          const verification = request.headers.get('x-observatory-verification');
+          if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
+          const namespace = verification ? 'verification:' + verification : 'live';
+          const [project_events, pending_project_reviews] = await Promise.all([
+            readProjectActivity(scoped.DB, owner, namespace), readPendingProjectReviews(scoped.DB, owner, namespace),
+          ]);
+          return response({ project_events, pending_project_reviews });
+        }
+        if (url.pathname === '/api/settings/data') {
+          if (request.method !== 'GET') return error('Method not allowed', 405);
+          const verification = request.headers.get('x-observatory-verification');
+          if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
+          const namespace = verification ? 'verification:' + verification : 'live';
+          return response(await readDataHealth(scoped.DB, {
+            owner, namespace, applicationId: originRuntime.application.id, revision: workerOptions.sourceRevision,
+          }));
+        }
+        if (url.pathname === '/api/settings/discovery') {
+          if (request.method !== 'GET') return error('Method not allowed', 405);
+          if (connectorApplication && connectorApplication !== originRuntime.application.id) return error('Connector discovery is on the shared Site', 404);
+          const headers = new Headers(request.headers);
+          headers.set('content-type', 'application/json');
+          const discovery = new Request(request, { headers });
+          const tools = await listTools(originRuntime, scoped, discovery, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+          return response({ tools: tools.map(tool => tool.name) });
+        }
+        if (url.pathname === '/api/settings') {
+          const verification = request.headers.get('x-observatory-verification');
+          if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
+          const namespace = verification ? 'verification:' + verification : 'live';
+          let body;
+          if (request.method === 'POST') {
+            if (request.headers.get('origin') !== url.origin || ![null, 'same-origin'].includes(request.headers.get('sec-fetch-site'))) {
+              return error('Same-origin request required', 403);
+            }
+            if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+              return error('Expected JSON', 415);
+            }
+            try { body = JSON.parse(await readBounded(request.body, 4096)); }
+            catch { return error('Invalid settings payload', 400); }
+          } else if (request.method !== 'GET') return error('Method not allowed', 405);
+          const connector = connectorApplication ? byId.get(connectorApplication) : originRuntime;
+          const facts = {
+            application: originRuntime.application,
+            revision: workerOptions.sourceRevision ?? null,
+            database_verified_at: new Date().toISOString(),
+            connections: {
+              github: {
+                credential_configured: Boolean(scoped.GITHUB_READ_TOKEN || scoped.GITHUB_PROPOSAL_TOKEN),
+                integration_read_credential_configured: Boolean(scoped.GITHUB_READ_TOKEN),
+              },
+              codex: { credential_configured: isTaskWorkerKey(scoped.OBSERVATORY_TASK_WORKER_KEY) },
+              chatgpt: {
+                discovery_here: connector === originRuntime,
+                ...(connector !== originRuntime && resolve(env, owner, connector) ? { connector_origin: connector.origin } : {}),
+              },
+            },
+            capacity: taskExecutionCapacity,
+            integration: integrationAccess(scoped, owner, namespace),
+          };
+          const result = await workspaceSettings({ db: scoped.DB, owner, namespace, body, facts });
+          return response(result.body, result.status);
         }
         if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {
           let body;

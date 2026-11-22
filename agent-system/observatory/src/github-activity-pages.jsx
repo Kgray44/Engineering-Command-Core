@@ -182,7 +182,7 @@ function RunDetails({ detail, Panel, Rise, Status }) {
         <div className="github-job-content">
           <Facts fields={[
             ['Started', stamp(job.started_at)], ['Completed', stamp(job.completed_at)],
-            ['GitHub job', <a href={githubItemHref('runs', detail.id) + '/job/' + job.id} target="_blank" rel="noreferrer">Open job on GitHub</a>]
+            ['GitHub job', <a href={detail.url + '/job/' + job.id} target="_blank" rel="noreferrer">Open job on GitHub</a>]
           ]}/>
           {job.steps_truncated && <p className="low">Open this job on GitHub for the full step list.</p>}
           {job.steps?.length > 0 && <ol className="github-steps">{job.steps.map(step => <li key={step.number}>
@@ -226,7 +226,7 @@ export function GitHubActivityDetails({ kind, id, group, headers, live, ui, inve
   return <>
     <div className="github-detail-actions">
       <a className="back" href={activityHref(kind)}><ArrowLeft size={15}/> {entityName(kind)}</a>
-      <a className="primary-button" href={githubItemHref(kind, id)} target="_blank" rel="noreferrer">Open on GitHub <ArrowUpRight size={16}/></a>
+      <a className="primary-button" href={detail?.url ?? githubItemHref(kind, id, ui.repository)} target="_blank" rel="noreferrer">Open on GitHub <ArrowUpRight size={16}/></a>
     </div>
     <Rise><Panel title={title} right={summary && <Status value={activityState(kind, summary) || 'unavailable'}/>}>
       <p className="low">{live && response === null ? 'Loading GitHub details…' : !live

@@ -7,7 +7,7 @@ const labels = {
 };
 const verificationKinds = new Set(['verification','test','benchmark','deployment_validation']);
 
-function safeActivityUrl(uri) {
+export function safeActivityUrl(uri) {
   try {
     const url = new URL(uri);
     return url.protocol==='https:' && !url.username && !url.password && !url.search ? url.href : null;

@@ -95,6 +95,10 @@ function waitState(task,lifecycle,rows,now,checks) {
   return {state:blockers.length?'blocked':lifecycle.start_at>now?'scheduled':'ready',blockers};
 }
 
+export function storedTaskPrerequisites(row, rows) {
+  return prerequisiteStatus(record(row), details(row), rows);
+}
+
 export function storedTaskDispatch(row, rows, now) {
   return waitState(record(row), details(row), rows, now);
 }
@@ -559,13 +563,15 @@ async function recoverWorkerCandidate(lifecycle, body, now) {
   return { lifecycle:{...lifecycle,state:'verifying',recovered_candidate:true}, previousFailure, previousFailureKind };
 }
 
-export async function readTaskRows({ db, owner, namespace, now = Date.now(), reconcileExpired = true }) {
+export async function readTaskRows({ db, owner, namespace, now = Date.now(), reconcileExpired = true, taskIds }) {
   const query = (sql, ...args) => db.prepare(sql).bind(...args);
-  const result = await query('SELECT * FROM proposals WHERE owner_id = ? AND namespace = ? ORDER BY created_at DESC, task_id DESC',
-    owner, namespace).all();
+  const constraint = taskIds ? ' AND task_id IN (SELECT value FROM json_each(?))' : '';
+  const scope = taskIds ? [owner, namespace, JSON.stringify(taskIds)] : [owner, namespace];
+  const result = await query('SELECT * FROM proposals WHERE owner_id = ? AND namespace = ?' + constraint +
+    ' ORDER BY created_at DESC, task_id DESC', ...scope).all();
   if (result.results.some(row => record(row).prerequisites?.merged_task_ids?.length)) {
     const verified = await query(`SELECT task_id, task_attempt_id, COALESCE(json_extract(record, '$.task.head_sha'), head_sha) AS head_sha FROM integration_runs
-      WHERE owner_id = ? AND namespace = ? AND task_id IS NOT NULL AND state IN ('merged', 'deployed')`, owner, namespace).all();
+      WHERE owner_id = ? AND namespace = ? AND task_id IS NOT NULL AND state IN ('merged', 'deployed')` + constraint, ...scope).all();
     const revisions = new Map();
     for (const { task_id, task_attempt_id, head_sha } of verified.results) {
       if (!revisions.has(task_id)) revisions.set(task_id, []);
@@ -629,6 +635,7 @@ const workerOperations = new Set(['claim', 'report', 'worker_pulse', 'recover_wo
 const workerStates = new Set(['available', 'busy', 'claim_rejected', 'task_connection_unavailable',
   'storage_guard_timeout', 'storage_reserve_denied', 'storage_guard_unavailable']);
 const workerFreshnessMs = 60_000;
+export const workerLivenessMaxAgeMs = 86_400_000;
 
 export async function taskOperation({ db, owner, namespace, body, access, validate, revision, repository, projectId, projectAware = false, now = Date.now() }) {
   if (!body || !['list', 'get', 'register', 'command', ...workerOperations].includes(body.op)) return failure(400, 'Invalid Task operation');
@@ -648,7 +655,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
       return failure(400, 'Invalid worker observation');
     }
     await query('DELETE FROM task_worker_liveness WHERE owner_id = ? AND namespace = ? AND seen_at < ?',
-      owner, namespace, now - 86_400_000).run();
+      owner, namespace, now - workerLivenessMaxAgeMs).run();
     await query(`
       INSERT INTO task_worker_liveness (owner_id, namespace, worker_id, seen_at, state, task_scope, conversation_continuation,
         last_error, last_error_at)

@@ -36,7 +36,9 @@ jobs:
         run: npm run build:sites
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-      - name: Exercise Task, Merge and Projects workspaces
+      - name: Exercise Task and protected Merge workspaces
         env:
           OBSERVATORY_ENGINE_E2E: '1'
-        run: node --test task-workspace.e2e.mjs sites/staging-browser.e2e.mjs
+        run: node --test task-workspace.e2e.mjs
+      - name: Exercise both application Sites and Project workspaces
+        run: node --test sites/staging-browser.e2e.mjs

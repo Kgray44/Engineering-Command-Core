@@ -139,6 +139,38 @@ test('a Project milestone gate blocks claims until the dependency is accepted', 
   assert.equal((await project({ ...milestone, status: 'accepted', expected_version: 1 })).status, 200);
   assert.equal((await claim()).task.id, task_id);
 });
+test('a rejected milestone dependency reports the scoped cycle in Project order', async t => {
+  const { call } = setup(t);
+  const project = body => call(0, '/api/projects', body);
+  const nodes = ['Plan', 'Build', 'Verify'].map(name => ({ id: crypto.randomUUID(), name, milestone_id: crypto.randomUUID() }));
+  for (const node of nodes) {
+    const { id, name, milestone_id } = node;
+    assert.equal((await project({ op: 'create', id, fields: { name, objective: 'Prove a rejected dependency path' } })).status, 201);
+    assert.equal((await project({ op: 'milestone', id, milestone_id, name: 'Fixture milestone',
+      acceptance: 'Reviewed', status: 'planned' })).status, 201);
+    const result = await project({ op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+    assert.equal(result.status, 201);
+    node.task_id = result.body.task.id;
+  }
+  const link = ({ id, task_id }, { milestone_id }) => ({ op: 'milestone_gate', id, task_id, milestone_id });
+  assert.equal((await project(link(nodes[0], nodes[1]))).status, 200);
+  assert.equal((await project(link(nodes[1], nodes[2]))).status, 200);
+  const closing = link(nodes[2], nodes[0]);
+  const conflict = await project(closing);
+  assert.equal(conflict.status, 409);
+  assert.deepEqual(conflict.body.dependency_cycle, [nodes[2], ...nodes].map(({ id, name }) => ({ id, name })));
+  const reread = (await call(0, '/api/projects/' + nodes[2].id)).body;
+  assert.deepEqual(reread.dependencies, []);
+  assert.equal(reread.history.some(event => event.kind === 'milestone_gate_set'), false);
+  assert.equal((await project(link(nodes[0], nodes[1]))).status, 200);
+  assert.equal((await call(1, '/api/projects', closing)).status, 404);
+  assert.equal((await project({ op: 'update', id: nodes[0].id, expected_version: 1, status: 'archived' })).status, 200);
+  const archived = await project(link(nodes[0], nodes[2]));
+  assert.equal(archived.status, 409);
+  assert.equal(archived.body.dependency_cycle, undefined);
+  assert.equal(archived.body.error, 'Project is archived');
+});
+
 test('application authorization and storage identity fail closed', async t => {
   const { call, env, rpc } = setup(t);
   env.TWO.OBSERVATORY_TASK_ENGINE_OWNER_ID = 'different-owner';
@@ -200,8 +232,93 @@ test('concurrent claim retries keep one Attempt and archive only affects the own
   assert.equal((await call(1, '/api/projects/' + id)).body.project.status, 'planned');
 });
 
+test('Project usage counts only App Server receipts for the recorded attempt and session', async t => {
+  const { call, task, rpc } = setup(t);
+  const id = crypto.randomUUID();
+  const project = body => call(0, '/api/projects', { id, ...body });
+  assert.equal((await project({ op: 'create', fields: { name: 'Token receipt fixture', objective: 'Read recorded usage' } })).status, 201);
+  const registered = await project({ op: 'register_task', operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = registered.body.task.id;
+  assert.equal((await task(0, { op: 'command', task_id, operation_id: crypto.randomUUID(), expected_version: registered.body.version,
+    action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const worker = async request => (await rpc(0, 'task_engine_v1', {
+    application_id: fixture[0].id, worker_key: 'a'.repeat(64), request,
+  })).body.result.structuredContent;
+  const { claim } = await worker({ op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() });
+  const session_id = crypto.randomUUID();
+  const reported = await worker({ op: 'report', task_id, attempt_id: claim.attempt.id, lease: claim.lease, operation_id: crypto.randomUUID(),
+    report: { type: 'failed', failure: 'Fixture execution stopped', session_id } });
+  assert.equal(reported.status, 200);
+  const at = new Date().toISOString();
+  const receipt = (session, counts) => ({
+    trace_version: 1, event_id: crypto.randomUUID(), trace_id: 'app-server-fixture', span_id: 'run', repository: fixture[0].repository,
+    task_id, attempt_id: claim.attempt.id, revision: claim.attempt.revision, session_id: session,
+    kind: 'measurement', phase: 'implementation', occurred_at: at,
+    measurements: Object.entries(counts).map(([name, value]) => ({
+      name: 'provider_' + name + '_tokens', unit: 'tokens', availability: 'observed', value,
+      source: 'codex_app_server_token_usage_updated', method: 'fresh_thread_total',
+    })),
+  });
+  const matching = receipt(session_id, { total: 90, input: 80, output: 10, cached_input: 60 });
+  const unrelated = receipt(crypto.randomUUID(), { total: 1000, input: 990, output: 10 });
+  const synced = await rpc(0, 'sync_task_telemetry', { application_id: fixture[0].id, task_id,
+    change: { base: null, generated_at: at, records: [registered.body.task], events: [matching, unrelated] } });
+  const syncReceipt = JSON.parse(synced.body.result.content[0].text);
+  assert.match(syncReceipt.digest ?? '', /^[a-f0-9]{64}$/, syncReceipt.error);
+  const detail = await call(0, '/api/projects/' + id);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.telemetry.total_tokens, 90);
+  assert.equal(detail.body.telemetry.input_tokens, 80);
+  assert.equal(detail.body.telemetry.measured_attempts, 1);
+  assert.equal(detail.body.telemetry.recent_attempts[0].observed_tokens, 90);
+  assert.equal(detail.body.telemetry.recent_attempts[0].token_source, 'Codex App Server');
+  assert.equal(detail.body.telemetry.recent_attempts[0].token_coverage, 'observed');
+  assert.equal(detail.body.telemetry.costs, null);
+});
+
+test('only a current, unadmitted Project milestone gate can be removed and the change is retained', async t => {
+  const { call, task } = setup(t);
+  const project = request => call(0, '/api/projects', request);
+  const id = crypto.randomUUID();
+  const dependencyId = crypto.randomUUID();
+  for (const projectId of [id, dependencyId]) {
+    assert.equal((await project({ op: 'create', id: projectId, fields: {
+      name: 'Fixture', objective: 'Verify scoped milestone gate changes',
+    } })).status, 201);
+  }
+  const milestone_id = crypto.randomUUID();
+  assert.equal((await project({ op: 'milestone', id: dependencyId, milestone_id, name: 'Foundation',
+    acceptance: 'Evidence', status: 'planned' })).status, 201);
+  const registration = await project({ op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = registration.body.task.id;
+  const gate = { id, task_id, milestone_id };
+  const read = async () => (await call(0, '/api/projects/' + id)).body;
+  const add = () => project({ ...gate, op: 'milestone_gate' });
+  assert.equal((await add()).status, 200);
+  const version = registration.body.version;
+  const first = (await read()).dependencies[0].removable_gate_event_id;
+  assert.ok(Number.isSafeInteger(first));
+  const remove = { ...gate, op: 'remove_milestone_gate', expected_version: version, expected_gate_event_id: first };
+  assert.equal((await call(1, '/api/projects', remove)).status, 404);
+  assert.equal((await project({ ...remove, expected_version: version + 1 })).status, 409);
+  assert.equal((await project(remove)).status, 200);
+  assert.equal((await read()).dependencies.length, 0);
+  assert.equal((await read()).history.filter(event => event.kind === 'milestone_gate_removed' &&
+    event.task_id === task_id && event.milestone_id === milestone_id).length, 1);
+  assert.equal((await add()).status, 200);
+  const current = (await read()).dependencies[0].removable_gate_event_id;
+  assert.ok(current > first);
+  assert.equal((await project(remove)).status, 409);
+  const admission = await task(0, { op: 'command', task_id, expected_version: version,
+    operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } });
+  assert.equal(admission.status, 200);
+  assert.equal((await read()).dependencies[0].removable_gate_event_id, null);
+  assert.equal((await project({ ...remove, expected_version: admission.body.version, expected_gate_event_id: current })).status, 409);
+  assert.equal((await read()).tasks[0].state, 'blocked');
+});
+
 test('Project progress reports actual scoped execution, milestone gates and owner review', async t => {
-  const { call, task, one } = setup(t);
+  const { call, task, one, rpc } = setup(t);
   const project = request => call(0, '/api/projects', request);
   const id = crypto.randomUUID();
   const dependencyId = crypto.randomUUID();
@@ -219,22 +336,53 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   assert.equal((await task(0, { op: 'command', task_id, expected_version: registration.body.version,
     operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
   const integrationId = crypto.randomUUID();
-  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, 42, 'merged', 1, ?, '{}', ?)")
-    .run('synthetic-owner', integrationId, task_id, crypto.randomUUID(), 'a'.repeat(40),
-      new Date().toISOString(), JSON.stringify({ operation_id: crypto.randomUUID() }));
+  const head = 'a'.repeat(40);
+  const checks = [{ context: 'test', app: 9, source: 'ruleset', state: 'passed' }];
+  const insertRun = one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, ?, 'merged', 1, ?, ?, ?)");
+  for (const [id, pr, observed_head] of [[integrationId, 42, head], [crypto.randomUUID(), 43, 'b'.repeat(40)]]) {
+    insertRun.run('synthetic-owner', id, task_id, crypto.randomUUID(), head, pr,
+      new Date().toISOString(), JSON.stringify({ evidence: { observed_head, policy_observed: true, checks } }),
+      JSON.stringify({ operation_id: crypto.randomUUID(), at: new Date(Date.now() + 250).toISOString(),
+        kind: 'start', state: 'merged', pr_number: pr }));
+  }
   const read = async () => (await call(0, '/api/projects/' + id)).body;
   const detail = await read();
   assert.equal(detail.progress.tasks.blocked, 1);
+  assert.equal(detail.active_workers, 0);
   assert.equal(detail.progress.tasks.completed, 0);
   assert.equal(detail.progress.owner_review, 'pending');
-  assert.deepEqual(detail.progress.integrations, { tracked: 1, merged: 1, deployed: 0 });
+  assert.deepEqual(detail.progress.integrations, { tracked: 2, merged: 2, deployed: 0 });
   assert.equal(detail.integrations[0].repository, fixture[0].repository);
+  assert.deepEqual(detail.integrations.find(run => run.id === integrationId).required_checks, checks);
+  assert.deepEqual(detail.integrations.find(run => run.id !== integrationId).required_checks, []);
+  assert.ok(detail.history.some(event => event.source === 'integration' && event.integration_id === integrationId &&
+    event.kind === 'start' && event.pr_number === 42 && event.status === 'merged'));
+  assert.ok(detail.history.some(event => event.kind === 'project_owner_review_changed' && event.name === 'Owner review requested'));
   assert.deepEqual(detail.tasks[0].blockers, [{ type: 'milestone', id: milestone_id, state: 'planned' }]);
+  const gates = (await call(0, '/api/projects/' + dependencyId)).body.milestone_dependents;
+  assert.deepEqual(gates, [{ milestone_id, task_id, title: taskFields.title, project_id: id }]);
   const portfolio = (await call(0, '/api/projects')).body;
   assert.deepEqual(portfolio.projects.find(item => item.id === id).progress, detail.progress);
   assert.equal((await call(1, '/api/projects')).body.projects.length, 0);
   assert.equal((await project({ ...milestone, expected_version: 1, status: 'accepted' })).status, 200);
   assert.equal((await read()).progress.tasks.ready, 1);
+  const claim = await rpc(0, 'task_engine_v1', { application_id: 'aetherwake', worker_key: 'a'.repeat(64),
+    request: { op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() } });
+  assert.equal(claim.body.result.structuredContent.claim.task.id, task_id);
+  assert.equal((await read()).active_workers, 1);
+  assert.equal((await call(0, '/api/projects/' + dependencyId)).body.active_workers, 0);
+  const insertHeartbeat = one.sqlite.prepare("INSERT INTO task_engine_events VALUES (?, 'live', ?, ?, ?, ?)");
+  for (let index = 0; index < 125; index++) {
+    const eventId = crypto.randomUUID();
+    insertHeartbeat.run('synthetic-owner', task_id, 1000 + index, eventId, JSON.stringify({
+      kind: 'heartbeat', at: new Date(Date.now() + 1000 + index).toISOString(), state: 'running',
+    }));
+  }
+  const afterPulses = await read();
+  assert.ok(afterPulses.history.some(event => event.kind === 'claim' && event.task_id === task_id));
+  assert.equal(afterPulses.history.filter(event => event.kind === 'heartbeat').length, 40);
+  assert.equal(afterPulses.heartbeat_history_truncated, true);
+  assert.equal(afterPulses.execution_history_truncated, false);
 });
 
 test('explicit proposal writes carry only the owning repository and its publication credential', async t => {
@@ -297,4 +445,354 @@ test('staging worker transport claims only in its own partition with both ingres
   assert.equal((await worker.call({ task_id: taskId }, 'staging.sync_task_telemetry')).baseline, null);
   const claimed = await worker.call({ request: claim, worker_key: 'never-sent-in-the-body' }, tool);
   assert.equal(claimed.claim.task.id, taskId);
+});
+
+test('Project presentation and manual order persist in the authorized scope', async t => {
+  const { call } = setup(t);
+  const projects = '/api/projects';
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  const peer = crypto.randomUUID();
+  const fields = { name: 'Project', objective: 'Verify library settings', icon: 'rocket', accent: 'violet' };
+  for (const [app, id] of [[0, first], [0, second], [1, peer]]) {
+    const created = await call(app, projects, { op: 'create', id, fields });
+    assert.equal(created.status, 201);
+    assert.equal(created.body.project.icon, 'rocket');
+    assert.equal(created.body.project.accent, 'violet');
+  }
+  for (const badFields of [{ icon: 'arbitrary' }, { accent: 'url(example)' }]) {
+    assert.equal((await call(0, projects, { op: 'update', id: first, expected_version: 1, fields: badFields })).status, 400);
+  }
+  const order = { op: 'reorder', project_ids: [second, first], expected_version: 0 };
+  assert.equal((await call(0, projects, { ...order, project_ids: [second, peer] })).status, 400);
+  assert.equal((await call(0, projects, { ...order, project_ids: [second, second] })).status, 400);
+  assert.equal((await call(0, projects, order, 'unassigned')).status, 403);
+  assert.equal((await call(0, projects, order, undefined, { origin: fixture[1].origin })).status, 403);
+  const writes = await Promise.all([call(0, projects, order), call(0, projects, { ...order, project_ids: [first, second] })]);
+  assert.deepEqual(writes.map(write => write.status).sort(), [200, 409]);
+  const persisted = (await call(0, projects)).body.manual_order;
+  assert.deepEqual(persisted, writes.find(write => write.status === 200).body.manual_order);
+  assert.equal(persisted.version, 1);
+  assert.deepEqual((await call(1, projects)).body.manual_order, { version: 0, project_ids: [] });
+  const verification = { 'x-observatory-verification': crypto.randomUUID() };
+  assert.deepEqual((await call(0, projects, undefined, undefined, verification)).body.manual_order, { version: 0, project_ids: [] });
+  const third = crypto.randomUUID();
+  assert.equal((await call(0, projects, { op: 'create', id: third, fields })).status, 201);
+  assert.equal((await call(0, projects, { ...order, expected_version: 1 })).status, 409);
+  assert.deepEqual((await call(0, projects)).body.manual_order, persisted);
+});
+
+test('workspace settings persist, audit concurrent changes, and never reveal credentials', async t => {
+  const { call } = setup(t);
+  const path = '/api/settings';
+  const initial = await call(0, path);
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.preferences.version, 0);
+  assert.equal(initial.body.preferences.values.project_sort, 'manual');
+  assert.equal(initial.body.preferences.values.attention_reviews, 'show');
+  assert.equal(initial.body.connections.github.credential_configured, true);
+  assert.doesNotMatch(JSON.stringify(initial.body), /one-fixture|a{64}/);
+  const change = { op: 'save', expected_version: 0, values: {
+    project_sort: 'priority', density: 'compact', task_group: 'category', merge_sort: 'oldest', merge_readiness: 'blocked',
+    project_state: 'planned', project_group: 'state', attention_reviews: 'hide',
+    merge_review_requests: 'requested',
+  } };
+  assert.equal((await call(0, path, { ...change, values: { density: 'bad' } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { project_group: 'unknown' } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { attention_reviews: false } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { repository: 'peer/repo' } })).status, 400);
+  assert.equal((await call(0, path, change, 'unassigned')).status, 403);
+  assert.equal((await call(0, path, change, undefined, { origin: fixture[1].origin })).status, 403);
+  const saved = await call(0, path, change);
+  assert.equal(saved.status, 200);
+  assert.equal((await call(0, path, change)).status, 409);
+  const current = await call(0, path);
+  assert.equal(current.body.preferences.values.project_sort, 'priority');
+  assert.equal(current.body.preferences.values.project_state, 'planned');
+  assert.equal(current.body.preferences.values.project_group, 'state');
+  assert.equal(current.body.audit[0].values.density, 'compact');
+  assert.equal(current.body.audit[0].values.attention_reviews, 'hide');
+  assert.equal(current.body.preferences.values.task_group, 'category');
+  assert.equal(current.body.preferences.values.merge_sort, 'oldest');
+  assert.equal(current.body.preferences.values.merge_readiness, 'blocked');
+  assert.equal(current.body.preferences.values.merge_review_requests, 'requested');
+  const peer = (await call(1, path)).body.preferences;
+  assert.equal(peer.version, 0);
+  assert.equal(peer.values.task_group, 'none');
+  assert.equal(peer.values.project_state, '');
+  assert.equal(peer.values.project_group, 'none');
+  assert.equal(peer.values.merge_sort, 'updated');
+  assert.equal(peer.values.merge_readiness, 'all');
+  assert.equal(peer.values.merge_review_requests, 'any');
+  assert.equal(peer.values.attention_reviews, 'show');
+  assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.version, 0);
+  const reset = await call(0, path, { op: 'reset', expected_version: 1, keys: ['project_sort', 'attention_reviews'] });
+  assert.equal(reset.status, 200);
+  assert.equal(reset.body.preferences.values.project_sort, 'manual');
+  assert.equal(reset.body.preferences.values.density, 'compact');
+  assert.equal(reset.body.preferences.values.attention_reviews, 'show');
+  assert.equal((await call(0, path)).body.audit.length, 2);
+});
+
+test('the Project Task picker exposes only unassigned Tasks in the active scope and fences their versions', async t => {
+  const { call, task } = setup(t);
+  const id = crypto.randomUUID();
+  for (const app of [0, 1]) {
+    assert.equal((await call(app, '/api/projects', { op: 'create', id,
+      fields: { name: 'Fixture', objective: 'Verify Task association scope' } })).status, 201);
+  }
+  const [local, peer] = await Promise.all([0, 1].map(app => task(app, {
+    op: 'register', operation_id: crypto.randomUUID(), fields: taskFields,
+  })));
+  const path = '/api/projects/' + id;
+  assert.deepEqual((await call(0, path)).body.linkable_tasks.map(task => task.id), [local.body.task.id]);
+  assert.deepEqual((await call(1, path)).body.linkable_tasks.map(task => task.id), [peer.body.task.id]);
+  const link = (task_id, expected_version) => call(0, '/api/projects', { op: 'link_task', id, task_id, expected_version });
+  assert.equal((await link(peer.body.task.id, peer.body.version)).status, 404);
+  assert.equal((await link(local.body.task.id, local.body.version + 1)).status, 409);
+  assert.equal((await link(local.body.task.id, local.body.version)).status, 200);
+  const linked = (await call(0, path)).body;
+  assert.deepEqual(linked.linkable_tasks, []);
+  assert.deepEqual(linked.tasks.map(task => [task.id, task.version]), [[local.body.task.id, local.body.version]]);
+});
+
+test('Project milestone ordering and eligible Task moves preserve canonical records', async t => {
+  const { call, task, one } = setup(t);
+  const projects = '/api/projects';
+  const from = crypto.randomUUID();
+  const to = crypto.randomUUID();
+  const fields = { name: 'Project', objective: 'Verify scope' };
+  for (const id of [from, to]) {
+    assert.equal((await call(0, projects, { op: 'create', id, fields })).status, 201);
+  }
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  const peer = crypto.randomUUID();
+  for (const [id, milestone_id] of [[from, first], [from, second], [to, peer]]) {
+    assert.equal((await call(0, projects, { op: 'milestone', id, milestone_id, name: 'Milestone',
+      acceptance: 'Review evidence', status: 'planned' })).status, 201);
+  }
+  const reorder = { op: 'reorder_milestones', id: from, expected_version: 1, milestone_ids: [second, first] };
+  assert.equal((await call(0, projects, { ...reorder, milestone_ids: [second, peer] })).status, 400);
+  assert.equal((await call(0, projects, reorder)).status, 200);
+  assert.equal((await call(0, projects, reorder)).status, 409);
+  const readFrom = () => call(0, projects + '/' + from);
+  assert.deepEqual((await readFrom()).body.milestones.map(item => item.id), [second, first]);
+
+  const parent = await call(0, projects, { op: 'register_task', id: from, operation_id: crypto.randomUUID(), fields: taskFields });
+  const child = await call(0, projects, { op: 'register_task', id: from, operation_id: crypto.randomUUID(),
+    fields: { ...taskFields, dependencies: [parent.body.task.id] } });
+  const task_id = child.body.task.id;
+  const attach = (version, number) => task(0, { op: 'command', task_id, expected_version: version,
+    operation_id: crypto.randomUUID(), action: { type: 'associate',
+      reference: { kind: 'pull_request', uri: 'https://github.com/' + fixture[0].repository + '/pull/' + number, revision: 'a'.repeat(40) } } });
+  const sourceEdit = await attach(child.body.version, 81);
+  assert.equal(sourceEdit.status, 200);
+  const sourceVersion = sourceEdit.body.version;
+  const source = await readFrom();
+  assert.ok(source.body.task_prerequisites.some(item => item.task_id === task_id && item.id === parent.body.task.id &&
+    item.status === 'unsatisfied'));
+  const move = { op: 'move_task', id: to, source_project_id: from, task_id, expected_version: sourceVersion };
+  const result = await call(0, projects, move);
+  assert.equal(result.status, 200);
+  assert.equal((await call(0, projects, move)).status, 404);
+  const after = await call(0, projects + '/' + to);
+  assert.equal(after.body.tasks[0].id, task_id);
+  assert.equal(after.body.tasks[0].version, sourceVersion);
+  const destinationEdit = await attach(sourceVersion, 82);
+  assert.equal(destinationEdit.status, 200);
+  // Separate the two receipts from their association boundaries regardless of test clock precision.
+  const stamps = ['2026-11-21T00:00:01.000Z', '2026-11-21T00:00:03.000Z', '2026-11-21T00:00:05.000Z'];
+  const retime = one.sqlite.prepare("UPDATE project_relationship_events SET occurred_at = ? WHERE task_id = ? AND kind = ?");
+  retime.run(stamps[0], task_id, 'task_registered');
+  retime.run(stamps[1], task_id, 'task_moved_out');
+  retime.run(stamps[1], task_id, 'task_linked');
+  const retimeReceipt = one.sqlite.prepare("UPDATE task_engine_events SET event = json_set(event, '$.at', ?) WHERE task_id = ? AND version = ?");
+  retimeReceipt.run(stamps[0], task_id, child.body.version);
+  retimeReceipt.run('2026-11-21T00:00:02.000Z', task_id, sourceVersion);
+  retimeReceipt.run(stamps[2], task_id, destinationEdit.body.version);
+  const versions = history => history.filter(event => event.source === 'task' && event.task_id === task_id).map(event => event.version);
+  assert.deepEqual(versions((await readFrom()).body.history).filter(version => version >= sourceVersion), [sourceVersion]);
+  assert.deepEqual(versions((await call(0, projects + '/' + to)).body.history), [destinationEdit.body.version]);
+  assert.ok((await readFrom()).body.history.some(event => event.kind === 'task_moved_out' && event.task_id === task_id));
+  await call(0, projects, { op: 'milestone_link', id: to, milestone_id: peer, task_id });
+  assert.equal((await call(0, projects, { ...move, source_project_id: to, id: from })).status, 409);
+});
+
+test('Merge source discovery reads scoped Task and Project associations before an integration run exists', async t => {
+  const { call, task, one } = setup(t);
+  const projectId = crypto.randomUUID();
+  const head = 'b'.repeat(40);
+  const operationId = crypto.randomUUID();
+  let prerequisiteId;
+  for (const app of [0, 1]) {
+    const project = await call(app, '/api/projects', { op: 'create', id: projectId,
+      fields: { name: app ? 'Peer project' : 'Delivery project', objective: 'Review source relationships' } });
+    assert.equal(project.status, 201);
+    const prerequisite = app === 0 && await call(app, '/api/projects', { op: 'register_task', id: projectId,
+      operation_id: crypto.randomUUID(), fields: { ...taskFields, title: 'Review prerequisite' } });
+    if (prerequisite) {
+      assert.equal(prerequisite.status, 201);
+      prerequisiteId = prerequisite.body.task.id;
+    }
+    const created = await call(app, '/api/projects', { op: 'register_task', id: projectId,
+      operation_id: operationId, fields: { ...taskFields, title: app ? 'Peer review' : 'Source review',
+        dependencies: prerequisite ? [prerequisiteId] : [] } });
+    assert.equal(created.status, 201);
+    const attached = await task(app, { op: 'command', task_id: created.body.task.id,
+      expected_version: created.body.version, operation_id: crypto.randomUUID(),
+      action: { type: 'associate', reference: { kind: 'pull_request', uri: 'https://github.com/' + fixture[app].repository + '/pull/81', revision: head } } });
+    assert.equal(attached.status, 200);
+  }
+  const path = '/api/integrations/v1?pr_number=81';
+  const primary = await call(0, path);
+  assert.equal(primary.status, 200);
+  assert.deepEqual(primary.body.associations.map(item => ({
+    title: item.task.title, project: item.project?.name, revisions: item.references.map(ref => ref.revision),
+  })), [{ title: 'Source review', project: 'Delivery project', revisions: [head] }]);
+  assert.deepEqual(primary.body.associations[0].prerequisites, [
+    { type: 'task', id: prerequisiteId, title: 'Review prerequisite', state: 'proposed', status: 'unsatisfied' },
+  ]);
+  const peer = (await call(1, path)).body.associations[0];
+  assert.equal(peer.task.title, 'Peer review');
+  assert.deepEqual(peer.prerequisites, []);
+  const discovery = '/api/integrations/v1?linked_prs=81,82';
+  const associated = (await call(0, discovery)).body;
+  assert.deepEqual(associated.matches, [{ number: 81, task: 'Source review', project: 'Delivery project' }]);
+  assert.deepEqual((await call(1, discovery)).body.matches, [{ number: 81, task: 'Peer review', project: 'Peer project' }]);
+  assert.deepEqual((await call(0, discovery, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.matches, []);
+  assert.equal((await call(0, discovery, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, '/api/integrations/v1?linked_prs=81,82&linked_prs=83')).status, 400);
+  assert.equal((await call(0, '/api/integrations/v1?linked_prs=81,invalid')).status, 400);
+  assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.associations, []);
+  assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, '/api/integrations/v1?pr_number=81junk')).status, 400);
+  const runId = crypto.randomUUID();
+  const associatedTaskId = primary.body.associations[0].task.id;
+  const createdAt = '2026-11-22T00:00:00.000Z';
+  const updatedAt = '2026-11-22T00:02:15.000Z';
+  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, 81, 'blocked', 1, ?, ?, ?)")
+    .run('synthetic-owner', runId, associatedTaskId, crypto.randomUUID(), head, updatedAt,
+      JSON.stringify({ id: runId, repository: fixture[0].repository, state: 'blocked',
+        task: { id: associatedTaskId }, created_at: createdAt }),
+      JSON.stringify({ operation_id: crypto.randomUUID(), at: updatedAt }));
+  const history = await call(0, '/api/integrations/v1?id=' + runId);
+  assert.equal(history.body.run.updated_at, updatedAt);
+  assert.deepEqual(history.body.project, { id: projectId, name: 'Delivery project' });
+  assert.equal((await call(0, '/api/integrations/v1')).body.runs[0].updated_at, updatedAt);
+  assert.equal((await call(1, '/api/integrations/v1?id=' + runId)).status, 404);
+
+});
+
+test('Activity reads recent Project events from the current owner and verification namespace', async t => {
+  const { call } = setup(t);
+  const verification = { 'x-observatory-verification': crypto.randomUUID() };
+  const id = crypto.randomUUID();
+  const operations = [
+    { op: 'create', id, fields: { name: 'Activity project', objective: 'Verify scoped events', owner_review: 'pending' } },
+    { op: 'update', id, expected_version: 1, fields: { name: 'Updated activity project' } },
+    { op: 'milestone', id, milestone_id: crypto.randomUUID(), name: 'Delivery check', status: 'planned', acceptance: 'Check evidence' },
+  ];
+  for (const operation of operations) {
+    assert.ok((await call(0, '/api/projects', operation, undefined, verification)).status < 300);
+  }
+  const live = await call(0, '/api/activity');
+  assert.equal(live.status, 200);
+  assert.deepEqual(live.body.project_events, []);
+  assert.deepEqual(live.body.pending_project_reviews, []);
+  assert.deepEqual((await call(1, '/api/activity', undefined, undefined, verification)).body.pending_project_reviews, []);
+  assert.deepEqual((await call(1, '/api/activity', undefined, undefined, verification)).body.project_events, []);
+  const scoped = await call(0, '/api/activity', undefined, undefined, verification);
+  assert.equal(scoped.status, 200);
+  assert.deepEqual(scoped.body.project_events.map(item => item.kind).sort(), ['milestone_changed', 'project_changed', 'project_created']);
+  assert.ok(scoped.body.project_events.every(item => item.project.id === id && item.project.name === 'Updated activity project'));
+  assert.ok(scoped.body.project_events.some(item => item.milestone?.name === 'Delivery check'));
+  assert.deepEqual(scoped.body.pending_project_reviews.map(({ id, name }) => ({ id, name })),
+    [{ id, name: 'Updated activity project' }]);
+  assert.equal((await call(0, '/api/projects', { op: 'update', id, expected_version: 2, fields: { owner_review: 'accepted' } },
+    undefined, verification)).status, 200);
+  assert.deepEqual((await call(0, '/api/activity', undefined, undefined, verification)).body.pending_project_reviews, []);
+  assert.equal((await call(0, '/api/activity', undefined, 'unassigned', verification)).status, 403);
+  assert.equal((await call(0, '/api/activity', undefined, undefined, { 'x-observatory-verification': 'invalid' })).status, 400);
+  assert.equal((await call(0, '/api/activity', {})).status, 405);
+});
+
+test('custom Project templates persist in versioned Settings and stay application scoped', async t => {
+  const { call } = setup(t);
+  const path = '/api/settings';
+  const template = { id: crypto.randomUUID(), label: 'Nightly qualification',
+    scope: 'Run scoped checks', acceptance: 'Record the evidence', milestones: ['Inspect', 'Record'] };
+  const change = { op: 'save', expected_version: 0, values: { project_templates: [template] } };
+  assert.equal((await call(0, path, change, 'unassigned')).status, 403);
+  assert.equal((await call(0, path, { ...change, values: { project_templates: [template, template] } })).status, 400);
+  assert.equal((await call(0, path, { ...change, values: { project_templates: [{ ...template, label: '  ' }] } })).status, 400);
+  assert.equal((await call(0, path, change)).status, 200);
+  const owner = (await call(0, path)).body;
+  assert.deepEqual(owner.preferences.values.project_templates, [template]);
+  assert.deepEqual(owner.audit[0].values.project_templates, [template]);
+  assert.deepEqual((await call(1, path)).body.preferences.values.project_templates, []);
+  assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.preferences.values.project_templates, []);
+  assert.equal((await call(0, path, change)).status, 409);
+  const removed = await call(0, path, { op: 'save', expected_version: 1, values: { project_templates: [] } });
+  assert.deepEqual(removed.body.preferences.values.project_templates, []);
+});
+
+test('Settings data checks validate the active scoped Project history', async t => {
+  const { call, one } = setup(t);
+  const path = '/api/settings/data';
+  const id = crypto.randomUUID();
+  const created = await call(0, '/api/projects', { op: 'create', id,
+    fields: { name: 'Data check fixture', objective: 'Verify the integrity of Project receipts' } });
+  assert.equal(created.status, 201);
+  const settings = await call(0, '/api/settings', { op: 'save', expected_version: 0, values: { task_group: 'category' } });
+  assert.equal(settings.status, 200);
+  const runId = crypto.randomUUID();
+  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, NULL, NULL, ?, 14, 'checking', 1, ?, '{}', ?)")
+    .run('synthetic-owner', runId, 'd'.repeat(40), new Date().toISOString(), JSON.stringify({ operation_id: crypto.randomUUID() }));
+  const task = await call(0, '/api/projects', { op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  assert.equal(task.status, 201);
+  const first = await call(0, path);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.schema.status, 'current');
+  assert.equal(first.body.schema.observed_migration_marker, '0020_project_milestone_gate_removal');
+  assert.equal(first.body.schema.checked_objects, 20);
+  assert.equal(first.body.integrity.tasks_without_engine_receipts, 0);
+  assert.equal(first.body.integrity.invalid_project_order_references, 0);
+  assert.equal(first.body.integrity.status, 'passed');
+  assert.equal(first.body.integrity.projects_without_receipts, 0);
+  assert.equal(first.body.integrity.invalid_milestone_gates, 0);
+  assert.equal(first.body.integrity.preferences_without_receipts, 0);
+  assert.equal(first.body.integrity.integrations_without_receipts, 0);
+  assert.equal(first.body.backup.status, 'unverified');
+  assert.equal(first.body.hosted_export.status, 'unverified');
+  assert.deepEqual(first.body.scope, { application_id: 'aetherwake', namespace: 'live', source_revision: 'd'.repeat(40) });
+  assert.deepEqual(first.body.retention, { controls: 'deployment_managed', github_detail_cache_entries: 128,
+    worker_liveness_max_age_ms: 86_400_000 });
+  assert.ok(Date.parse(first.body.checked_at) > 0);
+  assert.doesNotMatch(JSON.stringify(first.body), /one-fixture|a{64}|synthetic-owner/);
+  one.sqlite.prepare('DELETE FROM project_events WHERE project_id = ?').run(id);
+  one.sqlite.prepare('DELETE FROM task_engine_events WHERE task_id = ?').run(task.body.task.id);
+  one.sqlite.prepare("INSERT INTO project_manual_order VALUES (?, 'live', 1, ?)")
+    .run('synthetic-owner', JSON.stringify([id, id, crypto.randomUUID()]));
+  one.sqlite.prepare("UPDATE workspace_preference_events SET preferences = '{}' WHERE namespace = 'live'").run();
+  one.sqlite.prepare('DELETE FROM integration_events WHERE integration_id = ?').run(runId);
+  one.sqlite.exec('PRAGMA foreign_keys = OFF');
+  one.sqlite.prepare("INSERT INTO project_task_gates VALUES (?, 'live', ?, ?)").run('synthetic-owner', crypto.randomUUID(), crypto.randomUUID());
+  one.sqlite.exec('PRAGMA foreign_keys = ON');
+  const affected = await call(0, path);
+  assert.equal(affected.body.integrity.status, 'issues_found');
+  assert.equal(affected.body.integrity.projects_without_receipts, 1);
+  assert.equal(affected.body.integrity.tasks_without_engine_receipts, 1);
+  assert.equal(affected.body.integrity.invalid_project_order_references, 2);
+  assert.equal(affected.body.integrity.invalid_milestone_gates, 1);
+  assert.equal(affected.body.integrity.preferences_without_receipts, 1);
+  assert.equal(affected.body.integrity.integrations_without_receipts, 1);
+  assert.equal((await call(1, path)).body.integrity.status, 'passed');
+  const verification = crypto.randomUUID();
+  const isolated = await call(0, path, undefined, undefined, { 'x-observatory-verification': verification });
+  assert.equal(isolated.body.integrity.status, 'passed');
+  assert.equal(isolated.body.scope.namespace, 'verification');
+  assert.ok(!JSON.stringify(isolated.body).includes(verification));
+  assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, path, {})).status, 405);
 });

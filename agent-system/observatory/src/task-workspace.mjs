@@ -2,6 +2,7 @@ import { taskTokenRows } from './task-engine-client.mjs';
 import { traceTimeline } from './trace-timeline.mjs';
 
 const idPattern = /^[A-Za-z0-9_.:-]{1,160}$/;
+const evidenceSuffix = '?section=evidence';
 const priorities = ['urgent', 'high', 'normal', 'low'];
 export const workLabels={
   active:'Executing',waiting:'Queued or paused',review:'Awaiting review',issues:'At risk',accepted:'Accepted',
@@ -36,35 +37,53 @@ export function taskHref(id,work) {
   return work&&Object.hasOwn(workLabels,work)?'#tasks?work='+work:'#tasks';
 }
 
+export function taskEvidenceHref(id) {
+  return taskHref(id)+evidenceSuffix;
+}
+
+export function taskAttemptHref(id, attemptId) {
+  return taskHref(id) + '?attempt=' + encodeURIComponent(attemptId).replaceAll('%3A', ':');
+}
+
 export function parseTaskHref(hash) {
   if (hash === '#tasks') return { id: null };
   const work=/^#tasks\?work=([a-zA-Z]+)$/.exec(hash)?.[1];
   if(work&&Object.hasOwn(workLabels,work))return {id:null,work};
-  const id = hash.startsWith('#tasks/') && hash.slice(7);
-  return id && idPattern.test(id) ? { id } : null;
+  const [path, query] = hash.split('?', 2);
+  const id = path.startsWith('#tasks/') && path.slice(7);
+  if (!id || !idPattern.test(id)) return null;
+  if (!hash.includes('?')) return { id };
+  if (hash === path + evidenceSuffix) return { id, section: 'evidence' };
+  const attemptId = query.startsWith('attempt=') && query.slice('attempt='.length);
+  return attemptId && idPattern.test(attemptId) && hash === path + '?attempt=' + attemptId
+    ? { id, attemptId } : null;
+}
+
+export function sortTasks(tasks, sort, priority = task => task.priority) {
+  const rank = task => {
+    const index = priorities.indexOf(priority(task));
+    return index < 0 ? priorities.length : index;
+  };
+  return tasks.toSorted((a, b) => {
+    const newest = String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''));
+    if (sort === 'oldest') return -newest || a.id.localeCompare(b.id);
+    if (sort === 'priority') return rank(a) - rank(b) || newest || a.id.localeCompare(b.id);
+    if (sort === 'title') return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
+    return newest || a.id.localeCompare(b.id);
+  });
 }
 
 export function organizeTasks(tasks, filters, controls = {}, workByTask) {
   const query = (filters.query ?? '').trim().toLowerCase();
   const hasControl = task => Object.hasOwn(controls, task.id);
-  const rank = task => {
-    const index = priorities.indexOf(hasControl(task) ? controls[task.id].priority : undefined);
-    return index < 0 ? priorities.length : index;
-  };
   const visible = tasks.filter(task =>
     (filters.source !== 'private' || hasControl(task) && controls[task.id].source !== 'published') &&
     (!filters.work||filters.work==='all'||workByTask?.get(task.id)===filters.work) &&
     ((!filters.state||filters.state==='all') ? task.state!=='archived'||filters.work==='archived' : task.state===filters.state) &&
     [task.title, task.objective, task.id, task.classification?.primary].join(' ').toLowerCase().includes(query));
-  visible.sort((a, b) => {
-    const newest = String(b.created_at ?? '').localeCompare(String(a.created_at ?? ''));
-    if (filters.sort === 'oldest') return -newest || a.id.localeCompare(b.id);
-    if (filters.sort === 'priority') return rank(a) - rank(b) || newest || a.id.localeCompare(b.id);
-    if (filters.sort === 'title') return a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
-    return newest || a.id.localeCompare(b.id);
-  });
+  const ordered = sortTasks(visible, filters.sort, task => hasControl(task) ? controls[task.id].priority : undefined);
   const groups = new Map();
-  for (const task of visible) {
+  for (const task of ordered) {
     const label = (filters.group === 'state' ? task.state :
       filters.group === 'category' ? task.classification?.primary : 'All Tasks') ?? 'Unavailable';
     if (!groups.has(label)) groups.set(label, []);

@@ -1,0 +1,147 @@
+# Developer verification and operations
+
+The Observatory package owns the React build, API tests, and browser workflows. Test the normal routes after changing a component. Fixture coverage uses local HTTP and SQLite with synthetic GitHub records. Hosted qualification checks service identity, partition wiring, provider observations, and deployed revision separately.
+
+## Regression checks
+
+- `npm test` covers inherited contracts, task workspace selectors, observability, and analytics.
+- `npm run test:sites` covers authorization, Task Engine transitions, GitHub evidence, protected integration, storage isolation, and Phase 2 Project and settings persistence.
+- `node --test ../../tests/agent-journal-export.test.mjs` covers journal exports.
+- `npm run test:workspace:e2e` covers existing workspace interactions and SQLite-backed staging. Set `OBSERVATORY_ENGINE_E2E=1` for the full Task browser scenario.
+
+See [deployment](deployment.md) for the shared Worker build. Use the staging browser test's optional `COMMAND_CORE_SCREENSHOT_DIR` only for a synthetic test run so captured artifacts contain no private records. The browser test verifies that Project history mounts before scrolling and remains reachable by keyboard, and that settled entrance animation releases its blur layer.
+
+### Scroll rendering measurement
+
+The animated scan grid now translates its repeated tile beneath a stationary mask. The tile extends one cell above and to the left of the viewport so it covers the full mask throughout the cycle. Chromium can move the rasterized tile without invalidating its background paint on every frame. The period, cell size, theme opacity, canvas particles, haze, and sidebar glass remain in place. Reduced motion stops grid movement.
+
+On Chrome 157 for Windows, a controlled 1,440 × 900 headless comparison used the same React build, a real local Command Core worker and SQLite partition, and a Project with 30 seeded Tasks. Each variant ran three 3.2-second scroll sweeps over a 4,972-pixel range with trace collection after load and fonts settled. Baseline used the compiled stylesheet from `e194cfb`. Paint counts include all traced page Paint events.
+
+| Measurement | Baseline | Translated tile |
+|---|---:|---:|
+| Median Paint events per sweep | 1,389 | 1,067 |
+| Median time in traced Paint events | 364.50 ms | 327.52 ms |
+| p95 animation frame callback interval | 6.20 ms | 6.20 ms |
+| Unexpected layout shift during sweeps | 0 | 0 |
+| Visible-region panel samples hidden by CSS | 0 / 225 | 0 / 225 |
+
+An isolated 2.6-second grid trace produced 860 to 862 Paint events per baseline run and zero in each of three runs with the translated tile. At the midpoint of the cycle, a screenshot comparison over 1,296,000 pixels found no RGB channel difference greater than one 8-bit level. This confirms a reduction in paint work under the tested workload. Browser frame callbacks and DOM visibility checks cannot establish whether the originally reported intermittent compositor bands are resolved.
+
+### Signed-in staging scroll probe
+
+On November 22, 2026, a foreground Microsoft Edge session opened each owner-private Project Workspace on deployed revision `352660f`. The viewports were 2,040 × 1,102 CSS pixels for Aetherwake and 2,040 × 1,100 for Voyagewright at device pixel ratio 1.25. The browser reported the animated `grid-travel` tile and 22 px sidebar blur active on both. Four mouse-source DevTools scroll gestures per Site traversed the full page range down and up at 3,200 to 4,800 CSS pixels/s. The screencast sampled compositor output every second frame at up to 960 px wide.
+
+| Application | Full scroll range | Captured frames | Distinct scroll offsets |
+|---|---:|---:|---:|
+| Aetherwake | 4,175 CSS px | 170 | 92 |
+| Voyagewright | 5,999 CSS px | 158 | 87 |
+
+Visual inspection of six sampled frames per application found no blank bands. History was still reachable and focused through the Voyagewright section control. The probe sampled a settled Project workspace in one browser configuration. Brief artifacts between samples, the owner's exact display and browser conditions, and other routes remain outside this observation. Screens from private staging were used for inspection only. If the symptom recurs, record the route, browser zoom, viewport, and scroll action for a targeted capture.
+
+### Project Library navigation
+
+During foreground Edge 157 navigation on Windows, the first Voyagewright Project Library load on staging revision `ba359a7` displaced the footer by 432 CSS pixels 643 ms after the click. The layout shift score was 0.0143. Layout Instability attributed the shift to the footer as the portfolio completed. The Project Library now reserves viewport height for the main column while the portfolio loads. A follow-up probe traced a separate 16-pixel movement to the loading paragraph margin collapsing through the workspace. The workspace now establishes its own formatting context to keep that margin inside it. A browser regression holds the Projects API response and compares both the workspace and footer positions before and after the cards render.
+
+### Large Project Library read and scroll
+
+The server groups Tasks, milestones, integration runs, and gates once per portfolio read. The existing Task Engine still calculates dispatch readiness. On Windows with Node 24 and local SQLite, the benchmark compared the indexed reader with the reader at `6ae7039`. Each pair read the same synthetic Projects, admitted Tasks, milestone gates, and integration rows. Project list responses were identical across all three sizes. Each variant had five warm-up calls and 13 measured calls with alternating order.
+
+| Projects | Tasks | Baseline median | Indexed median |
+|---:|---:|---:|---:|
+| 8 | 64 | 0.66 ms | 0.68 ms |
+| 64 | 768 | 11.17 ms | 7.64 ms |
+| 240 | 3,840 | 177.07 ms | 49.32 ms |
+
+The largest fixture also rendered 240 cards through the local Worker in Windows Chromium 157.0.8103.80 at 1,440 × 900 with motion enabled. A 4.2-second down-and-up sweep traversed 15,966 CSS pixels in each direction. The probe recorded 566 animation-frame intervals, 12.2 ms at p95, zero browser long tasks, zero unexpected layout shift, and zero CSS-hidden cards across 8,116 visible-card samples. This measured local response processing and browser behavior. Hosted D1 transfer time and intermittent compositor artifacts require separate observation.
+
+### Large Project Library compositor capture
+
+A follow-up captured compositor frames on Windows Chromium 157.0.8103.80 at 1,440 × 900 on `6d87271`. Each theme loaded 240 synthetic cards through the local Worker. The browser confirmed the animated scan grid and 22 px sidebar blur. A mouse-source gesture traversed the full Library down and back up at a requested 5,400 CSS px/s. Chrome supplied 960 × 600 JPEG frames from every second compositor frame eligible for capture.
+
+| Theme | Scroll range | Captured frames | Distinct offsets | p95 gap between captures |
+|---|---:|---:|---:|---:|
+| Aetherwake | 15,966 CSS px | 303 | 299 | 24.27 ms |
+| Voyagewright | 15,977 CSS px | 300 | 291 | 24.29 ms |
+
+An initial fill-to-gutter contrast check flagged 2 Aetherwake frames and 36 Voyagewright frames. The longest flagged spans were 26 and 48 CSS pixels. Visual inspection of the strongest flags and representative down and up frames found intact cards. An edge check then scanned all captures for at least 24 consecutive CSS pixels with fewer than two detectable card borders in the expected grid area. It flagged no frames. Both tests flagged a 36 CSS px control when edge measurements were suppressed. The maximum observed gap between captures during a gesture was 42.43 ms. The probe covered synthetic content in headless Chromium. Brief artifacts between captures and differences in the owner's physical display, zoom, and foreground load remain unverified.
+
+### Project card dragging
+
+On Windows Chrome 157.0.8103.80, headless Playwright drove both themes through the shared local Command Core Worker on revision `346f6cb`. Each application used an isolated SQLite partition with eight synthetic Projects. The desktop viewport was 1,440 × 1,000 CSS pixels. Touch emulation used 390 × 1,100 CSS pixels. Motion was enabled. Each trial moved the first card into the next row using 26 paced input steps, waited for the insertion indicator, and required a successful reorder receipt and the same order after reload.
+
+| Theme and input | Trials | Worst trial p95 frame callback interval | Largest frame callback gap |
+|---|---:|---:|---:|
+| Aetherwake pointer | 3 | 4.3 ms | 16.6 ms |
+| Aetherwake touch | 3 | 4.3 ms | 4.4 ms |
+| Voyagewright pointer | 3 | 4.3 ms | 12.6 ms |
+| Voyagewright touch | 3 | 4.3 ms | 8.4 ms |
+
+All 12 moves persisted. The frame window began after drag activation and ended at visible insertion feedback. It contained no unexpected layout shifts or browser long tasks. These frame callback timings cover the tested synthetic workload. Physical touch latency, display presentation, and larger Project libraries remain outside this measurement.
+
+### Settings confirmation and live Task updates
+
+On Windows Chrome 157.0.8103.80 at 1,440 × 900, three local SQLite-backed runs measured the in-page Settings reset confirmation and three measured a remote worker claim with the Project Tasks panel in view. The probe captured animation-frame intervals within 250 ms of the first rendered change, plus Layout Instability and long-task observations. Each run began with settled navigation and a fresh scoped fixture.
+
+| Interaction | First visible change | Worst run p95 frame interval | Unexpected layout shift | Long tasks |
+|---|---:|---:|---:|---:|
+| Settings reset confirmation | 58–59 ms from probe start through the browser click | 17.0 ms | 0 across three runs | 0 |
+| Remote Task claim after layout correction | 4.70–4.75 s from probe start through the worker request | 17.0 ms | 0 across three runs | 0 |
+
+The inline confirmation's insertion was input-related, with a layout shift score of 0.0024. The original Task update displaced the execution control and activity text when the status chip widened. The Task row now reserves status space, and Current work uses fixed column proportions. The repeated claim produced one scoped Project read per run. Its observed latency includes the existing five-second Task registry polling interval.
+
+## Troubleshooting and recovery
+
+If Projects or Settings report a scope error, check the caller's assignment, the origin configuration, and the D1 singleton identity. If a preference or card order conflicts, refresh before resubmitting. For a blocked Task, open its attempt and dependency receipts. For GitHub errors, check the latest observed credential state, rate-limit budget, source SHA, and recorded workflow attempt. A heartbeat is stronger evidence of worker availability than credential presence.
+
+Before rehearsing a migration, take a consistent export in private custody. Record the source digest, migration journal, row counts, and stable Project, Task, and attempt identities. Rehearse replay, failure recovery, stale leases, and rollback against a separate database. An imported snapshot remains fenced. Use the [Phase 1B steps](../PHASE1B-SITES.md) for worker handoff and Site rollback. Production service, data, and worker ownership remain subject to separate authorization.
+
+If a workspace section cannot load after a release, use **Reload page** to reopen the same route with the current assets. The navigation remains available, and Command Core leaves reload to the user so they can decide when to leave an open form. The staging browser regression tests this with a missing lazy-loaded Project asset.
+
+### What the recovery checks cover
+
+Run `node --test --test-name-pattern "current application partitions" sites/staging.test.mjs` from the Observatory package. The test creates independently identified Aetherwake and Voyagewright fixture partitions, checkpoints each current schema with SQLite's backup API, advances the source settings, and restores the checkpoint into a separate file. It compares schema definitions and table contents, runs integrity and foreign-key checks, and reads back Project order, milestone links, the Task and attempt IDs, and the pre-checkpoint Settings. Serving a restored partition under the peer application must fail. The legacy import test separately checks the dispatch fence for copied in-flight leases.
+
+Sites version rollback restores code only. The database inspection tools provide bounded views. A hosted recovery drill requires a consistent data export and any applicable file inventory from authorized custody, restoration into an isolated target, and verified record and file readback. Hosted backup, restore, and retention remain unverified. [Sites versions and saved data](https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites)
+
+After an authorized operator obtains a consistent current-schema SQLite checkpoint, run the tool from an Observatory checkout with migrations matching the source deployment. Keep the checkpoint and the offline restore outside Git. Use the source application, repository, and portfolio explicitly. Choose a new destination filename in an existing private directory.
+
+```text
+node sites/verify-restore.mjs --create SOURCE.sqlite RESTORED.sqlite aetherwake Kgray44/Aetherwake engineering
+node sites/verify-restore.mjs --create SOURCE.sqlite RESTORED.sqlite voyagewright Kgray44/treasurehuntSoT engineering
+```
+
+The command writes a private SQLite copy and verifies it before publishing the destination. It refuses to overwrite an existing path and emits a source file hash with the verification receipt. Keep the copy disconnected from active Sites and Task workers during the drill. For a restore already made in private custody, omit `--create` to run the same comparison without writing either file.
+
+```text
+node sites/verify-restore.mjs SOURCE.sqlite RESTORED.sqlite aetherwake Kgray44/Aetherwake engineering
+```
+
+The verifier opens both files read-only. It checks application identity, current schema objects, exact schema equality, SQLite integrity, foreign keys, and every table's typed rows, including any migration journal present in the checkpoint. The receipt contains counts and a digest instead of row payloads. Keep that receipt in private custody. Preserve the provider's export and migration receipts, check the file inventory and digests separately where applicable, and read restored identities through the isolated application before recording acceptance.
+
+### Materialize an authorized SQL checkpoint
+
+If the storage operator supplies SQL, request the full schema and data in SQLite CLI-compatible format and retain the provider export receipt in private custody. Record the source partition, export timestamp or bookmark, and SQL SHA-256. Cloudflare D1 documents a SQLite CLI-compatible export format and warns that export can block requests. Use an authorized storage operator and an appropriate maintenance window for any export that could affect a live service. [D1 export formats and availability](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/export/)
+
+Run this PowerShell example only on a trusted provider export, with Python 3.12 and both paths in an existing private working directory outside Git. Size the dump and the additional database copies before running it. This example reads the SQL into memory. Use a fresh destination. If the command fails, retain the original dump and treat the materialized file as an incomplete attempt.
+
+```powershell
+Get-FileHash -LiteralPath 'SOURCE.sql' -Algorithm SHA256
+@'
+import pathlib
+import sqlite3
+import sys
+
+sql, target = map(pathlib.Path, sys.argv[1:])
+with target.open('xb'):
+    pass
+with sqlite3.connect(target) as db:
+    db.set_authorizer(lambda action, *_: sqlite3.SQLITE_DENY
+                      if action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH)
+                      else sqlite3.SQLITE_OK)
+    db.executescript(sql.read_text(encoding='utf-8'))
+'@ | python - 'SOURCE.sql' 'SOURCE.sqlite'
+```
+
+After a successful import, run the SQLite verifier above. Where the storage operator supplies source checks, reconcile the materialized table counts, migration state, record identities, and any available digests against that independent receipt before accepting the restore. The SQLite comparison verifies the copy against the materialized database. Completeness of the hosted export and any separately held files requires evidence from the storage operator.
+
+A local Windows rehearsal converted full SQL dumps of both synthetic application partitions with Python 3.12. The verifier compared each materialized checkpoint and final copy against its original fixture, including a 64-bit integer, BLOB, and NULL value. It verified 23 tables per partition on migration `0020_project_milestone_gate_removal`. The materialization rejected an existing destination. The SQL came from local fixture databases.

@@ -1,12 +1,11 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync } from 'node:fs';
-import { chmod, link, mkdtemp, realpath, rm, rmdir, stat } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { applicationId, repositoryName } from './application-config.mjs';
 import { applyMigrations } from './sqlite-runtime.mjs';
+import { checkpointFileDigest, publishPrivateCheckpoint, resolvePrivateCheckpointTarget } from './private-checkpoint.mjs';
 
 const sourceTables = [
   'proposals', 'task_engine_events', 'task_telemetry', 'private_projection', 'task_worker_liveness',
@@ -25,12 +24,6 @@ function contentDigest(sqlite, schema) {
       hash.update(JSON.stringify(row) + '\n');
     }
   }
-  return hash.digest('hex');
-}
-
-async function fileDigest(path) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
 }
 
@@ -55,13 +48,8 @@ export async function stageSnapshot({ source, destination, application, reposito
   if (source.toLowerCase() === destination.toLowerCase() || ['-wal', '-shm', '-journal'].some(suffix => existsSync(source + suffix))) {
     throw Error('An immutable, standalone v15 checkpoint and separate destination are required');
   }
-  const targetDirectory = await realpath(dirname(destination));
-  for (let path = targetDirectory; ; path = dirname(path)) {
-    if (existsSync(join(path, '.git'))) throw Error('Store checkpoint copies outside Git checkouts');
-    if (path === dirname(path)) break;
-  }
-  destination = join(targetDirectory, destination.slice(dirname(destination).length + 1));
-  const digest = await fileDigest(source);
+  destination = await resolvePrivateCheckpointTarget(destination);
+  const digest = await checkpointFileDigest(source);
   const sourceReader = new DatabaseSync(source, { readOnly: true });
   let schema;
   try { schema = tableColumns(sourceReader); } finally { sourceReader.close(); }
@@ -82,24 +70,7 @@ export async function stageSnapshot({ source, destination, application, reposito
       existing.close();
     }
   }
-  const temporary = await mkdtemp(join(dirname(destination), '.snapshot-'));
-  const prepared = join(temporary, 'prepared.sqlite');
-  try {
-    if (process.platform === 'win32') {
-      const script = [
-        '$ErrorActionPreference = "Stop"',
-        '$path = $env:COMMAND_CORE_PRIVATE_DIR',
-        '$acl = [IO.Directory]::GetAccessControl($path)',
-        '$acl.SetAccessRuleProtection($true, $false)',
-        'foreach ($rule in @($acl.Access)) { $acl.RemoveAccessRuleAll($rule) }',
-        '$ids = @([System.Security.Principal.WindowsIdentity]::GetCurrent().User, (New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")), (New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")))',
-        'foreach ($id in $ids) { $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($id, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"); $acl.SetAccessRule($rule) }',
-        '[IO.Directory]::SetAccessControl($path, $acl)',
-      ].join('; ');
-      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-        env: { ...process.env, COMMAND_CORE_PRIVATE_DIR: temporary }, timeout: 10000, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
-      });
-    }
+  return publishPrivateCheckpoint(destination, async prepared => {
     const input = new DatabaseSync(source, { readOnly: true });
     let counts, content;
     try {
@@ -121,7 +92,7 @@ export async function stageSnapshot({ source, destination, application, reposito
     } finally {
       input.close();
     }
-    if (await fileDigest(source) !== digest) throw Error('Source checkpoint changed during copy');
+    if (await checkpointFileDigest(source) !== digest) throw Error('Source checkpoint changed during copy');
     const output = new DatabaseSync(prepared);
     try {
       applyMigrations(output, { from: 16 });
@@ -133,17 +104,8 @@ export async function stageSnapshot({ source, destination, application, reposito
     } finally {
       output.close();
     }
-    if (process.platform !== 'win32') {
-      await chmod(prepared, 0o600);
-      if ((await stat(prepared)).mode & 0o077) throw Error('Checkpoint file permissions could not be restricted');
-    }
-    // An atomic no-replace publication keeps a racing importer from overwriting the prepared copy.
-    await link(prepared, destination);
     return { replayed: false, counts, runtime_mode: 'frozen' };
-  } finally {
-    await rm(prepared, { force: true });
-    await rmdir(temporary);
-  }
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

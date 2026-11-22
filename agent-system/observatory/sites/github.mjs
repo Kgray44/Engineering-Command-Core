@@ -297,6 +297,9 @@ function pullItems(data, repository) {
       head_ref: text(item.head?.ref),
       base_ref: text(item.base?.ref),
       draft: typeof item.draft === 'boolean' ? item.draft : null,
+      ...(Array.isArray(item.requested_reviewers) && Array.isArray(item.requested_teams) ? {
+        requested_review_count: item.requested_reviewers.length + item.requested_teams.length,
+      } : {}),
       merged,
       merged_at: mergedAt,
     };
