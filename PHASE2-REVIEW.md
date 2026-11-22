@@ -41,7 +41,7 @@ CI for the deployed candidate passed 69 Observatory checks, 138 Sites checks, 12
 
 ## Owner decision and external inputs
 
-- Both read bindings were absent from the canonical staging environment at revision 2 when rechecked for this review. Install `AETHERWAKE_GITHUB_READ_TOKEN` and `VOYAGEWRIGHT_GITHUB_READ_TOKEN` as independent repository-scoped secrets on the canonical [Aetherwake staging Site](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site). Then verify PR detail and exact-head checks from both signed-in origins. Keep credential values in Sites. [Binding runbook](PHASE1B-SITES.md)
+- Both read bindings were absent from the canonical staging environment at revision 2 when rechecked for this review. Install `AETHERWAKE_GITHUB_READ_TOKEN` and `VOYAGEWRIGHT_GITHUB_READ_TOKEN` as independent repository-scoped secrets on the canonical [Aetherwake staging Site](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site). Then verify PR detail and exact-head checks from both signed-in origins. Keep credential values in Sites. [Credential setup and troubleshooting](docs/deployment.md#staging-github-read-credentials)
 - Obtain an authorized consistent hosted database export and any applicable file inventory, then restore into a separate target. Compare source and restored schema, identities, relationships, and file digests where applicable. The available Sites connector provides bounded inspection, and Sites version rollback restores code. [Recovery guide](docs/operations.md#troubleshooting-and-recovery)
 - Record the owner decision on [draft PR #2](https://github.com/Kgray44/Engineering-Command-Core/pull/2) after reviewing the staged workflows and remaining evidence. Keep the production cutover decision in [Phase 1B](PHASE1B-SITES.md).
 

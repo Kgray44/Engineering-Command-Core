@@ -163,7 +163,8 @@ export async function projectOperation({ db, owner, namespace, application, body
         CASE WHEN t.project_id = ?3 AND json_extract(r.record, '$.evidence.observed_head') = r.head_sha
           AND json_extract(r.record, '$.evidence.policy_observed') = 1
           AND json_type(r.record, '$.evidence.checks') = 'array'
-          THEN json_extract(r.record, '$.evidence.checks') END AS checks
+          THEN json_extract(r.record, '$.evidence.checks') END AS checks,
+        CASE WHEN t.project_id = ?3 THEN json_extract(r.record, '$.evidence.base_sha') END AS observed_base
         FROM integration_runs r JOIN proposals t ON t.owner_id = r.owner_id AND t.namespace = r.namespace AND t.task_id = r.task_id
         WHERE r.owner_id = ?1 AND r.namespace = ?2 AND t.project_id IS NOT NULL ORDER BY r.updated_at DESC, r.id`,
       body.op === 'get' ? body.id : null).all(),
@@ -217,9 +218,10 @@ export async function projectOperation({ db, owner, namespace, application, body
           project.milestone_order ?? []);
         const projectIntegrations = integrations.results.filter(item => item.project_id === project.id);
         return { linked, tasks, active_workers: activeWorkers.size, milestones: projectMilestones, dependencies,
-          integrations: projectIntegrations.map(({ project_id, checks, ...integration }) => ({
+          integrations: projectIntegrations.map(({ project_id, checks, observed_base, ...integration }) => ({
             ...integration, repository: application.repository,
             required_checks: checks ? JSON.parse(checks) : [],
+            check_base_sha: checks && /^[0-9a-f]{40}$/.test(observed_base ?? '') ? observed_base : null,
           })),
           progress: projectProgress(project, tasks, projectMilestones, projectIntegrations) };
       },

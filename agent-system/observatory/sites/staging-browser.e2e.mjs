@@ -377,6 +377,27 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const verification = page.locator('#project-verification');
   const currentMain = verification.getByRole('link', { name: 'Inspect main commit' });
   assert.equal(await currentMain.getAttribute('href'), 'https://github.com/' + repository + '/commit/' + 'd'.repeat(40));
+  const recordedRun = crypto.randomUUID();
+  const staleRun = crypto.randomUUID();
+  const insertProjectRun = part.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, ?, 'blocked', 1, ?, ?, ?)");
+  for (const [id, pr, observedHead] of [[recordedRun, 7, head], [staleRun, 10, 'c'.repeat(40)]]) {
+    const at = new Date().toISOString();
+    insertProjectRun.run('synthetic-staging-owner', id, taskId, crypto.randomUUID(), head, pr, at,
+      JSON.stringify({ evidence: { observed_head: observedHead, base_sha: base, policy_observed: true,
+        checks: [{ context: 'Project qualification', app: 9, source: 'ruleset', state: 'failed' }] } }),
+      JSON.stringify({ operation_id: crypto.randomUUID(), at, kind: 'start', state: 'blocked', pr_number: pr }));
+  }
+  await page.reload();
+  const projectRun = verification.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'PR #7', exact: true }) });
+  await projectRun.getByText('Recorded required checks', { exact: true }).click({ timeout: 5_000 });
+  await projectRun.getByText('Project qualification · failed', { exact: true }).waitFor();
+  assert.equal(await projectRun.locator('code[title="' + head + '"]').count(), 1);
+  assert.equal(await projectRun.locator('code[title="' + base + '"]').count(), 1);
+  assert.equal(await projectRun.getByRole('link', { name: 'Inspect integration' }).getAttribute('href'), '#merge?pr=7&run=' + recordedRun);
+  const staleProjectRun = verification.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'PR #10', exact: true }) });
+  await staleProjectRun.getByText('No exact-head required checks recorded.').waitFor();
+  assert.equal(await staleProjectRun.getByText('Project qualification', { exact: false }).count(), 0);
+  part.sqlite.prepare("DELETE FROM integration_runs WHERE id IN (?, ?)").run(recordedRun, staleRun);
   await verification.getByRole('link', { name: 'Inspect PR #7 in Merge Control Center' }).click();
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
   await page.goto(stage.origin + '/#projects/' + projectId);

@@ -163,7 +163,7 @@ function MilestoneEvidence({ milestone, tasks, links, dependents, history, Statu
   </section>;
 }
 
-function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSave, Panel, DetailLine }) {
+function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSave, onJump, Panel, DetailLine }) {
   const completed = tasks.filter(task => task.candidate_revision);
   const decisions = Object.entries(projectReviewLabels);
   const currentReview = project.owner_review ?? '';
@@ -173,7 +173,9 @@ function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSav
     <p className="objective">{project.acceptance || 'No requirements recorded.'}</p>
     <DetailLine name="Implementation completed" value={completed.length + ' of ' + tasks.length + ' Tasks with a completed candidate'}/>
     <DetailLine name="Technical verification" value={project.technical_state === 'verified' ? 'Project verification recorded' : 'No current Project verification recorded'}/>
-    <DetailLine name="PR checks" value={integrations.some(run => run.required_checks?.length) ? 'Recorded checks by candidate below' : 'No exact-revision check evidence recorded'}/>
+    <DetailLine name="PR checks" value={integrations.some(run => run.required_checks?.length)
+      ? <button type="button" className="text-button" onClick={() => onJump('project-verification')}>Review recorded PR checks</button>
+      : 'No exact-revision check evidence recorded'}/>
     <DetailLine name="PR merged" value={progress.integrations.merged + ' of ' + progress.integrations.tracked + ' recorded integrations'}/>
     <DetailLine name="Functionality delivered" value={progress.integrations.deployed + ' recorded deployments'}/>
     <DetailLine name="Owner review" value={Object.hasOwn(projectReviewLabels, currentReview) ? projectReviewLabels[currentReview] : currentReview}/>
@@ -181,16 +183,6 @@ function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSav
       <summary>Completed Task candidates</summary>
       <ul className="project-list">{completed.map(task => <li key={task.id}>
         <a href={taskHref(task.id)}>{task.title}</a><code title={task.candidate_revision}>{task.candidate_revision.slice(0, 12)}</code>
-      </li>)}</ul>
-    </details>}
-    {integrations.some(run => run.required_checks?.length) && <details>
-      <summary>Recorded required checks by candidate</summary>
-      <ul className="project-list">{integrations.filter(run => run.required_checks?.length).map(run => <li key={run.id}>
-        <a href={'#merge?pr=' + run.pr_number + '&run=' + run.id}>PR #{run.pr_number}</a>
-        <code title={run.head_sha}>{run.head_sha.slice(0, 12)}</code>
-        {run.required_checks.map(check => <small key={JSON.stringify([check.context, check.app, check.source])}>
-          {check.context} · {check.state}
-        </small>)}
       </li>)}</ul>
     </details>}
     <form className="form" key={project.version} onSubmit={event => {
@@ -609,9 +601,18 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           {new Date(repositoryMain.observed_at).toLocaleString()}</time></p>}
         <p>{progress.integrations.merged} of {progress.integrations.tracked} tracked integrations merged · {progress.integrations.deployed} deployed</p>
         <ul className="project-list">{integrations.map(item => <li key={item.id}>
-          {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <small>{item.head_sha.slice(0, 12)}</small>}
+          {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a>
+            : <small>{item.head_sha.slice(0, 12)}</small>}
           <Status value={item.state}/>
-          {item.pr_number && <a className="text-button" href={'#merge?pr=' + item.pr_number + '&run=' + item.id}>Inspect integration</a>}
+          <a className="text-button" href={'#merge?' + (item.pr_number ? 'pr=' + item.pr_number + '&' : '') + 'run=' + item.id}>Inspect integration</a>
+          {item.required_checks?.length > 0 ? <details>
+            <summary>Recorded required checks</summary>
+            <p>Head <code title={item.head_sha}>{item.head_sha.slice(0, 12)}</code> · Base {item.check_base_sha
+              ? <code title={item.check_base_sha}>{item.check_base_sha.slice(0, 12)}</code> : 'Unavailable'}</p>
+            <ul>{item.required_checks.map(check => <li key={JSON.stringify([check.context, check.app, check.source])}>
+              {check.context} · {check.state}
+            </li>)}</ul>
+          </details> : <small>No exact-head required checks recorded.</small>}
         </li>)}</ul>
         <ul className="project-list">{github.map((item, index) => {
           const source = repository ? parseActivityHref(taskActivityHref(item.uri, repository)) : null;
@@ -628,7 +629,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         <ProjectArtifacts tasks={tasks} artifacts={artifact_sources}/>
       </Panel>
       <ProjectAcceptance project={project} tasks={tasks} integrations={integrations} progress={progress} busy={busy}
-        Panel={Panel} DetailLine={DetailLine} onSave={owner_review => submit({
+        Panel={Panel} DetailLine={DetailLine} onJump={onJump} onSave={owner_review => submit({
           op: 'update', expected_version: project.version, fields: { owner_review },
         })}/>
       <Panel id="project-telemetry" title="Execution and telemetry">
