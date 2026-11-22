@@ -52,6 +52,18 @@ test('Projects workspace performs live project and Task mutations through the sh
   await enteredWithBlur;
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.project-portfolio .metric')).filter === 'none');
   assert.equal(await page.locator('.sidebar').evaluate(node => getComputedStyle(node).backdropFilter), 'blur(22px)');
+  const gridLayer = await page.locator('.scan-grid').evaluate(node => {
+    const mask = getComputedStyle(node);
+    const grid = getComputedStyle(node, '::before');
+    return { mask: mask.maskImage, animation: grid.animationName, period: grid.animationDuration, tile: grid.backgroundSize,
+      keyframes: node.getAnimations({ subtree: true }).flatMap(animation => animation.effect.getKeyframes()) };
+  });
+  assert.match(gridLayer.mask, /linear-gradient/);
+  assert.equal(gridLayer.animation, 'grid-travel');
+  assert.equal(gridLayer.period, '40s');
+  assert.deepEqual(gridLayer.tile.split(', '), ['58px 58px', '58px 58px']);
+  assert.ok(gridLayer.keyframes.some(keyframe => keyframe.transform === 'translate(58px, 58px)'));
+  assert.ok(gridLayer.keyframes.every(keyframe => !('backgroundPosition' in keyframe)));
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
   await page.getByLabel('Objective', { exact: true }).fill('Prove a Project owns its newly registered Tasks');
@@ -228,6 +240,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await shell.waitFor();
   assert.equal(await shell.evaluate(node => getComputedStyle(node).getPropertyValue('--accent').trim()), '#c9a95f');
   assert.equal(await page.locator('.settings-card').count(), 10);
+  assert.equal(await page.locator('.scan-grid').evaluate(node => getComputedStyle(node, '::before').animationName), 'none');
   await capture(page, 'voyagewright-settings-mobile.png');
   await page.getByRole('link', { name: /General Landing page/ }).click();
   await page.getByLabel('Panel density').selectOption('compact');
