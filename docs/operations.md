@@ -9,7 +9,7 @@ The Observatory package owns the React build, API tests, and browser workflows. 
 - `node --test ../../tests/agent-journal-export.test.mjs` covers journal exports.
 - `npm run test:workspace:e2e` covers existing workspace interactions and SQLite-backed staging. Set `OBSERVATORY_ENGINE_E2E=1` for the full Task browser scenario.
 
-See [deployment](deployment.md) for the shared Worker build. Use the staging browser test's optional `COMMAND_CORE_SCREENSHOT_DIR` only for a synthetic test run so captured artifacts contain no private records. The browser test verifies that Project history mounts before scrolling and remains reachable by keyboard, and that settled entrance animation releases its blur layer. The intermittent reported scroll bands still require observation on the actual hosted browser and hardware.
+See [deployment](deployment.md) for the shared Worker build. Use the staging browser test's optional `COMMAND_CORE_SCREENSHOT_DIR` only for a synthetic test run so captured artifacts contain no private records. The browser test verifies that Project history mounts before scrolling and remains reachable by keyboard, and that settled entrance animation releases its blur layer.
 
 ### Scroll rendering measurement
 
@@ -26,6 +26,17 @@ On Chrome 157 for Windows, a controlled 1,440 × 900 headless comparison used th
 | Visible-region panel samples hidden by CSS | 0 / 225 | 0 / 225 |
 
 An isolated 2.6-second grid trace produced 860 to 862 Paint events per baseline run and zero in each of three runs with the translated tile. At the midpoint of the cycle, a screenshot comparison over 1,296,000 pixels found no RGB channel difference greater than one 8-bit level. This confirms a reduction in paint work under the tested workload. Browser frame callbacks and DOM visibility checks cannot establish whether the originally reported intermittent compositor bands are resolved.
+
+### Signed-in staging scroll probe
+
+On November 22, 2026, a foreground Microsoft Edge session opened each owner-private Project Workspace on deployed revision `352660f`. The viewports were 2,040 × 1,102 CSS pixels for Aetherwake and 2,040 × 1,100 for Voyagewright at device pixel ratio 1.25. The browser reported the animated `grid-travel` tile and 22 px sidebar blur active on both. Four mouse-source DevTools scroll gestures per Site traversed the full page range down and up at 3,200 to 4,800 CSS pixels/s. The screencast sampled compositor output every second frame at up to 960 px wide.
+
+| Application | Full scroll range | Captured frames | Distinct scroll offsets |
+|---|---:|---:|---:|
+| Aetherwake | 4,175 CSS px | 170 | 92 |
+| Voyagewright | 5,999 CSS px | 158 | 87 |
+
+Visual inspection of six sampled frames per application found no blank bands. History was still reachable and focused through the Voyagewright section control. The probe sampled a settled Project workspace in one browser configuration. Brief artifacts between samples, the owner's exact display and browser conditions, and other routes remain outside this observation. Screens from private staging were used for inspection only. If the symptom recurs, record the route, browser zoom, viewport, and scroll action for a targeted capture.
 
 ### Settings confirmation and live Task updates
 
