@@ -514,6 +514,19 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await page.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href'), pull.html_url);
   assert.equal(await page.getByRole('button', { name: 'Inspect source' }).isEnabled(), true);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  await page.route('**/api/github/pulls/7', route => route.fulfill({ json: {
+    status: 'unavailable', reason: 'GitHub read credential unavailable',
+  } }), { times: 1 });
+  await page.getByRole('button', { name: 'Refresh GitHub source' }).click();
+  await page.getByText('GitHub read credential unavailable', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
+  await page.getByText('Last observed repository feed', { exact: false }).waitFor();
+  assert.equal(await page.getByRole('link', { name: 'GitHub connection settings' }).getAttribute('href'), '#settings/connections');
+  assert.equal(await page.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href'), pull.html_url);
+  assert.equal(await page.getByRole('button', { name: 'Inspect source', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('button', { name: 'Preview required checks' }).count(), 0);
+  await page.getByRole('button', { name: 'Refresh GitHub source' }).click();
+  await page.getByRole('button', { name: 'Preview required checks' }).waitFor();
   await page.setViewportSize({ width: 1250, height: 930 });
   await capture(page, 'voyagewright-merge-source.png');
   const inspection = page.waitForResponse(response => response.url().endsWith('/api/integrations/v1') && response.request().method() === 'POST');

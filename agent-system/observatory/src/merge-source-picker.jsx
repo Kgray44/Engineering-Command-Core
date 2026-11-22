@@ -44,7 +44,10 @@ export function useMergeSourceContext(number, headers, runs) {
 
 function pullReadiness(pull, runs, group, main) {
   const number = activityId('pulls', pull);
-  if (activityState('pulls', pull) === 'merged') return ['merged', 'Merged on GitHub'];
+  const state = activityState('pulls', pull);
+  if (state === 'merged') return ['merged', 'Merged on GitHub'];
+  if (group?.status === 'available' && pull.draft) return ['blocked', 'Draft pull request'];
+  if (group?.status === 'available' && state === 'closed') return ['blocked', 'Closed pull request'];
   const run = runs.find(item => item.pr_number === number && item.head_sha === pull.revision);
   if (!run) return runs.some(item => item.pr_number === number) ? ['stale', 'Different revision inspected'] : ['unknown', 'Awaiting inspection'];
   if (group?.status !== 'available' || (run.evidence?.base_sha &&
@@ -111,6 +114,8 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     .filter(pull => readiness === 'all' || pullReadiness(pull, runs, group, main)[0] === readiness);
   if (sort === 'updated') pulls.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
   const detail = source?.detail;
+  const summary = detail ? null : group?.items?.find(pull => activityId('pulls', pull) === number);
+  const githubUrl = detail?.url ?? summary?.url;
   const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
   return <div className="merge-discovery">
     <div className="merge-discovery-filters">
@@ -139,14 +144,24 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     {!pulls.length && <p>No pull requests match the current view.</p>}
     {number && <motion.section key={number} className="merge-source-detail"
       initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .18 }}>
-      <h3>#{number} {detail?.title ?? 'Pull request'}</h3>
+      <h3>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>
       <p role="status">{!source ? 'Reading GitHub source…' : source.reason || source.error ||
         (source.observed_at ? 'GitHub observed ' + new Date(source.observed_at).toLocaleString() : 'GitHub observation unavailable')}</p>
       <div className="integration-actions">
         <a href={activityHref('pulls', number)}>Pull request details</a>
-        {detail?.url && <a href={detail.url}>Open on GitHub</a>}
+        {githubUrl && <a href={githubUrl}>Open on GitHub</a>}
+        {source && source.status !== 'available' && <a href="#settings/connections">GitHub connection settings</a>}
         <button type="button" className="quiet-button" onClick={reload}>Refresh GitHub source</button>
       </div>
+      {summary && <>
+        <p>Last observed repository feed{group.observed_at ? ' · ' + new Date(group.observed_at).toLocaleString() : ''}</p>
+        <p>{summary.author ?? 'Unknown author'} · {summary.merged ? 'Merged' : summary.draft ? 'Draft' : summary.state}</p>
+        <dl className="integration-revisions">
+          <div><dt>Observed source branch</dt><dd>{summary.head_ref ?? 'Unavailable'}</dd></div>
+          <div><dt>Observed target branch</dt><dd>{summary.base_ref ?? 'Unavailable'}</dd></div>
+          <div><dt>Observed head</dt><dd><code>{summary.revision ?? 'Unavailable'}</code></dd></div>
+        </dl>
+      </>}
       {detail && <>
         <p>{detail.author ?? 'Unknown author'} · {detail.merged ? 'Merged' : detail.draft ? 'Draft' : detail.state}</p>
         {detail.body && <details><summary>Description</summary><p className="objective">{detail.body}</p></details>}
