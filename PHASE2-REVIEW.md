@@ -1,24 +1,43 @@
-# Phase 2 review and qualification
+# Phase 2 owner review
 
-The work in [draft PR #2](https://github.com/Kgray44/Engineering-Command-Core/pull/2) builds on the pinned base in [draft PR #1](https://github.com/Kgray44/Engineering-Command-Core/pull/1). The public screenshots in the [README](README.md) come from the local browser fixture.
+Phase 2 is ready for owner walkthrough on the private staging Sites. Hosted GitHub check qualification, hosted recovery, and the owner's acceptance decision remain open. The implementation is in [draft PR #2](https://github.com/Kgray44/Engineering-Command-Core/pull/2), stacked on [Phase 1 draft PR #1](https://github.com/Kgray44/Engineering-Command-Core/pull/1).
 
-## Candidate staging
+## Review the deployed candidate
 
-| Origin | Observation |
-|---|---|
-| [Aetherwake staging](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#projects) | Hosted Settings and data checks passed on `accd4c2710c36246eccea77fc10ca5912c6a0125`. |
-| [Voyagewright staging](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#projects) | Hosted Settings and data checks passed on the same source. Signed-in checks also covered its own Project and the token-derived theme. |
-| [Production Aetherwake Observatory](https://aetherwake-engineering-observatory.kgamazing44.chatgpt.site/#tasks) | Task Control Center loaded during earlier staging qualification and showed production build `8bd0e4553b`. |
+Both staging origins reported ready on Command Core revision `ba684ff53fd76c213b9f08dd661098d784234a60`. Each Site mirror matched the tested source tree apart from its hosting manifest. The production Observatory Task Control Center loaded during the November 22 readback and reported build `8bd0e4553b`. [Deployed commit](https://github.com/Kgray44/Engineering-Command-Core/commit/ba684ff53fd76c213b9f08dd661098d784234a60) · [Production Task Control Center](https://aetherwake-engineering-observatory.kgamazing44.chatgpt.site/#tasks)
 
-Each Project library returned its own record and rejected the peer Project ID. The Voyagewright browser opened the interactive dependency view and inline Task controls, then navigated to the mounted History section. The production Observatory Task list loaded after that deployment.
+| Workspace | Aetherwake | Voyagewright |
+|---|---|---|
+| Project Library | [Projects](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#projects) | [Projects](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#projects) |
+| Task Control Center | [Tasks](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#tasks) | [Tasks](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#tasks) |
+| Merge source and linked work | [PR #356](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#merge?pr=356) | [PR #899](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#merge?pr=899) |
+| Activity and attention | [Activity](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#activity) | [Activity](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#activity) |
+| Settings categories | [Settings](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#settings) | [Settings](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#settings) |
+| Connections and data | [Connections](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#settings/connections) · [Data](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site/#settings/data) | [Connections](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#settings/connections) · [Data](https://ecc-voyagewright-stage.kgamazing44.chatgpt.site/#settings/data) |
 
-The Voyagewright site-side mirror and Aetherwake canonical Site mirror matched the Command Core Git tree after excluding their Site manifests. The Voyagewright deployment completed first, then the canonical Aetherwake staging deployment. Both migrations applied. An isolated Voyagewright browser session saved compact density, reloaded and read it back, then restored the default.
+The [README screenshots](README.md) use synthetic records from the browser fixtures. The links above open the owner-private staging workspaces.
 
-## Verification and open acceptance
+## Acceptance evidence and limits
 
-- [CI for the Settings and diagnostics candidate](https://github.com/Kgray44/Engineering-Command-Core/actions/runs/44984516040) passed the shared Worker build, regression tests, and Linux Chromium workflows. The hosted owner-scoped database checks found all 12 expected schema objects, with zero findings across four Project integrity counters on each staging partition. Backup and hosted restore are unverified.
-- Browser fixture coverage includes Project creation, icon and accent selection, milestone creation and template suggestions, a linked Task, keyboard cancellation, pointer and keyboard reorder with reload, and mobile Settings and Merge discovery. PR inspection in the fixture reached the existing protected engine with the exact selected head.
-- Hosted source context resolved Project and Task associations for Aetherwake PR #356 and Voyagewright PR #899. Independent repository-scoped credentials for both staging applications remain necessary to qualify live PR detail and required-check data.
-- The follow-up adds in-Project execution controls, milestone ordering, an interactive prerequisite view, and version-fenced Task moves. The Task Workspace remains the route for full specification editing and evidence inspection. Settings exposes supported preferences and observations. Deployment policies remain managed by their original source owners.
-- The scroll test exercised mounted History and verified the settled blur behavior. In a controlled Windows Chrome trace, the translated scan grid reduced median page Paint events from 1,389 to 1,067 while preserving the effect. The intermittent horizontal bands still need a reproducible hosted case. See the [measurement method and results](docs/operations.md#scroll-rendering-measurement).
-- Production Phase 1B migration, protected integration acceptance, and owner acceptance are open. This staging work retained the live Observatory, database, connector, and worker assignments.
+| Area | Verified | Remaining evidence |
+|---|---|---|
+| Project library and customization | Browser fixtures create a Project, pick its icon and accent, edit its name and description, and reload. Pointer, touch across rows, keyboard movement and cancellation, and persisted ordering pass. Hosted browser verified keyboard persistence and peer Project rejection. | Owner walkthrough of visual quality and interaction on their viewport. |
+| Project workspace | Hosted readbacks covered dependencies, inline Task controls, artifacts, exact Task evidence navigation, acceptance, and milestone history. Latest readback showed one recorded attempt in Aetherwake and four in Voyagewright. Neither selected Project had a measured token receipt. Fixtures cover Task and milestone linking, eligible moves retaining identity, and a downloaded Task PDF. | Owner review of the end-to-end workspace and its evidence presentation. |
+| Merge | Hosted source context resolved linked Task and Project records. The exact inspector read live GitHub through signed-in GitHub CLI GET transport. Aetherwake #356 passed two required checks and remained a draft. Voyagewright #901 had base drift and a failed check on the selected SHA. A stale head returned no check evidence. The existing engine verified landed revisions for Aetherwake #355 and Voyagewright #902. Browser fixtures verify the read-only preview, exact approval fencing, and protected integration history. [Failed Voyagewright job](https://github.com/Kgray44/treasurehuntSoT/actions/runs/44982000641/job/137085220306) | The hosted Sites need the two repository-scoped read bindings to qualify live PR detail, checks, and job links end to end. Protected live merge and repair acceptance remains subject to authorization. |
+| Voyagewright and Aetherwake design | The 11 core Voyagewright colors match the current product token source. Authenticated browsers verified application isolation. Browser fixtures exercise both themes and mobile controls, including reduced motion and touch reorder. [Voyagewright product tokens](https://github.com/Kgray44/treasurehuntSoT/blob/main/src/styles/tokens.css) | Owner visual acceptance of both applications. |
+| Settings, activity, and health | Hosted settings save, reload, and reset passed in an isolated namespace. API and browser fixtures cover validation, category confirmation, audit, default behavior, sensitive-field exclusion, and peer scope. Both hosted data checks found all 12 expected schema objects and passed scoped integrity. Activity uses recorded Task, Project, CI, and worker observations. | Hosted database and file backup or restore remains unverified. Hosted GitHub health remains limited by the read bindings. |
+| Recovery | Current-schema SQLite drills restored both independent fixture partitions and proved Project order, milestone links, Task and attempt identities, and preference rollback. Restored copies rejected the peer application. | A consistent hosted export, authorized isolated restore, and record/file readback are still needed. A Sites version rollback restores code only. |
+| Performance and responsiveness | The Windows Chrome scroll trace reduced median Paint events from 1,389 to 1,067 and recorded zero unexpected layout shift in the measured sweeps. Fixtures exercise navigation, interaction, reduced motion, and responsive layout. [Trace method and results](docs/operations.md#scroll-rendering-measurement) | The intermittent blank bands still need a reproducible hosted case. The measured scroll trace covers that workload. A separate trace of dialogs and live updates remains open. |
+| Shared engine and production safety | Hosted origin and partition readbacks and browser scope checks passed. The production Observatory stayed on its existing build. This candidate uses one engine for both applications. | Production migration and worker/connector handoff remain in Phase 1B and require separate owner approval. [Phase 1B runbook](PHASE1B-SITES.md) |
+
+The deployed revision's CI passed 69 Observatory checks, 136 Sites checks, 12 journal checks, four Task and Merge browser workflows, and three Project and staging browser workflows. [Verification run for the deployed revision](https://github.com/Kgray44/Engineering-Command-Core/actions/runs/44988062875)
+
+## Owner decision and external inputs
+
+- Install `AETHERWAKE_GITHUB_READ_TOKEN` and `VOYAGEWRIGHT_GITHUB_READ_TOKEN` as independent repository-scoped secrets on the canonical [Aetherwake staging Site](https://ecc-aetherwake-stage.kgamazing44.chatgpt.site). Then verify PR detail and exact-head checks from both signed-in origins. Keep credential values in Sites. [Binding runbook](PHASE1B-SITES.md)
+- Obtain an authorized consistent hosted export and any applicable file inventory before rehearsing hosted recovery. Record the restore result and compare it with the source. [Recovery guide](docs/operations.md#troubleshooting-and-recovery)
+- Record the owner decision on [draft PR #2](https://github.com/Kgray44/Engineering-Command-Core/pull/2) after reviewing the staged workflows and remaining evidence. Keep the production cutover decision in [Phase 1B](PHASE1B-SITES.md).
+
+## Repository guides
+
+[README and quick start](README.md) · [Architecture and isolation](docs/architecture.md) · [Deployment, workers, and ChatGPT](docs/deployment.md) · [Project and Task guide](docs/engineering-workspaces.md) · [GitHub and merge integration](docs/integration.md) · [Settings and diagnostics](docs/settings.md) · [Testing and recovery](docs/operations.md)

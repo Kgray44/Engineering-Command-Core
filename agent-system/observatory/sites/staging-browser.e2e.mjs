@@ -68,13 +68,18 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.ok(gridLayer.keyframes.some(keyframe => keyframe.transform?.replaceAll(' ', '') === 'translate(58px,58px)'));
   assert.ok(gridLayer.keyframes.every(keyframe => !('backgroundPosition' in keyframe)));
   await page.getByRole('button', { name: 'New project', exact: true }).click();
-  await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
+  await page.getByLabel('Name', { exact: true }).fill('Synthetic browser draft');
   await page.getByLabel('Objective', { exact: true }).fill('Prove a Project owns its newly registered Tasks');
   await page.getByText('Project appearance', { exact: true }).click();
   await page.getByRole('searchbox', { name: 'Find a project icon' }).fill('rocket');
   await page.getByRole('button', { name: 'rocket', exact: true }).click();
   await page.getByLabel('Accent color').selectOption('violet');
   await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await page.getByRole('heading', { name: 'Synthetic browser draft', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
+  await page.getByLabel('Description', { exact: true }).fill('Description saved through the Project editor');
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   const projectHash = new URL(page.url()).hash;
   const sectionNav = page.getByRole('navigation', { name: 'Jump to Project section' });
@@ -91,6 +96,8 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.equal(await page.getByText('Project accepted', { exact: true }).count(), 0);
   await page.reload();
   await pendingReview.waitFor();
+  await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
+  await page.getByText('Description saved through the Project editor', { exact: true }).waitFor();
   await page.locator('#project-history').getByText('Owner review requested', { exact: true }).waitFor();
   const historyHeading = page.locator('#project-history h2');
   assert.equal(await historyHeading.count(), 1, 'Below-fold content mounts before scrolling');
