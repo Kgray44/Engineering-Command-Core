@@ -66,6 +66,11 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
     onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean),
       milestone_suggestions: milestone_suggestions.split('\n').map(value => value.trim()).filter(Boolean) });
   }}>
+    <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
+    <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
+    <details className="form-options">
+      <summary>Planning and template</summary>
+      <div className="form-options-body">
     {!project.id && <label>Project template
       <select defaultValue="" onChange={event => applyTemplate(event.target.value)}>
         <option value="">Blank project</option>
@@ -75,8 +80,6 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
         </optgroup>}
       </select>
     </label>}
-    <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
-    <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
     <div className="form-grid"><label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
     <label>Scope <textarea name="scope" value={draft.scope} onChange={editField} maxLength={16000}/></label></div>
     <div className="form-grid"><label>Acceptance requirements <textarea name="acceptance" value={draft.acceptance} onChange={editField} maxLength={16000}/></label>
@@ -84,7 +87,11 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
       <textarea name="milestone_suggestions" value={draft.milestone_suggestions} onChange={editField}
         placeholder="One milestone per line" rows={3} maxLength={1812}/>
     </label></div>
-    <ProjectAppearance project={project}/>
+      </div>
+    </details>
+    <details className="form-options">
+      <summary>Schedule and status</summary>
+      <div className="form-options-body">
     <div className="form-grid">
       <label>Start date <input type="date" name="start_date" defaultValue={project.start_date}/></label>
       <label>Target date <input type="date" name="target_date" defaultValue={project.target_date}/></label>
@@ -92,6 +99,9 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
       <label>Participants <input name="participants" defaultValue={project.participants?.join(', ')} placeholder="Comma-separated names"/></label>
       <label>Technical completion <select name="technical_state" defaultValue={project.technical_state ?? ''}><Options values={['', 'in_progress', 'verified', 'integrated', 'delivered']}/></select></label>
     </div>
+      </div>
+    </details>
+    <ProjectAppearance project={project}/>
     <button className="primary-button" disabled={busy}>{project.id ? 'Save project' : 'Create project'}</button>
   </form>;
 }

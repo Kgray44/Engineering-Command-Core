@@ -70,6 +70,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser draft');
   await page.getByLabel('Objective', { exact: true }).fill('Prove a Project owns its newly registered Tasks');
+  assert.equal(await page.locator('.project-definition-form').getByRole('textbox').count(), 2);
   await page.getByText('Project appearance', { exact: true }).click();
   await page.getByRole('searchbox', { name: 'Find a project icon' }).fill('rocket');
   await page.getByRole('button', { name: 'rocket', exact: true }).click();
@@ -78,6 +79,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('heading', { name: 'Synthetic browser draft', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
+  await page.getByText('Planning and template', { exact: true }).click();
   await page.getByLabel('Description', { exact: true }).fill('Description saved through the Project editor');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
@@ -90,11 +92,13 @@ test('Projects workspace performs live project and Task mutations through the sh
     await acceptanceSection.getByText(label, { exact: true }).waitFor();
   }
   await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.getByText('Schedule and status', { exact: true }).click();
   await page.locator('select[name="technical_state"]').selectOption('verified');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   const projectHistory = page.locator('#project-history');
   await projectHistory.getByText('Project verification recorded', { exact: true }).waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.getByText('Schedule and status', { exact: true }).click();
   await page.locator('select[name="technical_state"]').selectOption('delivered');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await projectHistory.getByText('Project delivery recorded', { exact: true }).waitFor();
@@ -202,6 +206,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Second synthetic project');
   await page.getByLabel('Objective', { exact: true }).fill('Prove order persistence across reloads');
+  await page.getByText('Planning and template', { exact: true }).click();
   const template = page.getByLabel('Project template');
   const scope = page.getByRole('textbox', { name: 'Scope', exact: true });
   const acceptance = page.getByLabel('Acceptance requirements');
@@ -666,6 +671,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await views.getByRole('button', { name: /Awaiting review/ }).getAttribute('aria-current'), 'page');
   assert.equal(await page.getByRole('combobox', { name: 'Sort', exact: true }).inputValue(), 'recent');
   await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await page.getByText('Planning and template', { exact: true }).click();
   await page.getByLabel('Project template').selectOption({ label: 'Qualification template' });
   assert.equal(await page.getByRole('textbox', { name: 'Scope', exact: true }).inputValue(), 'Check staging isolation');
   assert.equal(await page.getByLabel('Suggested milestones').inputValue(), 'Prepare fixture\nVerify receipt');

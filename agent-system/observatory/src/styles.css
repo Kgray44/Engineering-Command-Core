@@ -939,15 +939,6 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 .analytics-distribution > div { position: relative; padding-block-end: .75rem; }
 .analytics-distribution .workspace-meter { position: absolute; inset: auto 0 0; }
 .workspace-meter { display: block; }
-.task-intake-group {
-  display: grid;
-  gap: .8rem;
-  margin: 0;
-  padding: .75rem 1rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: .6rem;
-}
-.task-intake-group legend { padding-inline: .35rem; font-size: .875rem; color: var(--accent); }
 .github-status-breakdown {
   display: grid;
   grid-template-columns: repeat(auto-fit,minmax(min(100%,9rem),1fr));
@@ -970,3 +961,19 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 @media (min-width: 1360px) {
   .integration-workspace { grid-template-columns: minmax(0,1fr) minmax(15rem,17rem); }
 }
+
+:is(.task-intake,.project-definition-form,.task-editor-fields) .form-options {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: .6rem;
+}
+.form-options > summary {
+  padding: .65rem .8rem;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: .875rem;
+}
+.form-options-body { display: grid; gap: .85rem; padding: .3rem .8rem .85rem; min-width: 0; }
+.form-options :is(input,textarea,select) { min-width: 0; }
+.project-definition-form > label > textarea { min-block-size: 5.5rem; }

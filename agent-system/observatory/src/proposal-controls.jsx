@@ -148,17 +148,27 @@ export function ProposalControls({ task, control, tasks, classes, headers, readF
           : 'Changes apply when the worker next claims this Task.'}</p>}
         <label>Task title <input name="title" defaultValue={stored.title} required minLength={4} maxLength={160}/></label>
         <label>Objective <textarea name="objective" defaultValue={stored.objective} required/></label>
-        <div className="form-grid">
+        <label>Acceptance criteria, one per line
+          <textarea name="criteria" defaultValue={stored.acceptance.criteria.map(criterion => criterion.description).join('\n')} required/>
+        </label>
+        <details className="form-options">
+          <summary>Execution options</summary>
+          <div className="form-options-body">
+            <div className="form-grid">
           <label>Category <select name="primary" defaultValue={stored.classification.primary}>{classes.map(value => <option key={value}>{value}</option>)}</select></label>
           <label>Priority <select name="priority" defaultValue={snapshot.priority}>{['low', 'normal', 'high', 'urgent'].map(value => <option key={value}>{value}</option>)}</select></label>
         </div>
         <label>Prerequisite Task IDs <input name="dependencies" readOnly={Boolean(control.lifecycle?.executor)} defaultValue={stored.prerequisites.task_ids.join(', ')}/></label>
         <label>Required capabilities <input name="capabilities" readOnly={Boolean(control.lifecycle?.executor)} defaultValue={stored.prerequisites.capabilities.join(', ')}/></label>
-        <TaskScopeFields task={stored} checks={checks}/>
         <label>Verification profile <input name="profile_id" defaultValue={stored.acceptance.profile_id} required/></label>
-        <label>Acceptance criteria, one per line
-          <textarea name="criteria" defaultValue={stored.acceptance.criteria.map(criterion => criterion.description).join('\n')} required/>
-        </label>
+          </div>
+        </details>
+        <details className="form-options">
+          <summary>Inputs and deliverables</summary>
+          <div className="form-options-body">
+        <TaskScopeFields task={stored} checks={checks}/>
+          </div>
+        </details>
       </fieldset>
       <section className="task-editor-admission" aria-label="Task admission">
         <h3>Task admission</h3>

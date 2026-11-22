@@ -168,8 +168,10 @@ test('keyboard, reduced motion, versioned edits, dependency admission and reload
   await page.getByRole('button', { name: 'Create proposal' }).click();
   await page.getByLabel('Task title').fill(taskTitle);
   await page.getByLabel('Tangible objective').fill('Exercise persisted creation and editing against the isolated Worker.');
+  await page.getByText('Execution options',{exact:true}).click();
   await page.getByLabel('Prerequisite task IDs').fill('unknown-prerequisite');
   await page.getByLabel('Acceptance criteria').fill('Reload the editor and check the saved title.');
+  await page.getByText('Inputs and deliverables',{exact:true}).click();
   await page.getByLabel('Requirements',{exact:false}).fill('document | https://example.test/design');
   await page.getByLabel('Input artifacts').fill('private-artifact:current-output');
   await page.getByLabel('Planned deliverables').fill('Verified implementation and a summary');
@@ -184,7 +186,9 @@ test('keyboard, reduced motion, versioned edits, dependency admission and reload
   assert.equal(await editor.getByRole('button', { name: 'Save proposal' }).isDisabled(), true);
   await editor.getByLabel('Prerequisite Task IDs').fill('unknown-prerequisite');
   await editor.getByLabel('Task title').fill(editTitle);
+  await editor.getByText('Execution options',{exact:true}).click();
   await editor.getByLabel('Priority').selectOption('urgent');
+  await editor.getByText('Inputs and deliverables',{exact:true}).click();
   await editor.getByLabel('Planned deliverables').fill('Implementation PR with checked output');
   await editor.getByRole('button', { name: 'Save proposal' }).click();
   await page.getByText('Proposal saved.', { exact: true }).waitFor();
@@ -327,9 +331,11 @@ test('owner schedules an engine Task, observes blockers and controls the queue',
   await page.getByRole('button', { name: 'Create proposal' }).click();
   await page.getByLabel('Task title').fill('Canonical schedule verification');
   await page.getByLabel('Tangible objective').fill('Use the existing engine API to register, schedule and control a genuine isolated Task.');
+  await page.getByText('Execution options',{exact:true}).click();
   await page.getByLabel('Prerequisite task IDs').fill(prerequisite.task.id);
   await page.getByLabel('Required capabilities').fill('Scoped verification workspace');
   await page.getByLabel('Acceptance criteria').fill('Observe the canonical schedule and audit receipts.');
+  await page.getByText('Inputs and deliverables',{exact:true}).click();
   await page.getByLabel('Input artifacts').fill('private-artifact:scope-input');
   await page.getByLabel('Planned deliverables').fill('Schedule verification receipt');
   await page.getByRole('button', { name: 'Create Task', exact: true }).click();
