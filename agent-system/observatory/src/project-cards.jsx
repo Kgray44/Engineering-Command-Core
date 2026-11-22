@@ -4,7 +4,7 @@ import { SortableContext, rectSortingStrategy, useSortable } from '@dnd-kit/sort
 import { CSS } from '@dnd-kit/utilities';
 import { motion, useReducedMotion } from 'motion/react';
 import { Activity, Boxes, ChevronRight, Code, Flag, FlaskConical, GitBranch, Grip, Map, Milestone, Rocket, Search, Shield, Target, Wrench } from 'lucide-react';
-import { projectAccents, projectIconGroups } from './project-presentation.mjs';
+import { projectAccents, projectReviewLabels, projectIconGroups } from './project-presentation.mjs';
 
 const icons = {
   activity: Activity, boxes: Boxes, code: Code, flag: Flag, flask: FlaskConical, 'git-branch': GitBranch,
@@ -61,7 +61,8 @@ function Card({ item, Status, sortable, keyboard }) {
       {item.description && <span className="project-card-description">{item.description}</span>}
       <span className="project-card-status"><Status value={item.status}/><small>{item.priority} priority</small></span>
       {progress && <small className="project-card-progress">{progress.tasks.completed}/{progress.tasks.total} Tasks complete · {progress.tasks.active} running · {progress.tasks.blocked} blocked · {progress.milestones.accepted}/{progress.milestones.total} milestones accepted</small>}
-      {item.owner_review === 'pending' && <small>Owner review pending</small>}
+      {item.owner_review && Object.hasOwn(projectReviewLabels, item.owner_review) &&
+        <small>{projectReviewLabels[item.owner_review]}</small>}
       {item.latest_activity && <small className="project-card-activity">
         <span>{item.latest_activity.label}</span> · <time dateTime={item.latest_activity.at}>{new Date(item.latest_activity.at).toLocaleDateString()}</time>
       </small>}

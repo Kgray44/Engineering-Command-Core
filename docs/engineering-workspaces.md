@@ -4,7 +4,7 @@ Open **Projects** and choose **New project**. Give it a name and objective. Open
 
 In **Current Projects**, use **Manual order** with search, State, and Group cleared. Drag the handle with a pointer or use Space, the arrow keys, and Space again. Escape cancels. Touch users can press and hold the handle before moving the card. Sorting and filtering leave the manual order intact. Before the first save, manual order starts with the newest Projects by creation date. Once the server records an order, newly created Projects appear after saved cards until rearranged. On a conflict the Library reloads current state so you can make the change again.
 
-Each card shows a recent recorded change from the Project or its linked work. Choose **Recently active** to sort by those timestamps. Choose the starting view and sort in **Settings → Projects**. Switch to **Current Projects** and **Manual order** when you want to change card positions.
+Each card shows a recent recorded change from the Project or its linked work. It also shows whether the owner review is pending, accepted, or declined when a decision is recorded. Choose **Recently active** to sort by those timestamps. Choose the starting view and sort in **Settings → Projects**. Switch to **Current Projects** and **Manual order** when you want to change card positions.
 
 Open a card to inspect the Project. Jump links lead to task, milestone, dependency, GitHub, artifact, telemetry, and history sections. Edit metadata or change the Project state from the overview. Archiving preserves identity and history.
 

@@ -99,6 +99,20 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   await page.getByText('Description saved through the Project editor', { exact: true }).waitFor();
   await page.locator('#project-history').getByText('Owner review requested', { exact: true }).waitFor();
+  const projectCard = page.locator('.project-card').filter({ hasText: 'Synthetic browser project' });
+  await page.goto(stage.origin + '/#projects');
+  await projectCard.getByText('Awaiting owner review', { exact: true }).waitFor();
+  for (const [decision, reviewLabel] of [['accepted', 'Accepted by owner'], ['declined', 'Declined by owner']]) {
+    await page.goto(stage.origin + '/' + projectHash);
+    await acceptanceSection.getByRole('combobox', { name: 'Review decision' }).selectOption(decision);
+    await acceptanceSection.getByRole('button', { name: 'Save owner review' }).click();
+    await acceptanceSection.locator('strong').getByText(reviewLabel, { exact: true }).waitFor();
+    await page.goto(stage.origin + '/#projects');
+    await page.reload();
+    await projectCard.getByText(reviewLabel, { exact: true }).waitFor();
+  }
+  await page.goto(stage.origin + '/' + projectHash);
+  await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   const historyHeading = page.locator('#project-history h2');
   assert.equal(await historyHeading.count(), 1, 'Below-fold content mounts before scrolling');
   const projectRequests = [];

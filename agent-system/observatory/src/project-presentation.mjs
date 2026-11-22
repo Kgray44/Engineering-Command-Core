@@ -7,6 +7,13 @@ export const projectIconGroups = {
 
 export const projectAccents = ['default', 'blue', 'violet', 'green', 'amber', 'rose'];
 
+export const projectReviewLabels = {
+  '': 'No decision recorded',
+  pending: 'Awaiting owner review',
+  accepted: 'Accepted by owner',
+  declined: 'Declined by owner',
+};
+
 export function orderBySavedIds(projects, savedIds) {
   const byId = new Map(projects.map(project => [project.id, project]));
   const ordered = [];

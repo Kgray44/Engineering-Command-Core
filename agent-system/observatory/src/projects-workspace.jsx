@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { ProjectAppearance, ProjectCardGrid, ProjectIcon } from './project-cards.jsx';
-import { orderBySavedIds } from './project-presentation.mjs';
+import { orderBySavedIds, projectReviewLabels } from './project-presentation.mjs';
 import { projectTemplates } from './project-templates.mjs';
 import { ProjectDependencies } from './project-dependencies.jsx';
 import { ProjectTaskControls } from './project-task-controls.jsx';
@@ -16,7 +16,6 @@ import { preferenceFields } from './workspace-preferences.mjs';
 const stages = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
 const milestoneStages = ['planned', 'verified', 'integrated', 'accepted'];
-const reviewDecisions = { '': 'No decision recorded', pending: 'Awaiting owner review', accepted: 'Accepted by owner', declined: 'Declined by owner' };
 const number = value => value === null || value === undefined ? 'Unavailable' : value.toLocaleString();
 const object = form => Object.fromEntries(new FormData(form));
 
@@ -163,9 +162,9 @@ function MilestoneEvidence({ milestone, tasks, links, dependents, history, Statu
 
 function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSave, Panel, DetailLine }) {
   const completed = tasks.filter(task => task.candidate_revision);
-  const decisions = Object.entries(reviewDecisions);
+  const decisions = Object.entries(projectReviewLabels);
   const currentReview = project.owner_review ?? '';
-  if (!Object.hasOwn(reviewDecisions, currentReview)) decisions.push([currentReview, currentReview]);
+  if (!Object.hasOwn(projectReviewLabels, currentReview)) decisions.push([currentReview, currentReview]);
   return <Panel id="project-acceptance" title="Acceptance">
     <h3>Acceptance requirements</h3>
     <p className="objective">{project.acceptance || 'No requirements recorded.'}</p>
@@ -174,7 +173,7 @@ function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSav
     <DetailLine name="PR checks" value={integrations.some(run => run.required_checks?.length) ? 'Recorded checks by candidate below' : 'No exact-revision check evidence recorded'}/>
     <DetailLine name="PR merged" value={progress.integrations.merged + ' of ' + progress.integrations.tracked + ' recorded integrations'}/>
     <DetailLine name="Functionality delivered" value={progress.integrations.deployed + ' recorded deployments'}/>
-    <DetailLine name="Owner review" value={Object.hasOwn(reviewDecisions, currentReview) ? reviewDecisions[currentReview] : currentReview}/>
+    <DetailLine name="Owner review" value={Object.hasOwn(projectReviewLabels, currentReview) ? projectReviewLabels[currentReview] : currentReview}/>
     {completed.length > 0 && <details>
       <summary>Completed Task candidates</summary>
       <ul className="project-list">{completed.map(task => <li key={task.id}>
