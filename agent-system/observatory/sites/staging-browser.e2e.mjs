@@ -386,6 +386,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await dataChecks.getByText('12 expected objects found').waitFor();
   await dataChecks.getByText('Passed', { exact: true }).waitFor();
   await dataChecks.getByText('Unverified by this Site').waitFor();
+  await dataChecks.getByText('Restores code only', { exact: true }).waitFor();
   await page.goto(stage.origin + '/#activity');
   await page.getByRole('heading', { name: 'Activity and attention' }).waitFor();
   const panel = name => page.locator('section.panel').filter({ has: page.getByRole('heading', { name, exact: true }) });

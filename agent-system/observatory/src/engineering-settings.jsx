@@ -94,6 +94,10 @@ function DataChecks({ headers, revision }) {
   return <section aria-label="Data checks">
     <h3>Data checks</h3>
     <p>Check schema objects and Project relationships in this application and the current owner namespace.</p>
+    <Facts rows={[
+      ['Sites version rollback', 'Restores code only'],
+      ['Database and file recovery', 'Requires a separately verified export and restore'],
+    ]}/>
     <button type="button" className="quiet-button" onClick={runChecks} disabled={Boolean(request)}>
       {request ? 'Checking data…' : 'Run scoped data checks'}
     </button>

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { backup, DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { startStage } from './staging-fixture.mjs';
 import { applyMigrations, openPartition } from './sqlite-runtime.mjs';
@@ -119,4 +120,91 @@ test('an isolated checkpoint import preserves canonical rows, replays idempotent
   await rm(options.destination);
   assert.equal((await stageSnapshot(options)).replayed, false);
   assert.deepEqual(await readFile(file('source')), before);
+});
+
+test('current application partitions restore from independent SQLite checkpoints with their relationships intact', async t => {
+  const file = await files(t);
+  for (const applicationId of ['aetherwake', 'voyagewright']) {
+    const applicationRepository = 'synthetic/' + applicationId;
+    const source = openPartition(file(applicationId + '-source'));
+    applyMigrations(source.sqlite);
+    source.sqlite.prepare('INSERT INTO application_partition VALUES (1, ?, ?, ?)').run(applicationId, applicationRepository, 'engineering');
+    const stage = await startStage(source, { applicationId, applicationRepository });
+    const projectId = crypto.randomUUID();
+    const secondProject = crypto.randomUUID();
+    const milestoneId = crypto.randomUUID();
+    let taskId, attemptId, inventory;
+    const schema = db => db.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
+    const contents = db => Object.fromEntries(schema(db).filter(item => item.type === 'table')
+      .map(({ name }) => [name, db.prepare('SELECT * FROM "' + name.replaceAll('"', '""') + '" ORDER BY rowid').all()]));
+    try {
+      for (const id of [projectId, secondProject]) {
+        assert.equal((await stage.run('/api/projects', { op: 'create', id, fields: {
+          name: 'Synthetic recovery Project', objective: 'Verify the checkpoint preserves Project records',
+        } })).status, 201);
+      }
+      const order = [secondProject, projectId];
+      assert.equal((await stage.run('/api/projects', { op: 'reorder', project_ids: order, expected_version: 0 })).status, 200);
+      const task = await stage.run('/api/projects', { op: 'register_task', id: projectId, operation_id: crypto.randomUUID(), fields });
+      assert.equal(task.status, 201);
+      taskId = task.body.task.id;
+      assert.equal((await stage.run('/api/projects', { op: 'milestone', id: projectId, milestone_id: milestoneId,
+        name: 'Recovery evidence', acceptance: 'Record stable identifiers', status: 'planned' })).status, 201);
+      assert.equal((await stage.run('/api/projects', { op: 'milestone_link', id: projectId, task_id: taskId, milestone_id: milestoneId })).status, 200);
+      assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId, expected_version: task.body.version,
+        operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+      const claim = (await stage.run('/mcp', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+        name: 'task_engine_v1', arguments: { worker_key: workerKey, application_id: applicationId,
+          request: { op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() } },
+      } })).body.result.structuredContent.claim;
+      attemptId = claim.attempt.id;
+      assert.equal((await stage.run('/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+        name: 'task_engine_v1', arguments: { worker_key: workerKey, application_id: applicationId,
+          request: { op: 'report', task_id: taskId, attempt_id: attemptId, lease: claim.lease,
+            operation_id: crypto.randomUUID(), report: { type: 'failed', failure: 'Synthetic result before backup' } } },
+      } })).body.result.structuredContent.status, 200);
+      assert.equal((await stage.run('/api/settings', { op: 'save', expected_version: 0, values: { density: 'compact' } })).status, 200);
+      inventory = { schema: schema(source.sqlite), contents: contents(source.sqlite) };
+      await backup(source.sqlite, file(applicationId + '-checkpoint'));
+      assert.equal((await stage.run('/api/settings', { op: 'save', expected_version: 1, values: { density: 'comfortable' } })).status, 200);
+      assert.equal((await stage.run('/api/settings')).body.preferences.values.density, 'comfortable');
+    } finally {
+      await stage.close();
+      source.sqlite.close();
+    }
+    const checkpoint = new DatabaseSync(file(applicationId + '-checkpoint'), { readOnly: true });
+    try {
+      await backup(checkpoint, file(applicationId + '-restore'));
+    } finally {
+      checkpoint.close();
+    }
+    const restored = openPartition(file(applicationId + '-restore'));
+    const recovered = await startStage(restored, { applicationId, applicationRepository });
+    try {
+      assert.deepEqual(schema(restored.sqlite), inventory.schema);
+      assert.deepEqual(contents(restored.sqlite), inventory.contents);
+      assert.equal(restored.sqlite.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+      assert.deepEqual(restored.sqlite.prepare('PRAGMA foreign_key_check').all(), []);
+      const project = (await recovered.run('/api/projects/' + projectId)).body;
+      assert.equal(project.project.application_id, applicationId);
+      assert.equal(project.tasks[0].id, taskId);
+      assert.deepEqual(project.task_milestones, [{ task_id: taskId, milestone_id: milestoneId }]);
+      assert.deepEqual((await recovered.run('/api/projects')).body.manual_order.project_ids, [secondProject, projectId]);
+      const task = (await recovered.run('/api/task-engine/v1', { op: 'get', task_id: taskId })).body;
+      assert.equal(task.attempts[0].id, attemptId);
+      assert.equal(task.lifecycle.state, 'failed');
+      assert.equal((await recovered.run('/api/settings')).body.preferences.values.density, 'compact');
+      assert.equal((await recovered.run('/api/settings/data')).body.integrity.status, 'passed');
+      const peerId = applicationId === 'aetherwake' ? 'voyagewright' : 'aetherwake';
+      const mismatched = await startStage(restored, { applicationId: peerId, applicationRepository: 'synthetic/' + peerId });
+      try {
+        assert.equal((await mismatched.run('/api/projects')).status, 503);
+      } finally {
+        await mismatched.close();
+      }
+    } finally {
+      await recovered.close();
+      restored.sqlite.close();
+    }
+  }
 });
