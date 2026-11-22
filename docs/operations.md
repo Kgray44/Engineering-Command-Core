@@ -79,3 +79,12 @@ If a workspace section cannot load after a release, use **Reload page** to reope
 Run `node --test --test-name-pattern "current application partitions" sites/staging.test.mjs` from the Observatory package. The test creates independently identified Aetherwake and Voyagewright fixture partitions, checkpoints each current schema with SQLite's backup API, advances the source settings, and restores the checkpoint into a separate file. It compares schema definitions and table contents, runs integrity and foreign-key checks, and reads back Project order, milestone links, the Task and attempt IDs, and the pre-checkpoint Settings. Serving a restored partition under the peer application must fail. The legacy import test separately checks the dispatch fence for copied in-flight leases.
 
 Sites version rollback restores code only. The database inspection tools provide bounded views. A hosted recovery drill requires a consistent data export and any applicable file inventory from authorized custody, restoration into an isolated target, and verified record and file readback. Hosted backup, restore, and retention remain unverified. [Sites versions and saved data](https://help.openai.com/en/articles/20001339-creating-and-using-chatgpt-sites)
+
+After an authorized operator obtains a consistent current-schema checkpoint and restores it to a separate target, retain two standalone SQLite files in private custody. Run the verifier from the Observatory package at the source deployment revision. Use the source application, repository, and portfolio explicitly.
+
+```text
+node sites/verify-restore.mjs SOURCE.sqlite RESTORED.sqlite aetherwake Kgray44/Aetherwake engineering
+node sites/verify-restore.mjs SOURCE.sqlite RESTORED.sqlite voyagewright Kgray44/treasurehuntSoT engineering
+```
+
+The verifier opens both files read-only. It checks application identity, current schema objects, exact schema equality, SQLite integrity, foreign keys, and every table's typed rows, including any migration journal present in the checkpoint. The receipt contains counts and a digest instead of row payloads. Keep that receipt in private custody. Preserve the provider's export and migration receipts, check the file inventory and digests separately where applicable, and read restored identities through the isolated application before recording acceptance.

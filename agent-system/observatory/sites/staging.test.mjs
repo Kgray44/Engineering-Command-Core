@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, rmdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { backup, DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { startStage } from './staging-fixture.mjs';
 import { applyMigrations, openPartition } from './sqlite-runtime.mjs';
 import { stageSnapshot } from './stage-snapshot.mjs';
 import { taskOperation } from './task-engine.mjs';
+import { verifyRestore } from './verify-restore.mjs';
 
 const owner = 'synthetic-staging-owner';
 const workerKey = 'w'.repeat(64);
@@ -135,8 +138,11 @@ test('current application partitions restore from independent SQLite checkpoints
     const milestoneId = crypto.randomUUID();
     let taskId, attemptId, inventory;
     const schema = db => db.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all();
-    const contents = db => Object.fromEntries(schema(db).filter(item => item.type === 'table')
-      .map(({ name }) => [name, db.prepare('SELECT * FROM "' + name.replaceAll('"', '""') + '" ORDER BY rowid').all()]));
+    const contents = db => Object.fromEntries(schema(db).filter(item => item.type === 'table').map(({ name }) => {
+      const statement = db.prepare('SELECT * FROM "' + name.replaceAll('"', '""') + '" ORDER BY rowid');
+      statement.setReadBigInts(true);
+      return [name, statement.all()];
+    }));
     try {
       for (const id of [projectId, secondProject]) {
         assert.equal((await stage.run('/api/projects', { op: 'create', id, fields: {
@@ -164,6 +170,7 @@ test('current application partitions restore from independent SQLite checkpoints
             operation_id: crypto.randomUUID(), report: { type: 'failed', failure: 'Synthetic result before backup' } } },
       } })).body.result.structuredContent.status, 200);
       assert.equal((await stage.run('/api/settings', { op: 'save', expected_version: 0, values: { density: 'compact' } })).status, 200);
+      source.sqlite.exec("CREATE TABLE recovery_probe (value); INSERT INTO recovery_probe VALUES (9223372036854775807), (X'00FF'), ('private fixture value'), (NULL)");
       inventory = { schema: schema(source.sqlite), contents: contents(source.sqlite) };
       await backup(source.sqlite, file(applicationId + '-checkpoint'));
       assert.equal((await stage.run('/api/settings', { op: 'save', expected_version: 1, values: { density: 'comfortable' } })).status, 200);
@@ -178,6 +185,22 @@ test('current application partitions restore from independent SQLite checkpoints
     } finally {
       checkpoint.close();
     }
+    const expected = { application: applicationId, repository: applicationRepository, portfolio: 'engineering' };
+    const checkpointFile = file(applicationId + '-checkpoint');
+    const restoredFile = file(applicationId + '-restore');
+    const receipt = verifyRestore(checkpointFile, restoredFile, expected);
+    assert.equal(receipt.application, applicationId);
+    assert.match(receipt.digest, /^[0-9a-f]{64}$/);
+    assert.equal(receipt.tables.proposals, 1);
+    assert.equal(receipt.tables.project_task_milestones, 1);
+    assert.equal(receipt.tables.recovery_probe, 4);
+    assert.doesNotMatch(JSON.stringify(receipt), /private fixture value/);
+    const verifier = fileURLToPath(new URL('./verify-restore.mjs', import.meta.url));
+    assert.deepEqual(JSON.parse(execFileSync(process.execPath, [verifier, checkpointFile, restoredFile,
+      expected.application, expected.repository, expected.portfolio], { encoding: 'utf8' })), receipt);
+    assert.throws(() => verifyRestore(checkpointFile, file(applicationId + '-source'), expected), /workspace_preference_events/);
+    assert.throws(() => verifyRestore(checkpointFile, restoredFile, { ...expected, application: 'peer' }), /identity/);
+    assert.throws(() => verifyRestore(checkpointFile, checkpointFile, expected), /separate files/);
     const restored = openPartition(file(applicationId + '-restore'));
     const recovered = await startStage(restored, { applicationId, applicationRepository });
     try {
@@ -195,6 +218,12 @@ test('current application partitions restore from independent SQLite checkpoints
       assert.equal(task.lifecycle.state, 'failed');
       assert.equal((await recovered.run('/api/settings')).body.preferences.values.density, 'compact');
       assert.equal((await recovered.run('/api/settings/data')).body.integrity.status, 'passed');
+      restored.sqlite.exec("DELETE FROM recovery_probe; INSERT INTO recovery_probe VALUES (NULL), ('private fixture value'), (X'00FF'), (9223372036854775807)");
+      assert.equal(verifyRestore(checkpointFile, restoredFile, expected).digest, receipt.digest);
+      restored.sqlite.exec('UPDATE recovery_probe SET value = 9223372036854775806 WHERE typeof(value) = \'integer\'');
+      assert.throws(() => verifyRestore(checkpointFile, restoredFile, expected), /recovery_probe/);
+      restored.sqlite.exec('CREATE INDEX recovery_probe_value ON recovery_probe (value)');
+      assert.throws(() => verifyRestore(checkpointFile, restoredFile, expected), /schema differs/);
       const peerId = applicationId === 'aetherwake' ? 'voyagewright' : 'aetherwake';
       const mismatched = await startStage(restored, { applicationId: peerId, applicationRepository: 'synthetic/' + peerId });
       try {
