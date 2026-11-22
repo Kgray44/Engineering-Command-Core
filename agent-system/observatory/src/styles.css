@@ -765,3 +765,14 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
     padding-inline-end: .75rem;
   }
 }
+
+.project-definition-form {
+  max-inline-size: 68rem;
+  padding-block: .25rem 1rem;
+}
+.project-definition-form > .primary-button { justify-self: start; }
+.project-definition-form .form-grid textarea { block-size: 100%; }
+
+@media (min-width: 801px) {
+  .task-detail-toolbar .primary-button { margin-inline-start: auto; }
+}

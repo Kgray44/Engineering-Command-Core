@@ -199,14 +199,14 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
         if (mode === 'task') act({ op: 'start', task_id: fields.get('task'), repair_limit });
         else if (reviewedHead) act({ op: 'start', pr_number: pull, head_sha: reviewedHead, repair_limit });
       }}>
-        {mode === 'task' ? <label>Accepted Task<select name="task" required defaultValue={initialTask ?? ''}>
-          <option value="">Select a Task</option>
+        {mode === 'task' ? <label>Accepted Task<select name="task" required disabled={!acceptedTasks.length} defaultValue={initialTask ?? ''}>
+          <option value="">{acceptedTasks.length ? 'Select a Task' : 'No accepted Tasks available'}</option>
           {acceptedTasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
         </select></label> : null}
         <label>Integration repair limit<select name="repair_limit" value={repairLimit ?? preferences.merge_repair_limit} onChange={event => setRepairLimit(event.target.value)}>
           {[1, 2, 3, 4, 5].map(limit => <option key={limit} value={limit}>{limit}</option>)}
         </select></label>
-        <button className="primary-button" disabled={busy || loading || (mode === 'pr' && !reviewedHead)}>Inspect source</button>
+        <button className="primary-button" disabled={busy || loading || (mode === 'pr' ? !reviewedHead : !acceptedTasks.length)}>Inspect source</button>
       </form>
     </section>
     <section className="panel integration-runs" aria-labelledby="integration-runs-title">
