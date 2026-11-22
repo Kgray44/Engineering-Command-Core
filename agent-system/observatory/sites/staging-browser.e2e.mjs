@@ -529,6 +529,20 @@ test('an open Project reflects a remote Task claim without a manual refresh or p
   assert.equal(claim.task.id, taskId);
   await tasks.locator('.status-running').waitFor({ timeout: 12_000 });
   assert.equal(portfolioReads, 0);
+  const pulse = (await stage.run('/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+    name: 'task_engine_v1', arguments: { worker_key: 'w'.repeat(64), application_id: 'aetherwake',
+      request: { op: 'report', task_id: taskId, attempt_id: claim.attempt.id, lease: claim.lease,
+        operation_id: crypto.randomUUID(), report: { type: 'heartbeat' } } },
+  } })).body.result.structuredContent;
+  assert.equal(pulse.status, 200);
+  await page.reload();
+  const history = page.locator('#project-history');
+  await history.getByText('claim', { exact: true }).waitFor();
+  assert.equal(await history.getByText('heartbeat', { exact: true }).count(), 0);
+  await history.getByRole('button', { name: 'Show worker heartbeats' }).click();
+  await history.getByText('heartbeat', { exact: true }).waitFor();
+  await history.getByRole('button', { name: 'Hide worker heartbeats' }).click();
+  assert.equal(await history.getByText('heartbeat', { exact: true }).count(), 0);
 });
 
 test('touch reorders Project cards across mobile grid rows and reloads the order', { timeout: 60_000 }, async t => {

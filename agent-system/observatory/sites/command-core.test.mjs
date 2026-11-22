@@ -254,6 +254,18 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   assert.equal(claim.body.result.structuredContent.claim.task.id, task_id);
   assert.equal((await read()).active_workers, 1);
   assert.equal((await call(0, '/api/projects/' + dependencyId)).body.active_workers, 0);
+  const insertHeartbeat = one.sqlite.prepare("INSERT INTO task_engine_events VALUES (?, 'live', ?, ?, ?, ?)");
+  for (let index = 0; index < 125; index++) {
+    const eventId = crypto.randomUUID();
+    insertHeartbeat.run('synthetic-owner', task_id, 1000 + index, eventId, JSON.stringify({
+      kind: 'heartbeat', at: new Date(Date.now() + 1000 + index).toISOString(), state: 'running',
+    }));
+  }
+  const afterPulses = await read();
+  assert.ok(afterPulses.history.some(event => event.kind === 'claim' && event.task_id === task_id));
+  assert.equal(afterPulses.history.filter(event => event.kind === 'heartbeat').length, 40);
+  assert.equal(afterPulses.heartbeat_history_truncated, true);
+  assert.equal(afterPulses.execution_history_truncated, false);
 });
 
 test('explicit proposal writes carry only the owning repository and its publication credential', async t => {

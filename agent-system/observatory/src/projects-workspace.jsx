@@ -240,6 +240,7 @@ const projectHref = id => '#projects/' + id;
 const shortDate = value => value ? new Date(value).toLocaleDateString() : 'Unavailable';
 const historyLabel = item => item.name ?? (item.source === 'integration' && item.kind === 'start'
   ? 'Integration started' : item.kind.replaceAll('_', ' '));
+const workerHeartbeat = item => item.source === 'task' && item.kind === 'heartbeat';
 
 function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaultSort, defaultView, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
   const interaction = useCardMotion(true);
@@ -326,6 +327,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
   const [taskState, setTaskState] = useState('');
   const [taskSort, setTaskSort] = useState(null);
   const [unassignedTaskId, setUnassignedTaskId] = useState('');
+  const [showHeartbeats, setShowHeartbeats] = useState(false);
   const [moveTaskId, setMoveTaskId] = useState('');
   const [controlTaskId, setControlTaskId] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
@@ -402,7 +404,9 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
   const controlTask = tasks.find(item => item.id === controlTaskId);
   const nextTask = tasks.find(item => item.state === 'ready');
   const blockedTasks = tasks.filter(item => item.blockers.length > 0);
-  const lastChange = history.at(-1);
+  const lastChange = history.findLast(item => !workerHeartbeat(item));
+  const heartbeatCount = history.filter(workerHeartbeat).length;
+  const shownHistory = showHeartbeats ? history : history.filter(item => !workerHeartbeat(item));
   const targetProjects = (taskList.projects ?? []).filter(item => item.id !== projectId && item.status !== 'archived');
   const moveMilestone = (index, offset) => submit({ op: 'reorder_milestones', expected_version: project.version,
     milestone_ids: arrayMove(milestones.map(item => item.id), index, index + offset) });
@@ -631,8 +635,11 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </dl>
       </Panel>
       <Panel id="project-history" title="History">
-        {data.execution_history_truncated && <p className="low">Showing the latest 120 Task and integration events. Open the source records for earlier activity.</p>}
-        <ol className="project-list">{history.toReversed().map(item => <li key={[
+        {!!heartbeatCount && <button type="button" className="quiet-button" aria-pressed={showHeartbeats}
+          onClick={() => setShowHeartbeats(value => !value)}>{showHeartbeats ? 'Hide worker heartbeats' : 'Show worker heartbeats'}</button>}
+        {data.execution_history_truncated && <p className="low">Showing the latest 120 Task and integration changes. Open the source records for earlier activity.</p>}
+        {showHeartbeats && data.heartbeat_history_truncated && <p className="low">Showing the latest {heartbeatCount} worker heartbeats. Open the Task for its full receipt history.</p>}
+        <ol className="project-list">{shownHistory.toReversed().map(item => <li key={[
           item.source, item.integration_id, item.task_id, item.milestone_id, item.kind, item.event_id ?? item.version,
         ].join(':')}>
           <span>{historyLabel(item)}</span>

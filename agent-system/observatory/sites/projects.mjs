@@ -14,6 +14,7 @@ const reviewHistoryLabels = {
   pending: 'Owner review requested', accepted: 'Owner accepted Project', declined: 'Owner declined Project', '': 'Owner review cleared',
 };
 const executionHistoryLimit = 120;
+const heartbeatHistoryLimit = 40;
 const projectTaskActivity = {
   register: 'Task registered', admit: 'Task admitted', claim: 'Task claimed', finished: 'Candidate reported',
   failed: 'Task attempt failed', accept: 'Task accepted', reject: 'Task returned for changes',
@@ -72,17 +73,23 @@ const executionHistoryQuery = `
     FROM integration_runs r JOIN integration_events e ON e.owner_id = r.owner_id
       AND e.namespace = r.namespace AND e.integration_id = r.id
     WHERE r.owner_id = ?1 AND r.namespace = ?2 AND r.task_id IN (SELECT task_id FROM membership)
+  ), scoped AS (
+    SELECT r.source, r.task_id, r.version, r.integration_id, json_extract(r.event, '$.at') AS occurred_at,
+      json_extract(r.event, '$.kind') AS kind, json_extract(r.event, '$.state') AS status,
+      json_extract(r.event, '$.pr_number') AS pr_number, json_extract(t.record, '$.title') AS task_title
+    FROM receipts r JOIN proposals t ON t.owner_id = ?1 AND t.namespace = ?2 AND t.task_id = r.task_id
+    WHERE EXISTS (SELECT 1 FROM membership m WHERE m.task_id = r.task_id
+      AND json_extract(r.event, '$.at') >= m.occurred_at
+      AND (m.ends_at IS NULL OR json_extract(r.event, '$.at') < m.ends_at))
+      AND json_extract(r.event, '$.kind') IS NOT NULL
+  ), ranked AS (
+    SELECT *, row_number() OVER (PARTITION BY source = 'task' AND kind = 'heartbeat'
+      ORDER BY occurred_at DESC, source, task_id, integration_id, version DESC) AS receipt_rank
+    FROM scoped
   )
-  SELECT r.source, r.task_id, r.version, r.integration_id, json_extract(r.event, '$.at') AS occurred_at,
-    json_extract(r.event, '$.kind') AS kind, json_extract(r.event, '$.state') AS status,
-    json_extract(r.event, '$.pr_number') AS pr_number, json_extract(t.record, '$.title') AS task_title
-  FROM receipts r JOIN proposals t ON t.owner_id = ?1 AND t.namespace = ?2 AND t.task_id = r.task_id
-  WHERE EXISTS (SELECT 1 FROM membership m WHERE m.task_id = r.task_id
-    AND json_extract(r.event, '$.at') >= m.occurred_at
-    AND (m.ends_at IS NULL OR json_extract(r.event, '$.at') < m.ends_at))
-    AND json_extract(r.event, '$.kind') IS NOT NULL
-  ORDER BY occurred_at DESC, r.source, r.task_id, r.integration_id, r.version DESC
-  LIMIT ?4
+  SELECT * FROM ranked
+  WHERE receipt_rank <= CASE WHEN source = 'task' AND kind = 'heartbeat' THEN ?5 ELSE ?4 END
+  ORDER BY occurred_at DESC, source, task_id, integration_id, version DESC
 `;
 const metadataFields = {
   name: 150, description: 4000, objective: 16000, scope: 16000, acceptance: 16000,
@@ -289,7 +296,7 @@ export async function projectOperation({ db, owner, namespace, application, body
         FROM snapshots ORDER BY version`, body.id).all(),
       scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
       scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
-      scope(executionHistoryQuery, body.id, executionHistoryLimit + 1).all(),
+      scope(executionHistoryQuery, body.id, executionHistoryLimit + 1, heartbeatHistoryLimit + 1).all(),
       scope('SELECT task_id, milestone_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
       scope('SELECT t.* FROM task_telemetry t JOIN proposals p USING (owner_id, namespace, task_id) WHERE t.owner_id = ? AND t.namespace = ? AND p.project_id = ?', body.id).all(),
       scope('SELECT payload FROM private_projection WHERE owner_id = ? AND namespace = ?').first(),
@@ -347,11 +354,15 @@ export async function projectOperation({ db, owner, namespace, application, body
     const linkable_tasks = project.status === 'archived' ? [] : view.taskRows
       .filter(row => !row.project_id && taskId(row.task_id))
       .map(row => ({ id: row.task_id, title: JSON.parse(row.record).title, version: row.version }));
+    const isHeartbeat = event => event.source === 'task' && event.kind === 'heartbeat';
+    const receipts = executionHistory.results.filter(event => event.receipt_rank <= (isHeartbeat(event) ? heartbeatHistoryLimit : executionHistoryLimit))
+      .map(({ receipt_rank, ...event }) => event);
     return success({ project, ...summary, artifacts, artifact_sources: [...artifactSources.values()], github, linkable_tasks,
       task_prerequisites: linked.flatMap(view.prerequisitesFor),
       history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results,
-        ...executionHistory.results.slice(0, executionHistoryLimit)].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)),
-      execution_history_truncated: executionHistory.results.length > executionHistoryLimit,
+        ...receipts].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)),
+      execution_history_truncated: executionHistory.results.some(event => !isHeartbeat(event) && event.receipt_rank > executionHistoryLimit),
+      heartbeat_history_truncated: executionHistory.results.some(event => isHeartbeat(event) && event.receipt_rank > heartbeatHistoryLimit),
       task_milestones: associations.results, milestone_dependents: view.milestoneDependents(body.id), telemetry });
   }
   if (body.op === 'register_task') {
