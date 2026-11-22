@@ -1,0 +1,300 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import test from 'node:test';
+import { createCommandCore } from './command-core.mjs';
+import { openCommandCoreStageConnector } from '../../../scripts/agent/command-core-stage-connector.mjs';
+
+const fixture = [
+  { id: 'aetherwake', name: 'Aetherwake', repository: 'synthetic/one', binding: 'ONE', origin: 'https://one.fixture.test' },
+  { id: 'voyagewright', name: 'Voyagewright', repository: 'synthetic/two', binding: 'TWO', origin: 'https://two.fixture.test' },
+];
+const journal = JSON.parse(readFileSync(new URL('./drizzle/meta/_journal.json', import.meta.url)));
+
+function partition(t) {
+  const sqlite = new DatabaseSync(':memory:');
+  t.after(() => sqlite.close());
+  for (const { tag } of journal.entries) {
+    sqlite.exec(readFileSync(new URL('./drizzle/' + tag + '.sql', import.meta.url), 'utf8'));
+  }
+  const DB = { prepare(sql) {
+    const statement = sqlite.prepare(sql);
+    return { bind: (...args) => ({
+      first: async () => statement.get(...args) ?? null,
+      all: async () => ({ results: statement.all(...args) }),
+      run: async () => ({ meta: statement.run(...args) }),
+    }) };
+  } };
+  return { sqlite, DB };
+}
+
+function setup(t) {
+  const one = partition(t);
+  const two = partition(t);
+  for (const [part, app] of [[one, fixture[0]], [two, fixture[1]]]) {
+    part.sqlite.prepare('INSERT INTO application_partition VALUES (1, ?, ?, ?)').run(app.id, app.repository, 'engineering');
+  }
+  const owner = 'synthetic-owner';
+  const env = {
+    ONE: { DB: one.DB, OBSERVATORY_TASK_ENGINE_OWNER_ID: owner, OBSERVATORY_TASK_WORKER_KEY: 'a'.repeat(64), GITHUB_READ_TOKEN: 'one-fixture' },
+    TWO: { DB: two.DB, OBSERVATORY_TASK_ENGINE_OWNER_ID: owner, OBSERVATORY_TASK_WORKER_KEY: 'b'.repeat(64), GITHUB_READ_TOKEN: 'two-fixture' },
+  };
+  const requests = [];
+  const engine = createCommandCore({
+    applications: fixture, assets: {}, trustedIdentity: request => request.headers.get('oai-authenticated-user-id'), validate: () => true, validateEvent: () => true, sourceRevision: 'd'.repeat(40),
+    fetcher: async (url, init) => {
+      requests.push({ url, credential: new Headers(init?.headers).get('authorization'), method: init?.method, body: init?.body });
+      if (init?.method === 'PUT') return Response.json({}, { status: 201 });
+      return Response.json(String(url).endsWith('/git/ref/heads/main')
+        ? { ref: 'refs/heads/main', object: { sha: 'a'.repeat(40) } }
+        : { message: 'Synthetic provider response' }, { status: String(url).endsWith('/git/ref/heads/main') ? 200 : 404 });
+    },
+  });
+  const call = async (app, path, body, identity = owner, extraHeaders = {}) => {
+    const origin = fixture[app].origin;
+    const response = await engine.fetch(new Request(origin + path, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'oai-authenticated-user-id': identity, 'content-type': 'application/json', origin, ...extraHeaders },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }), env);
+    return { status: response.status, body: await response.json() };
+  };
+  const task = (app, body) => call(app, '/api/task-engine/v1', body);
+  const rpc = (app, name, args) => call(app, '/mcp', {
+    jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args },
+  });
+  return { call, task, rpc, requests, one, two, env };
+}
+const taskFields = { title: 'Synthetic task', objective: 'Write a synthetic evidence file', primary: 'backend',
+  profile_id: 'backend', criteria: ['Evidence is readable'] };
+
+test('one engine keeps equal task IDs, credentials, and queues independent across applications', async t => {
+  const { task, rpc, requests } = setup(t);
+  const operation_id = crypto.randomUUID();
+  const tasks = await Promise.all([0, 1].map(app => task(app, { op: 'register', operation_id, fields: taskFields })));
+  assert.deepEqual(tasks.map(result => result.status), [201, 201]);
+  assert.equal(tasks[0].body.task.id, tasks[1].body.task.id);
+  assert.deepEqual(tasks.map(result => result.body.task.repository), ['synthetic/one', 'synthetic/two']);
+  for (const {url, credential} of requests.filter(request => request.url.includes('/repos/'))) {
+    assert.match(url, credential === 'Bearer one-fixture' ? /\/repos\/synthetic\/one\// : /\/repos\/synthetic\/two\//);
+  }
+  for (const [index, result] of tasks.entries()) {
+    assert.equal((await task(index, { op: 'command', task_id: result.body.task.id, expected_version: result.body.version,
+      operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  }
+  const claim = { op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() };
+  const worker = (id, key, request = claim) => rpc(0, 'task_engine_v1', {
+    application_id: fixture[id].id, request, worker_key: key.repeat(64),
+  });
+  const denied = await worker(1, 'a');
+  assert.equal(denied.body.result.structuredContent.status, 403);
+  const results = await Promise.all([worker(0, 'a'), worker(1, 'b')]);
+  const claims = results.map(result => result.body.result.structuredContent.claim);
+  assert.ok(claims.every(Boolean));
+  assert.notEqual(claims[0].attempt.id, claims[1].attempt.id);
+  const report = (app, claim, key) => worker(app, key, { op: 'report', operation_id: crypto.randomUUID(),
+    task_id: claim.task.id, attempt_id: claim.attempt.id, lease: claim.lease, report: { type: 'failed', failure: 'Synthetic worker interruption' } });
+  assert.ok((await report(1, claims[0], 'b')).body.result.structuredContent.status >= 400);
+  assert.equal((await report(0, claims[0], 'a')).body.result.structuredContent.status, 200);
+  const independent = await task(1, { op: 'get', task_id: claims[1].task.id });
+  assert.equal(independent.body.lifecycle.state, 'running');
+});
+
+test('project records are application-scoped and enforce optimistic updates', async t => {
+  const { call, rpc } = setup(t);
+  const id = crypto.randomUUID();
+  const created = await call(0, '/api/projects', { op: 'create', id, fields: { name: 'Synthetic project', objective: 'Prove scoped storage' } });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.project.application_id, 'aetherwake');
+  assert.equal((await call(1, '/api/projects/' + id)).status, 404);
+  assert.equal((await call(0, '/api/projects/' + id, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, '/api/projects', { op: 'update', id, expected_version: 0, fields: { name: 'Stale' } })).status, 409);
+  assert.equal((await rpc(0, 'projects_v1', { request: { op: 'get', id } })).body.error.code, -32602);
+  const result = await rpc(0, 'projects_v1', { application_id: 'aetherwake', request: { op: 'get', id } });
+  assert.equal(result.body.result.structuredContent.project.name, 'Synthetic project');
+});
+
+test('a Project milestone gate blocks claims until the dependency is accepted', async t => {
+  const { call, task, rpc } = setup(t);
+  const project = (body) => call(0, '/api/projects', body);
+  const first = crypto.randomUUID();
+  const second = crypto.randomUUID();
+  for (const id of [first, second]) {
+    assert.equal((await project({ op: 'create', id, fields: { name: 'Synthetic project', objective: 'Prove acceptance gate' } })).status, 201);
+    assert.equal((await project({ op: 'update', id, expected_version: 1, status: 'active' })).status, 200);
+  }
+  const milestone_id = crypto.randomUUID();
+  const milestone = { op: 'milestone', id: second, milestone_id, name: 'Synthetic acceptance', acceptance: 'Confirm a reviewed receipt' };
+  assert.equal((await project({ ...milestone, status: 'integrated' })).status, 201);
+  const created = await project({ op: 'register_task', id: first, operation_id: crypto.randomUUID(), fields: taskFields });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.project_id, first);
+  const task_id = created.body.task.id;
+  assert.equal((await project({ op: 'milestone_gate', id: first, task_id, milestone_id })).status, 200);
+  assert.equal((await task(0, { op: 'command', task_id, operation_id: crypto.randomUUID(), expected_version: created.body.version,
+    action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const claim = async () => (await rpc(0, 'task_engine_v1', { application_id: 'aetherwake', worker_key: 'a'.repeat(64),
+    request: { op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() } })).body.result.structuredContent.claim;
+  assert.equal(await claim(), null);
+  assert.equal((await project({ ...milestone, status: 'accepted', expected_version: 1 })).status, 200);
+  assert.equal((await claim()).task.id, task_id);
+});
+test('application authorization and storage identity fail closed', async t => {
+  const { call, env, rpc } = setup(t);
+  env.TWO.OBSERVATORY_TASK_ENGINE_OWNER_ID = 'different-owner';
+  assert.equal((await call(1, '/api/projects')).status, 403);
+  const applications = await rpc(0, 'list_applications', {});
+  assert.deepEqual(applications.body.result.structuredContent.applications.map(app => app.id), ['aetherwake']);
+  assert.equal((await rpc(0, 'task_engine_v1', { application_id: ['aetherwake', 'voyagewright'], request: { op: 'list' } })).body.error.code, -32602);
+  assert.equal((await rpc(0, 'task_engine_v1', { application_id: 'voyagewright', request: { op: 'list' } })).status, 403);
+  env.TWO.OBSERVATORY_TASK_ENGINE_OWNER_ID = env.ONE.OBSERVATORY_TASK_ENGINE_OWNER_ID;
+  const original = env.TWO.DB;
+  env.TWO.DB = env.ONE.DB;
+  assert.equal((await call(1, '/api/projects')).status, 503);
+  env.TWO.DB = original;
+  env.TWO.GITHUB_READ_TOKEN = env.ONE.GITHUB_READ_TOKEN;
+  assert.equal((await call(0, '/api/projects')).status, 503);
+});
+
+test('application Task dependencies and telemetry reject a request for the other repository', async t => {
+  const { task, rpc, requests } = setup(t);
+  const scoped = (app, name, params) => rpc(0, name, { application_id: fixture[app].id, ...params });
+  const body = { op: 'register', operation_id: crypto.randomUUID(), fields: taskFields };
+  const remote = await task(1, body);
+  const mismatch = await task(0, { ...body, fields: { ...taskFields, repository: fixture[1].repository } });
+  assert.equal(mismatch.status, 400);
+  assert.equal(requests.some(({url}) => url.includes('/repos/synthetic/one/')), false);
+  const denied = await task(0, { ...body, fields: { ...taskFields, dependencies: [remote.body.task.id] } });
+  assert.equal(denied.status, 400);
+  const local = await task(0, body);
+  assert.equal(local.status, 201);
+  const telemetry = record => ({ task_id: record.id, change: { base: null, generated_at: new Date().toISOString(),
+    records: [record], events: [] } });
+  const reject = await scoped(0, 'sync_task_telemetry', telemetry(remote.body.task));
+  assert.equal(JSON.parse(reject.body.result.content[0].text).status, 400);
+  const write = await scoped(0, 'sync_task_telemetry', telemetry(local.body.task));
+  assert.match(JSON.parse(write.body.result.content[0].text).digest, /^[a-f0-9]{64}$/);
+  const other = await scoped(1, 'sync_task_telemetry', { task_id: local.body.task.id });
+  const baseline = JSON.parse(other.body.result.content[0].text).baseline;
+  assert.equal(baseline, null);
+});
+
+test('concurrent claim retries keep one Attempt and archive only affects the owning Project', async t => {
+  const { call, task, rpc } = setup(t);
+  const id = crypto.randomUUID();
+  const fields = { name: 'Synthetic same identity', objective: 'Verify archive and claim scope' };
+  for (const app of [0, 1]) assert.equal((await call(app, '/api/projects', { op: 'create', id, fields })).status, 201);
+  const linked = await call(0, '/api/projects', { op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = linked.body.task.id;
+  assert.equal((await task(0, { op: 'command', task_id, operation_id: crypto.randomUUID(), expected_version: 1,
+    action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const claim = async operation_id => (await rpc(0, 'task_engine_v1', { application_id: 'aetherwake', worker_key: 'a'.repeat(64),
+    request: { op: 'claim', operation_id, task_ids: [task_id] } })).body.result.structuredContent;
+  const operations = [crypto.randomUUID(), crypto.randomUUID()];
+  const results = await Promise.all(operations.map(claim));
+  assert.equal(results.filter(result => result.claim).length, 1);
+  const winner = results.findIndex(result => result.claim);
+  assert.equal((await claim(operations[winner])).claim.attempt.id, results[winner].claim.attempt.id);
+  assert.equal((await task(0, { op: 'get', task_id })).body.attempts.length, 1);
+  assert.equal((await call(0, '/api/projects', { op: 'update', id, status: 'archived', expected_version: 1 })).status, 200);
+  assert.equal((await call(1, '/api/projects/' + id)).body.project.status, 'planned');
+});
+
+test('Project progress reports actual scoped execution, milestone gates and owner review', async t => {
+  const { call, task, one } = setup(t);
+  const project = request => call(0, '/api/projects', request);
+  const id = crypto.randomUUID();
+  const dependencyId = crypto.randomUUID();
+  for (const projectId of [id, dependencyId]) {
+    assert.equal((await project({ op: 'create', id: projectId, fields: {
+      name: 'Fixture', objective: 'Verify reported progress', owner_review: projectId === id ? 'pending' : '',
+    } })).status, 201);
+  }
+  const milestone_id = crypto.randomUUID();
+  const milestone = { op: 'milestone', id: dependencyId, milestone_id, name: 'Foundation', acceptance: 'Evidence', status: 'planned' };
+  assert.equal((await project(milestone)).status, 201);
+  const registration = await project({ op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = registration.body.task.id;
+  assert.equal((await project({ op: 'milestone_gate', id, task_id, milestone_id })).status, 200);
+  assert.equal((await task(0, { op: 'command', task_id, expected_version: registration.body.version,
+    operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const integrationId = crypto.randomUUID();
+  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, 42, 'merged', 1, ?, '{}', ?)")
+    .run('synthetic-owner', integrationId, task_id, crypto.randomUUID(), 'a'.repeat(40),
+      new Date().toISOString(), JSON.stringify({ operation_id: crypto.randomUUID() }));
+  const read = async () => (await call(0, '/api/projects/' + id)).body;
+  const detail = await read();
+  assert.equal(detail.progress.tasks.blocked, 1);
+  assert.equal(detail.progress.tasks.completed, 0);
+  assert.equal(detail.progress.owner_review, 'pending');
+  assert.deepEqual(detail.progress.integrations, { tracked: 1, merged: 1, deployed: 0 });
+  assert.equal(detail.integrations[0].repository, fixture[0].repository);
+  assert.deepEqual(detail.tasks[0].blockers, [{ type: 'milestone', id: milestone_id, state: 'planned' }]);
+  const portfolio = (await call(0, '/api/projects')).body;
+  assert.deepEqual(portfolio.projects.find(item => item.id === id).progress, detail.progress);
+  assert.equal((await call(1, '/api/projects')).body.projects.length, 0);
+  assert.equal((await project({ ...milestone, expected_version: 1, status: 'accepted' })).status, 200);
+  assert.equal((await read()).progress.tasks.ready, 1);
+});
+
+test('explicit proposal writes carry only the owning repository and its publication credential', async t => {
+  const { call, env, requests } = setup(t);
+  env.ONE.GITHUB_PROPOSAL_TOKEN = 'one-publish-fixture';
+  env.TWO.GITHUB_PROPOSAL_TOKEN = 'two-publish-fixture';
+  const headers = { 'x-observatory-publish': 'github', 'x-observatory-request-id': crypto.randomUUID() };
+  const write = (app, repository, owner = 'synthetic-owner') => call(app, '/api/tasks', { ...taskFields, repository }, owner, headers);
+  assert.equal((await write(0, fixture[1].repository)).status, 400);
+  assert.equal((await write(1, fixture[1].repository, 'unassigned')).status, 403);
+  assert.equal(requests.some(entry => entry.method === 'PUT'), false);
+  for (const app of [0, 1]) {
+    const result = await write(app, fixture[app].repository);
+    assert.equal(result.status, 201);
+    assert.equal(result.body.github.state, 'published');
+    assert.match(result.body.github.url, new RegExp('github.com/' + fixture[app].repository + '/'));
+  }
+  const mutations = requests.filter(entry => entry.method === 'PUT');
+  assert.equal(mutations.length, 2);
+  for (const [index, mutation] of mutations.entries()) {
+    assert.equal(mutation.credential, 'Bearer ' + [env.ONE, env.TWO][index].GITHUB_PROPOSAL_TOKEN);
+    assert.ok(mutation.url.startsWith('https://api.github.com/repos/' + fixture[index].repository + '/contents/'));
+    const payload = JSON.parse(mutation.body);
+    assert.equal(payload.branch, 'observatory-proposed-tasks');
+    assert.equal(JSON.parse(Buffer.from(payload.content, 'base64').toString()).repository, fixture[index].repository);
+  }
+});
+
+test('staging worker transport claims only in its own partition with both ingress and executor credentials', async t => {
+  const { task, env } = setup(t);
+  const applications = fixture;
+  const engine = createCommandCore({ applications, validate: () => true, trustedIdentity: () => null,
+    trustedWorkerIngress: (request, _env, context) => context?.origin === new URL(request.url).origin });
+  const { body: registered } = await task(0, { op: 'register', operation_id: crypto.randomUUID(), fields: taskFields });
+  const taskId = registered.task.id;
+  assert.equal((await task(0, { op: 'command', task_id: taskId, expected_version: registered.version,
+    operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const connect = (originIndex, { appIndex = originIndex, accessIndex = originIndex, keyIndex = originIndex } = {}) =>
+    openCommandCoreStageConnector({
+      endpoint: applications[originIndex].origin + '/worker/mcp', application: applications[appIndex].id,
+      workerKey: env[applications[keyIndex].binding].OBSERVATORY_TASK_WORKER_KEY, siteServiceToken: 'fixture-secret',
+      fetcher: (url, init) => {
+        const headers = new Headers(init.headers);
+        assert.equal(headers.get('OAI-Sites-Authorization'), 'Bearer fixture-secret');
+        assert.equal(init.redirect, 'error');
+        assert.equal(Object.hasOwn(JSON.parse(init.body).params.arguments ?? {}, 'worker_key'), false);
+        return engine.fetch(new Request(url, init), env, { origin: applications[accessIndex].origin });
+      },
+    });
+  const claim = { op: 'claim', worker_id: crypto.randomUUID(), operation_id: crypto.randomUUID(), task_ids: [taskId] };
+  const tool = 'staging.task_engine_v1';
+  const worker = connect(0);
+  await worker.ready();
+  await assert.rejects(connect(1, { accessIndex: 0 }).ready(), { status: 401 });
+  await assert.rejects(connect(1, { keyIndex: 0 }).ready(), { status: 403 });
+  await assert.rejects(connect(0, { appIndex: 1 }).call({ request: claim }, tool), { status: 403 });
+  await assert.rejects(worker.call({ request: { op: 'list' } }, tool), { status: 403 });
+  await assert.rejects(worker.call({ request: { op: 'command' } }, tool), { status: 403 });
+  await assert.rejects(connect(1).call({ task_id: taskId }, 'staging.sync_task_telemetry'), { status: 404 });
+  assert.equal((await worker.call({ task_id: taskId }, 'staging.sync_task_telemetry')).baseline, null);
+  const claimed = await worker.call({ request: claim, worker_key: 'never-sent-in-the-body' }, tool);
+  assert.equal(claimed.claim.task.id, taskId);
+});

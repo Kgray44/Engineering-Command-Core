@@ -1,0 +1,125 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794796800000,
+      "tag": "0000_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794805200000,
+      "tag": "0001_github_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794810600000,
+      "tag": "0002_private_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794844800000,
+      "tag": "0003_proposal_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794877500000,
+      "tag": "0004_cached_proposal_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794881100000,
+      "tag": "0005_github_conditional_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794881700000,
+      "tag": "0006_github_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794884400000,
+      "tag": "0007_proposal_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794884700000,
+      "tag": "0008_ci_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794885000000,
+      "tag": "0009_task_telemetry",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794888500000,
+      "tag": "0010_refresh_ci_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795134900000,
+      "tag": "0011_task_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795182867000,
+      "tag": "0012_task_trace_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795233600000,
+      "tag": "0013_task_worker_liveness",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795248000000,
+      "tag": "0014_task_worker_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1795284000000,
+      "tag": "0015_integration_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1795306000000,
+      "tag": "0016_projects",
+      "breakpoints": true
+    }
+  ]
+}

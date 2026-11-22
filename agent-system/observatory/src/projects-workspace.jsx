@@ -1,0 +1,370 @@
+import { useEffect, useRef, useState } from 'react';
+import { motion } from 'motion/react';
+import { Activity, ArrowLeft, Boxes, ChevronRight, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
+import { useCardMotion } from './card-motion.jsx';
+import { StickySectionAside } from './sticky-section-aside.jsx';
+import { taskHref } from './task-workspace.mjs';
+
+const stages = ['planned', 'active', 'paused', 'archived'];
+const priorities = ['low', 'normal', 'high', 'urgent'];
+const milestoneStages = ['planned', 'verified', 'integrated', 'accepted'];
+const number = value => value === null || value === undefined ? 'Unavailable' : value.toLocaleString();
+const object = form => Object.fromEntries(new FormData(form));
+
+export async function projectRequest(body, headers = {}, { id, signal } = {}) {
+  const response = await fetch('/api/projects' + (id ? '/' + id : ''), {
+    method: body ? 'POST' : 'GET', cache: 'no-store',
+    headers: { ...headers, ...(body ? { 'content-type': 'application/json' } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}), signal,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw Error(data.error || 'Projects service unavailable');
+  return data;
+}
+
+function Options({ values }) {
+  return values.map(value => <option key={value} value={value}>{value}</option>);
+}
+
+function ProjectForm({ project = {}, onSave, busy }) {
+  return <form className="form" onSubmit={event => {
+    event.preventDefault();
+    const { participants, ...fields } = object(event.currentTarget);
+    onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean) });
+  }}>
+    <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
+    <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
+    <label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
+    <label>Scope <textarea name="scope" defaultValue={project.scope} maxLength={16000}/></label>
+    <label>Acceptance requirements <textarea name="acceptance" defaultValue={project.acceptance} maxLength={16000}/></label>
+    <div className="form-grid">
+      <label>Start date <input type="date" name="start_date" defaultValue={project.start_date}/></label>
+      <label>Target date <input type="date" name="target_date" defaultValue={project.target_date}/></label>
+      <label>Priority <select name="priority" defaultValue={project.priority ?? 'normal'}><Options values={priorities}/></select></label>
+      <label>Participants <input name="participants" defaultValue={project.participants?.join(', ')} placeholder="Comma-separated names"/></label>
+      <label>Technical completion <select name="technical_state" defaultValue={project.technical_state ?? ''}><Options values={['', 'in_progress', 'verified', 'integrated', 'delivered']}/></select></label>
+      <label>Owner review <select name="owner_review" defaultValue={project.owner_review ?? ''}><Options values={['', 'pending', 'accepted', 'declined']}/></select></label>
+    </div>
+    <button className="primary-button" disabled={busy}>{project.id ? 'Save project' : 'Create project'}</button>
+  </form>;
+}
+
+function MilestoneForm({ milestone, onSave, busy }) {
+  const operation = useRef(crypto.randomUUID());
+  return <form className="form" onSubmit={event => {
+    event.preventDefault();
+    onSave({ ...object(event.currentTarget), milestone_id: milestone?.id ?? operation.current,
+      ...(milestone ? { expected_version: milestone.version } : {}) });
+  }}>
+    <label>Milestone name <input name="name" defaultValue={milestone?.name} required maxLength={150}/></label>
+    <label>Acceptance evidence required <textarea name="acceptance" defaultValue={milestone?.acceptance} required maxLength={16000}/></label>
+    <label>Milestone state <select name="status" defaultValue={milestone?.status ?? 'planned'}><Options values={milestoneStages}/></select></label>
+    <button className="quiet-button" disabled={busy}>{milestone ? 'Save milestone' : 'Add milestone'}</button>
+  </form>;
+}
+
+const defaultFilters = { view: 'all', query: '', state: '', sort: 'newest', group: 'none' };
+const projectViews = [
+  ['all', 'Current Projects', project => project.status !== 'archived'],
+  ['active', 'Active', project => project.status === 'active'],
+  ['waiting', 'Planned or paused', project => ['planned', 'paused'].includes(project.status)],
+  ['review', 'Awaiting review', project => project.status !== 'archived' && project.owner_review === 'pending'],
+  ['accepted', 'Accepted', project => project.status !== 'archived' && project.owner_review === 'accepted'],
+  ['archived', 'Archived', project => project.status === 'archived'],
+];
+const projectHref = id => '#projects/' + id;
+const shortDate = value => value ? new Date(value).toLocaleDateString() : 'Unavailable';
+
+function ProjectExplorer({ application, projects, unassigned, filters, setFilters, Panel, Status, Metric, editing, onEdit, children }) {
+  const interaction = useCardMotion(true);
+  const views = projectViews.map(([id, label, matches]) => [id, label, projects.filter(matches)]);
+  const viewItems = views.find(([id]) => id === filters.view)[2];
+  const query = filters.query.trim().toLowerCase();
+  const items = (filters.state && filters.view === 'all' ? projects : viewItems).filter(project =>
+    (!filters.state || project.status === filters.state) &&
+    [project.name, project.description, project.objective, project.id].some(value => value?.toLowerCase().includes(query)));
+  const sorters = {
+    newest: (left, right) => right.created_at.localeCompare(left.created_at),
+    oldest: (left, right) => left.created_at.localeCompare(right.created_at),
+    priority: (left, right) => priorities.indexOf(right.priority) - priorities.indexOf(left.priority),
+    title: (left, right) => left.name.localeCompare(right.name),
+  };
+  items.sort(sorters[filters.sort]);
+  const groups = filters.group === 'none' ? [['Projects', items]]
+    : stages.map(stage => [stage, items.filter(item => item.status === stage)]).filter(([, rows]) => rows.length);
+  const field = ({ currentTarget: { name, value } }) => setFilters(previous => ({ ...previous, [name]: value }));
+
+  return <>
+    <div className="metrics project-portfolio" aria-label={application.name + ' portfolio'}>
+      <Metric name="Registered projects" value={projects.length} meta={application.name} Icon={Boxes} index={0}/>
+      <Metric name="Active" value={views[1][2].length} meta="Active Projects" Icon={Activity} index={1}/>
+      <Metric name="Awaiting review" value={views[3][2].length} meta="Pending owner decision" Icon={ShieldCheck} index={2}/>
+      <Metric name="Unassigned Tasks" value={unassigned} meta="Tasks without a Project" Icon={GitBranch} index={3}/>
+    </div>
+    <Panel title="Project explorer" right={<button type="button" className="primary-button" aria-expanded={editing} onClick={onEdit}>
+      <Plus size={16} aria-hidden="true"/>{editing ? 'Close form' : 'New project'}
+    </button>}>
+      {children}
+      <nav className="task-work-filters" aria-label="Project activity views">
+        {views.map(([id, label, rows]) => <motion.button type="button" key={id} className="quiet-button task-work-filter"
+          aria-current={filters.view === id ? 'page' : undefined} {...interaction}
+          onClick={() => setFilters(previous => ({ ...previous, view: id, state: '' }))}>{label}<span>{rows.length}</span></motion.button>)}
+      </nav>
+      <div className="task-filters project-filters">
+        <label>Search <span className="search"><Search size={16} aria-hidden="true"/>
+          <input aria-label="Search projects" name="query" type="search" value={filters.query} onChange={field} placeholder="Name, objective, or ID"/>
+        </span></label>
+        <label>State <select name="state" value={filters.state} onChange={field}>
+          <option value="">{filters.view === 'all' ? 'Current Projects' : 'Any state in view'}</option><Options values={stages}/>
+        </select></label>
+        <label>Sort <select name="sort" value={filters.sort} onChange={field}>
+          <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+          <option value="priority">Highest priority</option><option value="title">Title</option>
+        </select></label>
+        <label>Group <select name="group" value={filters.group} onChange={field}>
+          <option value="none">None</option><option value="state">State</option>
+        </select></label>
+      </div>
+      <div className="task-result-bar">
+        <span role="status"><Filter size={14} aria-hidden="true"/> {items.length} of {projects.length} Projects</span>
+        {filters !== defaultFilters && <button type="button" className="text-button" onClick={() => setFilters(defaultFilters)}>Reset filters</button>}
+      </div>
+      {!items.length && <p>{projects.length ? 'No Projects match these filters.' : 'No Projects in the current feed.'}</p>}
+      {groups.map(([label, rows]) => <section key={label} className="task-group" aria-label={label}>
+        {filters.group !== 'none' && <h3>{label} <span>{rows.length}</span></h3>}
+        <ul className="task-rows">{rows.map(item => <li key={item.id}>
+          <motion.a className="task-row" href={projectHref(item.id)} {...interaction}>
+            <span className="task-row-title"><strong>{item.name}</strong><small>{shortDate(item.created_at)}</small></span>
+            <span className="task-row-state"><small>Project state</small><Status value={item.status}/></span>
+            <span className="task-priority">{item.priority} priority</span>
+            <span className="task-counts">{item.progress && <small>
+              {item.progress.tasks.completed}/{item.progress.tasks.total} Tasks complete · {item.progress.tasks.active} running · {item.progress.tasks.blocked} blocked · {item.progress.milestones.accepted}/{item.progress.milestones.total} milestones accepted
+            </small>}{item.owner_review === 'pending' && <small>Owner review pending</small>}</span>
+            <span className="task-row-action">Manage<ChevronRight size={15} aria-hidden="true"/></span>
+          </motion.a>
+        </li>)}</ul>
+      </section>)}
+    </Panel>
+  </>;
+}
+
+export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, demo }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState(defaultFilters);
+  const [edit, setEdit] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [addingMilestone, setAddingMilestone] = useState(false);
+  const [selectedProject, setSelectedProject] = useState('');
+  const [other, setOther] = useState(null);
+  const [taskList, setTaskList] = useState([]);
+  const createId = useRef(crypto.randomUUID());
+  const pending = useRef(false);
+  const readVersion = useRef(0);
+  const load = async signal => {
+    const version = ++readVersion.current;
+    const next = await projectRequest(null, headers, { id: projectId, signal });
+    if (!signal?.aborted && version === readVersion.current) {
+      setData(next);
+      setError('');
+    }
+  };
+  useEffect(() => {
+    if (demo) return;
+    const controller = new AbortController();
+    const loading = load(controller.signal);
+    const version = readVersion.current;
+    void loading.catch(error => {
+      if (!controller.signal.aborted && version === readVersion.current) setError(error.message);
+    });
+    if (projectId) {
+      void projectRequest(null, headers, { signal: controller.signal }).then(setTaskList).catch(() => {});
+    }
+    return () => controller.abort();
+  }, [projectId, demo, headers, refreshVersion]);
+  useEffect(() => {
+    if (!selectedProject) return;
+    const controller = new AbortController();
+    void projectRequest(null, headers, { id: selectedProject, signal: controller.signal }).then(setOther).catch(error => {
+      if (!controller.signal.aborted) setError(error.message);
+    });
+    return () => controller.abort();
+  }, [headers, selectedProject]);
+  const submit = async (request, onSuccess) => {
+    if (pending.current) return;
+    pending.current = true;
+    ++readVersion.current;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await projectRequest({ id: projectId, ...request }, headers);
+      onSuccess?.(result);
+      if (request.op !== 'create') await load();
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  };
+  if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_milestones = [], artifacts = [], github = [], progress, integrations = [] } = data ?? {};
+  return <div className="projects-workspace">
+    {error && <p className="notice error" role="alert">{error}</p>}
+    {!data && !error && <p role="status">Loading Projects…</p>}
+    {application && !projectId && <ProjectExplorer application={application} projects={projects} unassigned={data.unassigned_tasks}
+      filters={filters} setFilters={setFilters} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}>
+      {edit && <div className="project-create"><ProjectForm busy={busy} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
+        window.location.hash = projectHref(result.project.id);
+      })}/></div>}
+    </ProjectExplorer>}
+    {project && <>
+      <div className="task-detail-toolbar">
+        <a href="#projects" className="back" aria-label="All projects"><ArrowLeft size={15} aria-hidden="true"/> Back to Project Control Center</a>
+        {project.status !== 'archived' && <button type="button" className="primary-button" onClick={() => onNewTask(project)}>
+          <Plus size={16} aria-hidden="true"/> New project task
+        </button>}
+      </div>
+      <nav className="task-section-nav" aria-label="Jump to Project section">
+        {[
+          ['overview', 'Project overview'], ['tasks', 'Tasks'], ['milestones', 'Milestones'], ['dependencies', 'Dependencies'],
+          ['telemetry', 'Telemetry'], ['verification', 'Verification'], ['evidence', 'Evidence'], ['history', 'History'],
+        ].map(([id, label]) => <button type="button" className="quiet-button" key={id} onClick={() => onJump('project-' + id)}>{label}</button>)}
+      </nav>
+      {project.owner_review === 'accepted' && <div className="task-completion" role="status">
+        <ShieldCheck size={24} aria-hidden="true"/><div><strong>Project accepted</strong><small>Owner accepted the Project.</small></div>
+      </div>}
+      <div className="detail-layout">
+        <div className="detail-left">
+          <Panel id="project-overview" title={project.name} kicker={project.id} right={<Status value={project.status}/>}>
+            <div className="objective">{project.objective}</div>
+            {project.description && <p className="objective">{project.description}</p>}
+            {project.scope && <DetailLine name="Scope" value={project.scope}/>}
+            <div className="task-tags"><span>{project.priority} priority</span></div>
+            <div className="project-actions">
+              <button className="quiet-button" aria-expanded={edit} onClick={() => setEdit(!edit)}>{edit ? 'Close form' : 'Edit project'}</button>
+              {stages.filter(stage => stage !== 'planned' && stage !== project.status).map(stage =>
+                <button className="quiet-button" key={stage} disabled={busy} onClick={() => submit({ op: 'update', expected_version: project.version, status: stage })}>
+                  {{active:'Activate', paused:'Pause', archived:'Archive'}[stage]}
+                </button>)}
+            </div>
+            {edit && <ProjectForm key={project.version} project={project} busy={busy}
+              onSave={fields => submit({ op: 'update', expected_version: project.version, fields }, () => setEdit(false))}/>}
+          </Panel>
+          <Panel title="Acceptance requirements" kicker="REQUIRED OUTCOMES">
+            <div className="objective">{project.acceptance || 'Unspecified'}</div>
+          </Panel>
+        </div>
+        <StickySectionAside className="detail-right">
+          <Panel title="Project record">
+            <DetailLine name="Repository" value={project.repositories?.join(', ') || 'Unavailable'}/>
+            <DetailLine name="Created" value={shortDate(project.created_at)}/>
+            <DetailLine name="Start date" value={project.start_date || 'Unspecified'}/>
+            <DetailLine name="Target date" value={project.target_date || 'Unspecified'}/>
+            <DetailLine name="Participants" value={project.participants?.join(', ') || 'Unspecified'}/>
+            <DetailLine name="Technical completion" value={project.technical_state?.replaceAll('_', ' ') || 'Unspecified'}/>
+            <DetailLine name="Owner review" value={project.owner_review || 'Unspecified'}/>
+            <DetailLine name="Linked Tasks" value={tasks.length}/>
+            <DetailLine name="Milestones" value={milestones.length}/>
+          </Panel>
+        </StickySectionAside>
+      </div>
+      <Panel id="project-tasks" title="Tasks">
+        <ul className="project-list">{tasks.map(task => <li key={task.id}>
+          <a className="text-button" href={taskHref(task.id)}>{task.title}</a> <Status value={task.state}/>
+          {task.branch && <small>{task.branch}</small>}
+          {task.blockers.map(item => <small key={item.type + ':' + item.id}>
+            {item.type === 'milestone' ? dependencies.find(gate => gate.milestone_id === item.id)?.name ?? item.id :
+              item.type === 'project' ? project.name : tasks.find(related => related.id === item.id)?.title ?? item.id} · {item.state}
+          </small>)}
+          {task_milestones.filter(link => link.task_id === task.id).map(link => <small key={link.milestone_id}>{milestones.find(item => item.id === link.milestone_id)?.name}</small>)}
+        </li>)}</ul>
+        {!tasks.length && <p>No linked tasks.</p>}
+        {project.status !== 'archived' && <details><summary>Associate an existing Task</summary>
+          <form className="form" onSubmit={event => {
+            event.preventDefault();
+            const fields = object(event.currentTarget);
+            submit({ op: 'link_task', task_id: fields.task_id, expected_version: Number(fields.version) });
+          }}>
+            <label>Task ID <input name="task_id" required/></label>
+            <label>Current Task version <input name="version" type="number" min="1" required/></label>
+            <button className="quiet-button" disabled={busy}>Link Task</button>
+          </form>
+        </details>}
+      </Panel>
+      <Panel id="project-milestones" title="Milestones" right={project.status !== 'archived' && <button className="quiet-button" aria-expanded={addingMilestone} onClick={() => setAddingMilestone(!addingMilestone)}>
+        {addingMilestone ? 'Close form' : 'New milestone'}</button>}>
+        {milestones.map(milestone => <details key={milestone.id}>
+          <summary>{milestone.name} <Status value={milestone.status}/></summary>
+          <p>{milestone.acceptance}</p>
+          {project.status !== 'archived' && <MilestoneForm key={milestone.version} milestone={milestone} busy={busy} onSave={fields => submit({ op: 'milestone', ...fields })}/>}
+        </details>)}
+        {!milestones.length && <p>No milestones recorded.</p>}
+        {addingMilestone && <MilestoneForm busy={busy} onSave={fields => submit({ op: 'milestone', ...fields }, () => setAddingMilestone(false))}/>}
+      </Panel>
+      <Panel id="project-dependencies" title="Dependencies">
+        <ul className="project-list">{dependencies.map(item => <li key={item.task_id + item.milestone_id}>
+          <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>
+          <a className="text-button" href={'#projects/' + item.project_id}>{item.name}</a> <Status value={item.status}/>
+        </li>)}</ul>
+        {!dependencies.length && <p>No milestone gates recorded.</p>}
+        {project.status !== 'archived' && tasks.length > 0 && <details><summary>Link a milestone</summary>
+          <form className="form" onSubmit={event => {
+            event.preventDefault();
+            submit({ op: selectedProject ? 'milestone_gate' : 'milestone_link', ...object(event.currentTarget) });
+          }}>
+            <label>Task <select name="task_id" required>{tasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}</select></label>
+            <label>Project <select value={selectedProject} onChange={event => { setOther(null); setSelectedProject(event.target.value); }}>
+              <option value="">Current project</option>{(taskList.projects ?? []).filter(item => item.id !== project.id).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select></label>
+            <label>Milestone <select name="milestone_id" required><option value="">Select milestone</option>
+              {(selectedProject ? other?.milestones ?? [] : milestones).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select></label>
+            <button className="quiet-button" disabled={busy}>{selectedProject ? 'Require acceptance before dispatch' : 'Link milestone'}</button>
+          </form>
+        </details>}
+      </Panel>
+      <Panel id="project-verification" title="GitHub and verification">
+        <p>{progress.integrations.merged} of {progress.integrations.tracked} tracked integrations merged · {progress.integrations.deployed} deployed</p>
+        <ul className="project-list">{integrations.map(item => <li key={item.id}>
+          {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <small>{item.head_sha.slice(0, 12)}</small>}
+          <Status value={item.state}/>
+        </li>)}</ul>
+        <ul className="project-list">{github.map((item, index) => <li key={item.task_id + item.uri + index}>
+          <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>
+          <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>
+        </li>)}</ul>
+        {!github.length && <p>No linked repository evidence.</p>}
+      </Panel>
+      <Panel id="project-evidence" title="Artifacts and reports">
+        <ul className="project-list">{artifacts.map((item, index) => <li key={item.task_id + index}>
+          <a className="text-button" href={taskHref(item.task_id)}>{item.name ?? item.kind ?? 'Task artifact'}</a>
+        </li>)}</ul>
+        <p>Open a linked Task to inspect its evidence or export its report.</p>
+      </Panel>
+      <Panel id="project-telemetry" title="Execution and telemetry">
+        <p>{progress.tasks.completed} of {progress.tasks.total} Tasks complete · {progress.tasks.active} running · {progress.tasks.blocked} blocked · {progress.tasks.verifying} verifying</p>
+        <dl className="project-metrics">
+          <dt>Tasks</dt><dd>{tasks.length}</dd>
+          <dt>Accepted Tasks</dt><dd>{tasks.filter(task => task.owner_acceptance === 'accepted').length}</dd>
+          <dt>Accepted milestones</dt><dd>{milestones.filter(item => item.status === 'accepted').length}</dd>
+          <dt>Attempts</dt><dd>{telemetry.attempts}</dd>
+          <dt>Retries</dt><dd>{telemetry.retries}</dd>
+          <dt>Failed or orphaned</dt><dd>{telemetry.failures}</dd>
+          <dt>Attempts with recorded token usage</dt><dd>{telemetry.measured_attempts}</dd>
+          <dt>Recorded attempt duration</dt><dd>{telemetry.execution_ms === null ? 'Unavailable' : number(Math.round(telemetry.execution_ms / 1000)) + ' s'}</dd>
+          <dt>Execution cost</dt><dd>{number(telemetry.costs)}</dd>
+          <dt>CI usage</dt><dd>{number(telemetry.ci_usage)}</dd>
+          <dt>Input tokens</dt><dd>{number(telemetry.input_tokens)}</dd>
+          <dt>Cached input tokens</dt><dd>{number(telemetry.cached_input_tokens)}</dd>
+          <dt>Output tokens</dt><dd>{number(telemetry.output_tokens)}</dd>
+        </dl>
+      </Panel>
+      <Panel id="project-history" title="History">
+        <ol className="project-list">{history.map(item => <li key={[item.kind, item.milestone_id, item.event_id ?? item.version].join(':')}>
+          {item.status && <Status value={item.status}/>} <span>{item.name ?? item.kind.replaceAll('_', ' ')}</span> <time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time>
+        </li>)}</ol>
+      </Panel>
+    </>}
+  </div>;
+}
