@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { preferenceFields } from './workspace-preferences.mjs';
 import { taskHref } from './task-workspace.mjs';
 import { activityHref, activityId, activityState, searchActivity } from './github-activity.mjs';
 
@@ -97,14 +98,17 @@ function PullCheckPreview({ number, head, headers }) {
   </section>;
 }
 
-export function MergeSourcePicker({ group, main, number, onSelect, source, context, reload, runs, onRun, defaultState, headers }) {
+export function MergeSourcePicker({ group, main, number, onSelect, source, context, reload, runs, onRun, preferences, headers }) {
   const [query, setQuery] = useState('');
-  const [state, setState] = useState(defaultState === 'all' ? '' : defaultState ?? 'open');
-  const [sort, setSort] = useState('updated');
-  const [readiness, setReadiness] = useState('');
+  const [stateOverride, setState] = useState(null);
+  const [sortOverride, setSort] = useState(null);
+  const [readinessOverride, setReadiness] = useState(null);
+  const state = stateOverride ?? preferences.merge_state;
+  const sort = sortOverride ?? preferences.merge_sort;
+  const readiness = readinessOverride ?? preferences.merge_readiness;
   const reduced = useReducedMotion();
-  const pulls = searchActivity('pulls', group?.items ?? [], { query, state, oldest: sort === 'oldest' })
-    .filter(pull => !readiness || pullReadiness(pull, runs, group, main)[0] === readiness);
+  const pulls = searchActivity('pulls', group?.items ?? [], { query, state: state === 'all' ? '' : state, oldest: sort === 'oldest' })
+    .filter(pull => readiness === 'all' || pullReadiness(pull, runs, group, main)[0] === readiness);
   if (sort === 'updated') pulls.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
   const detail = source?.detail;
   const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
@@ -112,17 +116,13 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     <div className="merge-discovery-filters">
       <label>Search pull requests<input type="search" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <label>State<select value={state} onChange={event => setState(event.target.value)}>
-        <option value="open">Open</option><option value="merged">Merged</option><option value="closed">Closed</option><option value="">All states</option>
+        {Object.entries(preferenceFields.merge_state.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
       <label>Integration evidence<select value={readiness} onChange={event => setReadiness(event.target.value)}>
-        <option value="">All evidence states</option><option value="merge_ready">Checks passed at inspection</option>
-        <option value="blocked">Blocked</option><option value="checking">Checking</option>
-        <option value="repairing">Repairing</option><option value="stale">Refresh required</option>
-        <option value="unknown">Awaiting inspection</option><option value="merged">Merged</option>
+        {Object.entries(preferenceFields.merge_readiness.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
       <label>Sort<select value={sort} onChange={event => setSort(event.target.value)}>
-        <option value="updated">Recently updated</option>
-        <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+        {Object.entries(preferenceFields.merge_sort.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>
     </div>
     {group?.status && group.status !== 'available' && <p role="status">Pull request feed {group.status}. {group.reason}</p>}

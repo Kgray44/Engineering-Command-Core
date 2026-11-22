@@ -7,9 +7,10 @@ import {taskEngineeringActivity} from './task-activity.mjs';
 import { useCardMotion } from './card-motion.jsx';
 import { attemptMatchesEvidence, criterionEvidenceStatus, evidenceClaimStatus } from './evidence-status.mjs';
 import { attemptJournal } from './task-attempts.mjs';
+import { defaultPreferences, preferenceFields } from './workspace-preferences.mjs';
 import { dependencyGraph, organizeTasks, taskHref, workLabels } from './task-workspace.mjs';
 
-export const defaultTaskFilters = { query: '', source: 'all', state: 'all', sort: 'newest', group: 'none' };
+export const defaultTaskFilters = { query: '', source: 'all', state: 'all', sort: defaultPreferences.task_sort, group: defaultPreferences.task_group };
 const labels = value => value.replaceAll('_', ' ');
 const date = value => value ? new Date(value).toLocaleDateString() : 'Unavailable';
 
@@ -54,7 +55,7 @@ export function TaskRows({ tasks, controls, related, activityFor, Status, overvi
   </ul>;
 }
 
-export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,onCreate,loading,filters,defaults=defaultTaskFilters,setFilters,work,workActivity}) {
+export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,onCreate,loading,filters,defaults=defaultTaskFilters,setOverrides,work,workActivity}) {
   const interaction=useCardMotion(true);
   const groups=useMemo(()=>organizeTasks(tasks,{...filters,work},controls,workActivity.byTask),[tasks,filters,controls,work,workActivity]);
   const queueViews=['all','active','waiting','review','issues','accepted','archived'];
@@ -63,7 +64,7 @@ export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,on
   const count = groups.reduce((sum, [, items]) => sum + items.length, 0);
   const field = event => {
     const { name, value } = event.currentTarget;
-    setFilters(previous => ({ ...previous, [name]: value }));
+    setOverrides(previous => ({ ...previous, [name]: value }));
   };
   return <Panel title="Task explorer" right={<button className="primary-button" type="button" onClick={onCreate}>
     <Plus size={16} aria-hidden="true"/> Create proposal
@@ -71,7 +72,7 @@ export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,on
     <nav className="task-work-filters" aria-label="Task activity views">
       {queueViews.map(view=><motion.a key={view} className="quiet-button task-work-filter" href={taskHref(undefined,view)}
         aria-current={work===view?'page':undefined} {...interaction}
-        onClick={event=>{if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey)setFilters(previous=>({...previous,state:'all'}));}}>
+        onClick={event=>{if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey)setOverrides(previous=>({...previous,state:'all'}));}}>
         {view==='all'?'Current Tasks':workLabels[view]}
         <span>{view==='all'?tasks.length-workActivity.counts.archived:workActivity.counts[view]}</span>
       </motion.a>)}
@@ -89,16 +90,15 @@ export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,on
           <option key={state} value={state}>{labels(state)}</option>)}
       </select></div>
       <div className="task-filter"><label htmlFor="task-filter-sort">Sort</label><select id="task-filter-sort" name="sort" value={filters.sort} onChange={field}>
-        <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
-        <option value="priority">Highest priority</option><option value="title">Title</option>
+        {Object.entries(preferenceFields.task_sort.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></div>
       <div className="task-filter"><label htmlFor="task-filter-group">Group</label><select id="task-filter-group" name="group" value={filters.group} onChange={field}>
-        <option value="none">None</option><option value="state">State</option><option value="category">Category</option>
+        {Object.entries(preferenceFields.task_group.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></div>
     </div>
     <div className="task-result-bar">
       <span role="status"><Filter size={14} aria-hidden="true"/> {count} of {tasks.length} Tasks</span>
-      {(filters!==defaults||work!=='all')&&<a className="text-button" href={taskHref()} onClick={()=>setFilters(defaults)}>Reset filters</a>}
+      {(Object.keys(defaults).some(key=>filters[key]!==defaults[key])||work!=='all')&&<a className="text-button" href={taskHref()} onClick={()=>setOverrides({})}>Reset filters</a>}
     </div>
     {!loading && !count && <p>{tasks.length ? 'No Tasks match these filters.' : 'No Tasks in the current feed.'}</p>}
     {groups.map(([label, items]) => <section key={label} className="task-group" aria-label={labels(label)}>
@@ -106,10 +106,6 @@ export function TaskExplorer({tasks,controls,related,activityFor,Status,Panel,on
       <TaskRows tasks={items} controls={controls} related={related} activityFor={activityFor} Status={Status}/>
     </section>)}
   </Panel>;
-}
-
-export function useTaskFilters() {
-  return useState(defaultTaskFilters);
 }
 
 export function PrerequisiteChecks({graph,Status}) {

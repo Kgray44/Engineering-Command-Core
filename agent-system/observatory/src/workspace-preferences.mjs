@@ -7,6 +7,8 @@ export const preferenceFields = {
     choices: { expanded: 'Expanded', compact: 'Icons only on desktop' } },
   task_sort: { category: 'general', label: 'Default Task sort', initial: 'newest',
     choices: { newest: 'Newest first', oldest: 'Oldest first', priority: 'Highest priority', title: 'Title' } },
+  task_group: { category: 'general', label: 'Default Task grouping', initial: 'none',
+    choices: { none: 'None', state: 'State', category: 'Category' } },
   project_section: { category: 'projects', label: 'Open Project at', initial: 'overview',
     choices: { overview: 'Overview', tasks: 'Tasks', milestones: 'Milestones', dependencies: 'Dependencies',
       verification: 'GitHub and verification', telemetry: 'Telemetry', acceptance: 'Acceptance', evidence: 'Artifacts', history: 'History' } },
@@ -27,6 +29,11 @@ export const preferenceFields = {
     choices: { all: 'All activity', attention: 'Needs attention', recent: 'Recent work' } },
   merge_state: { category: 'integration', label: 'Default pull request filter', initial: 'open',
     choices: { open: 'Open', merged: 'Merged', closed: 'Closed', all: 'All states' } },
+  merge_readiness: { category: 'integration', label: 'Default integration evidence filter', initial: 'all',
+    choices: { all: 'All evidence states', merge_ready: 'Checks passed at inspection', blocked: 'Blocked',
+      checking: 'Checking', repairing: 'Repairing', stale: 'Refresh required', unknown: 'Awaiting inspection', merged: 'Merged' } },
+  merge_sort: { category: 'integration', label: 'Default pull request sort', initial: 'updated',
+    choices: { updated: 'Recently updated', newest: 'Newest first', oldest: 'Oldest first' } },
 };
 
 export const defaultPreferences = Object.fromEntries(Object.entries(preferenceFields).map(([key, field]) => [key, field.initial]));

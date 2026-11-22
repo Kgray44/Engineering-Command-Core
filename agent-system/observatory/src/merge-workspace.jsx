@@ -1,3 +1,4 @@
+import { defaultPreferences } from './workspace-preferences.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { GitMerge, GitPullRequest, RefreshCw } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
@@ -96,7 +97,7 @@ function Revisions({ run }) {
   </dl>;
 }
 
-export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initialTask, initialPull, initialRun, defaultState, defaultRepairLimit = '3', demo }) {
+export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initialTask, initialPull, initialRun, preferences = defaultPreferences, demo }) {
   const [pull, setPull] = useState(() => /^[1-9]\d*$/.test(initialPull ?? '') && Number.isSafeInteger(Number(initialPull)) ? Number(initialPull) : null);
   const { source, reload: reloadSource } = useMergeSource(demo ? null : pull, headers);
   const reviewedHead = source?.status === 'available' && source.detail?.number === pull && source.detail.state === 'open' &&
@@ -187,7 +188,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
           <GitMerge size={16} aria-hidden="true"/> Integrate Task
         </button>
       </div>
-      {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} main={main} context={sourceContext} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs} headers={headers}
+      {mode === 'pr' && <MergeSourcePicker preferences={preferences} group={pullGroup} main={main} context={sourceContext} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs} headers={headers}
         onRun={id => { setConfirmation(''); setSelected(id); }}/>}
       <form key={mode} onSubmit={event => {
         event.preventDefault();
@@ -200,7 +201,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
           <option value="">Select a Task</option>
           {acceptedTasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
         </select></label> : null}
-        <label>Integration repair limit<select name="repair_limit" value={repairLimit ?? defaultRepairLimit} onChange={event => setRepairLimit(event.target.value)}>
+        <label>Integration repair limit<select name="repair_limit" value={repairLimit ?? preferences.merge_repair_limit} onChange={event => setRepairLimit(event.target.value)}>
           {[1, 2, 3, 4, 5].map(limit => <option key={limit} value={limit}>{limit}</option>)}
         </select></label>
         <button className="primary-button" disabled={busy || loading || (mode === 'pr' && !reviewedHead)}>Inspect source</button>

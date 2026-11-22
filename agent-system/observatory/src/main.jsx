@@ -13,7 +13,7 @@ import {ProposalControls} from './proposal-controls.jsx';
 import {activityHref,parseActivityHref} from './github-activity.mjs';
 import {IntegrationTaskStatus,MergeWorkspace,useIntegrationRuns} from './merge-workspace.jsx';
 import {proposalChecks} from '../intake.mjs';
-import {PrerequisiteChecks,RawTaskRecord,TaskAcceptanceMatrix,TaskActivityLabel,TaskAttemptHistory,TaskEvidenceLedger,TaskCapabilitySummary,TaskDependencies,TaskExplorer,TaskRows,defaultTaskFilters,useTaskFilters} from './task-workspace.jsx';
+import {PrerequisiteChecks,RawTaskRecord,TaskAcceptanceMatrix,TaskActivityLabel,TaskAttemptHistory,TaskEvidenceLedger,TaskCapabilitySummary,TaskDependencies,TaskExplorer,TaskRows,defaultTaskFilters} from './task-workspace.jsx';
 import {dependencyGraph,parseTaskHref,overviewTaskResults,taskActivity,taskHref,workspaceActivity} from './task-workspace.mjs';
 import {useTaskEngineDetail} from './use-task-engine-detail.jsx';
 import {codexThreadHref,hasLiveTaskWork,taskEngineRequest,taskNextAction,workerDispatchStatus} from './task-engine-client.mjs';
@@ -102,13 +102,13 @@ function TaskAdmission({checks,draft,tasks,summaries,publicIntake,publicationCon
 }
 
 function App(){const reduce=useReducedMotion(),[records,setRecords]=useState([]),[demo,setDemo]=useState(false),[localPage,setPage]=useState('overview'),[revision,setRevision]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(true),[formError,setFormError]=useState(''),[saving,setSaving]=useState(false);
-const [filters,setFilters]=useTaskFilters();
+const [taskFilterOverrides,setTaskFilterOverrides]=useState({});
 const [settings,setSettings]=useState(null);
 const initialDestination=useRef(true);
 const preference=settings?.preferences.values??defaultPreferences;
-const taskDefaults=useMemo(()=>preference.task_sort===defaultTaskFilters.sort?defaultTaskFilters:
-  {...defaultTaskFilters,sort:preference.task_sort},[preference.task_sort]);
-useEffect(()=>setFilters(previous=>previous.query || previous.state!=='all' ? {...previous,sort:taskDefaults.sort} : taskDefaults),[taskDefaults]);
+const taskDefaults=useMemo(()=>({...defaultTaskFilters,sort:preference.task_sort,group:preference.task_group}),
+  [preference.task_sort,preference.task_group]);
+const filters=useMemo(()=>({...taskDefaults,...taskFilterOverrides}),[taskDefaults,taskFilterOverrides]);
 const repository=settings?.application.repository??'Kgray44/Aetherwake';
 const voyage=(settings?.application.id??document.documentElement.dataset.engineeringApplication)==='voyagewright';
 const applicationName=voyage?'Voyagewright':'Aetherwake';
@@ -282,7 +282,7 @@ const related=(id,type)=>records.filter(r=>r.record_type===type&&r.task_id===id)
 const activity=useMemo(()=>workspaceActivity(tasks,attempts,demo?new Map():summaries),[tasks,records,summaries,demo]);
 const work=activity.counts;
 const resetMetricFilters=event=>{
-  if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey)setFilters(taskDefaults);
+  if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey)setTaskFilterOverrides({});
 };
 const chart=useMemo(()=>Array.from({length:14},(_,i)=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-13+i);return tasks.filter(t=>String(t.created_at).slice(0,10)===d.toISOString().slice(0,10)).length}),[tasks]);
 const traceCoverage=useMemo(()=>page==='overview'&&!demo
@@ -446,7 +446,7 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
     refreshVersion={projectRefresh} liveTaskState={projectTaskState} workerAccess={workerAccess} workerDispatch={engine.workerDispatch} onJump={jumpToSection} demo={demo} onNewTask={project=>{navigate('create');setNewTaskProject(project)}}/>
 </Suspense>}
 {page==='tasks'&&<Rise><TaskExplorer tasks={displayTasks} work={taskRoute?.work??'all'} workActivity={activity} controls={privateControls} related={related} activityFor={activityFor}
-  Status={Status} Panel={Panel} loading={loading} filters={filters} defaults={taskDefaults} setFilters={setFilters} onCreate={()=>navigate('create')}/></Rise>}
+  Status={Status} Panel={Panel} loading={loading} filters={filters} defaults={taskDefaults} setOverrides={setTaskFilterOverrides} onCreate={()=>navigate('create')}/></Rise>}
 {(page==='pulls'||page==='runs')&&<Suspense fallback={<p role="status">Loading repository activity…</p>}><GitHubActivityList kind={page} group={activityGroup(page)} ui={githubUi}
   ci={{ headers:verificationHeaders, live:!demo&&Boolean(proposals), mainRevision:github?.main?.status==='available'?revision:null }}
   filters={githubFilters[page]} setFilters={next=>setGitHubFilters(previous=>({...previous,[page]:next}))}/></Suspense>}
@@ -455,7 +455,7 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
   investigation={{ records, events: execution?.events ?? [], github,
     openTask: taskId => { navigate('detail'); select(taskId); } }}/></Suspense>}
 {page==='merge'&&<MergeWorkspace headers={verificationHeaders} demo={demo}
-  defaultState={preference.merge_state} defaultRepairLimit={preference.merge_repair_limit}
+  preferences={preference}
   initialTask={new URLSearchParams(mergeRoute?.[1]).get('task')}
   initialPull={new URLSearchParams(mergeRoute?.[1]).get('pr')}
   initialRun={new URLSearchParams(mergeRoute?.[1]).get('run')}

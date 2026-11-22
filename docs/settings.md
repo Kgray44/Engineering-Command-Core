@@ -1,6 +1,6 @@
 # Settings and diagnostics
 
-Open **Settings** to browse ten categories. General and Projects set workspace preferences. Integration includes the default pull request filter. Repository, worker, scheduling, authorization, storage, and external delivery facts reflect the active configuration and available observations. The settings API reports credential presence only.
+Open **Settings** to browse ten categories. General and Projects set workspace preferences. Integration sets the default pull request state, evidence filter, and sort. Repository, worker, scheduling, authorization, storage, and external delivery facts reflect the active configuration and available observations. The settings API reports credential presence only.
 
 ## Configuration registry
 
@@ -12,17 +12,20 @@ All editable values below are enum strings. The server validates the allowed val
 | Panel density | Comfortable | Comfortable, Compact |
 | Sidebar | Expanded | Expanded or icon-only on desktop |
 | Default Task sort | Newest first | Newest, oldest, priority, title |
+| Default Task grouping | None | None, state, category |
 | Project entry section | Overview | Overview, Tasks, Milestones, Dependencies, GitHub, Telemetry, Artifacts, History |
 | Project layout | Card grid | Card grid, List |
 | Default Project view | Current Projects | Current, active, planned or paused, awaiting review, accepted, archived |
 | Default Project sort | Manual order | Manual order, recently active, newest, oldest, priority, title |
 | Default Project priority | Normal | Low, Normal, High, Urgent |
 | Default pull request filter | Open | Open, Merged, Closed, All states |
+| Default integration evidence filter | All evidence states | Checks passed at inspection, blocked, checking, repairing, refresh required, awaiting inspection, merged, all evidence states |
+| Default pull request sort | Recently updated | Recently updated, newest first, oldest first |
 | Default Task priority | Normal | Low, Normal, High, Urgent |
 | Default repair limit | 3 attempts | 1 to 5 attempts |
 | Default Activity view | All activity | All activity, Needs attention, Recent work |
 
-Restore defaults previews the category and requires a confirmation. Task priority and repair limit prefill new forms and can be overridden for each new item. Saved preferences leave existing Tasks and integration runs intact.
+Restore defaults previews the category and requires a confirmation. Task priority and repair limit prefill new forms and can be overridden for each new item. Task grouping applies inside each Task activity view. Pull request criteria apply to the Merge source list. Changes made in either workspace are temporary. Change Settings to update the saved defaults.
 
 Project card order persists independently from these preferences. The settings audit under **Security** lists the last 15 revisions and timestamps; the scoped read API also returns those revision values. If another tab has saved changes, refresh before applying your changes again.
 
