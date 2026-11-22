@@ -54,6 +54,17 @@ The server groups Tasks, milestones, integration runs, and gates once per portfo
 
 The largest fixture also rendered 240 cards through the local Worker in Windows Chromium 157.0.8103.80 at 1,440 × 900 with motion enabled. A 4.2-second down-and-up sweep traversed 15,966 CSS pixels in each direction. The probe recorded 566 animation-frame intervals, 12.2 ms at p95, zero browser long tasks, zero unexpected layout shift, and zero CSS-hidden cards across 8,116 visible-card samples. This measured local response processing and browser behavior. Hosted D1 transfer time and intermittent compositor artifacts require separate observation.
 
+### Large Project Library compositor capture
+
+A follow-up captured compositor frames on Windows Chromium 157.0.8103.80 at 1,440 × 900 on `6d87271`. Each theme loaded 240 synthetic cards through the local Worker. The browser confirmed the animated scan grid and 22 px sidebar blur. A mouse-source gesture traversed the full Library down and back up at a requested 5,400 CSS px/s. Chrome supplied 960 × 600 JPEG frames from every second compositor frame eligible for capture.
+
+| Theme | Scroll range | Captured frames | Distinct offsets | p95 gap between captures |
+|---|---:|---:|---:|---:|
+| Aetherwake | 15,966 CSS px | 303 | 299 | 24.27 ms |
+| Voyagewright | 15,977 CSS px | 300 | 291 | 24.29 ms |
+
+An initial fill-to-gutter contrast check flagged 2 Aetherwake frames and 36 Voyagewright frames. The longest flagged spans were 26 and 48 CSS pixels. Visual inspection of the strongest flags and representative down and up frames found intact cards. An edge check then scanned all captures for at least 24 consecutive CSS pixels with fewer than two detectable card borders in the expected grid area. It flagged no frames. Both tests flagged a 36 CSS px control when edge measurements were suppressed. The maximum observed gap between captures during a gesture was 42.43 ms. The probe covered synthetic content in headless Chromium. Brief artifacts between captures and differences in the owner's physical display, zoom, and foreground load remain unverified.
+
 ### Project card dragging
 
 On Windows Chrome 157.0.8103.80, headless Playwright drove both themes through the shared local Command Core Worker on revision `346f6cb`. Each application used an isolated SQLite partition with eight synthetic Projects. The desktop viewport was 1,440 × 1,000 CSS pixels. Touch emulation used 390 × 1,100 CSS pixels. Motion was enabled. Each trial moved the first card into the next row using 26 paced input steps, waited for the insertion indicator, and required a successful reorder receipt and the same order after reload.
