@@ -276,7 +276,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const branch = (ref, sha) => ({ ref, sha, repo: providerRepository });
   const pull = {
     number: 7, title: 'Synthetic proposal for staging', body: 'Review the exact source revision.',
-    user: { login: 'synthetic-author' }, state: 'open', changed_files: 1, additions: 5, deletions: 2,
+    user: { login: 'synthetic-author' }, state: 'open', mergeable: true, changed_files: 1, additions: 5, deletions: 2,
     head: branch('codex/synthetic', head), base: branch('main', base),
     requested_reviewers: [{ login: 'synthetic-reviewer' }], requested_teams: [],
     html_url: 'https://github.com/' + repository + '/pull/7', created_at: '2026-11-20T00:00:00Z',
@@ -518,6 +518,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await linkedWork.getByRole('link', { name: 'Release project' }).getAttribute('href'), '#projects/' + projectId);
   assert.equal(await linkedWork.getByRole('link', { name: 'Release review' }).getAttribute('href'), '#tasks/' + taskId);
   await page.getByText(head, { exact: true }).waitFor();
+  await page.getByText('GitHub reports no conflict for this head and base', { exact: true }).waitFor();
   const reviews = page.getByRole('region', { name: 'Submitted reviews' });
   await reviews.getByText('prior-reviewer', { exact: true }).waitFor();
   assert.match(await reviews.getByRole('listitem').filter({ hasText: 'prior-reviewer' }).innerText(), /Changes requested[\s\S]*Different reviewed commit/);
@@ -579,7 +580,8 @@ test('the Project Library layout stays stable while a slow portfolio request com
     await route.continue();
   }, { times: 1 });
   const footerTop = () => page.locator('main footer').evaluate(footer => footer.getBoundingClientRect().top);
-  const workspaceTop = () => page.locator('.projects-workspace').evaluate(workspace => workspace.offsetTop);
+  const workspaceTop = () => page.locator('.projects-workspace').evaluate(workspace =>
+    workspace.getBoundingClientRect().top - workspace.closest('.view').getBoundingClientRect().top);
   let loadingPosition, workspaceLoadingPosition;
   try {
     const reading = page.waitForRequest('**/api/projects');
@@ -593,7 +595,7 @@ test('the Project Library layout stays stable while a slow portfolio request com
 
   await page.getByRole('link', { name: /Slow portfolio Project/ }).waitFor();
   assert.ok(Math.abs((await footerTop()) - loadingPosition) <= 1, 'The footer moved after the portfolio read');
-  assert.equal(await workspaceTop(), workspaceLoadingPosition, 'The workspace moved after the loading message cleared');
+  assert.ok(Math.abs((await workspaceTop()) - workspaceLoadingPosition) <= 0.1, 'The workspace moved after the loading message cleared');
 });
 
 test('an open tab recovers when a workspace asset is replaced during rollout', { timeout: 45_000 }, async t => {

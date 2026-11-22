@@ -15,6 +15,12 @@ const names = values => Array.isArray(values) ? values.slice(0, 25).map(user => 
 const logins = v => text(v?.login, 100);
 const lifecycle = v => ({ status: text(v.status, 48), conclusion: text(v.conclusion, 48) });
 
+function conflictStatus(data) {
+  if (data.mergeable === false || data.mergeable_state === 'dirty') return 'conflicting';
+  if (data.mergeable === true) return 'clear';
+  return data.mergeable === null ? 'pending' : 'unavailable';
+}
+
 function pull(data, number, repository) {
   if (data?.number !== number || data.base?.repo?.full_name !== repository || !isRevision(data.base?.sha) || !isRevision(data.head?.sha)) {
     throw new Error('Pull request identity mismatch');
@@ -34,6 +40,7 @@ function pull(data, number, repository) {
     } : null,
     maintainer_can_modify: typeof data.maintainer_can_modify === 'boolean' ? data.maintainer_can_modify : null,
     base: ref(data.base.ref, data.base.sha), head: ref(data.head.ref, data.head.sha),
+    conflict_status: conflictStatus(data),
     merge_commit_sha: isRevision(data.merge_commit_sha) ? data.merge_commit_sha : null,
     created_at: time(data.created_at), updated_at: time(data.updated_at),
     closed_at: time(data.closed_at), merged_at: time(data.merged_at),
@@ -158,7 +165,9 @@ export async function fetchGitHubDetail(fetcher, token, kind, id, { now, previou
   const path = (kind === 'pulls' ? '/pulls/' : '/actions/runs/') + id;
   const next = {};
   const core = await capture(async () => {
-    const current = await reader.get(path, 256 * 1024, previous ? validators.core : null);
+    const canReuseCore = previous && (kind !== 'pulls' ||
+      (Object.hasOwn(previous, 'conflict_status') && previous.conflict_status !== 'pending'));
+    const current = await reader.get(path, 256 * 1024, canReuseCore ? validators.core : null);
     const detail = current.unchanged ? previous : kind === 'pulls' ? pull(current.data, id, repository) : run(current.data, id, repository);
     next.core = current.etag;
     return { detail };

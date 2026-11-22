@@ -306,3 +306,23 @@ test('refreshes a cached review projection that predates reviewed revisions', as
   });
   assert.equal(refreshed.result.detail.reviews[0].revision, sha);
 });
+
+test('a pending GitHub conflict observation refreshes promptly through the shared cache', async t => {
+  const db = database(t);
+  const now = Date.now();
+  let detailReads = 0;
+  const upstream = async (url, { headers }) => {
+    if (url.endsWith('/pulls/12')) {
+      assert.equal(headers['If-None-Match'], undefined);
+      return Response.json({ ...pull(12), state: 'open', changed_files: 0, mergeable: detailReads++ === 0 ? null : false },
+        { headers: { etag: '"pull"' } });
+    }
+    return Response.json([]);
+  };
+  const read = delta => cachedGitHubDetail(db, upstream, 'fixture-token', 'pulls', 12, now + delta);
+  assert.equal((await read(0)).detail.conflict_status, 'pending');
+  assert.equal((await read(2000)).detail.conflict_status, 'pending');
+  assert.equal(detailReads, 1);
+  assert.equal((await read(11_000)).detail.conflict_status, 'conflicting');
+  assert.equal(detailReads, 2);
+});

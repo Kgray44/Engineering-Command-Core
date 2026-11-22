@@ -90,6 +90,19 @@ function PullReviews({ detail, sourceStatus }) {
   </section>;
 }
 
+function PullConflict({ detail, sourceStatus }) {
+  const stale = sourceStatus === 'stale';
+  const status = detail.conflict_status;
+  const labels = {
+    conflicting: stale ? 'Conflict reported at last observation' : 'GitHub reports a merge conflict',
+    clear: stale ? 'No conflict at last observation' : 'GitHub reports no conflict for this head and base',
+    pending: stale ? 'Last conflict check was pending' : 'GitHub is calculating conflicts',
+  };
+  return <div><dt>Merge conflicts</dt><dd>{labels[status] ?? 'Unavailable'}
+    {!stale && status === 'pending' && <small> Refresh GitHub source in a few seconds.</small>}
+  </dd></div>;
+}
+
 function TaskPrerequisites({ checks }) {
   if (!checks) return null;
   const open = checks.filter(check => check.status !== 'satisfied');
@@ -218,6 +231,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         <dl className="integration-revisions">
           <div><dt>Source · {detail.head?.ref}</dt><dd><code>{detail.head?.sha}</code></dd></div>
           <div><dt>Target · {detail.base?.ref}</dt><dd><code>{detail.base?.sha}</code></dd></div>
+          {detail.state === 'open' && <PullConflict detail={detail} sourceStatus={source.status}/>}
         </dl>
         <p>{detail.changed_files ?? 'Unknown'} files · +{detail.additions ?? '?'} / −{detail.deletions ?? '?'}</p>
         {detail.requested_reviewers?.length > 0 && <p>Requested reviewers {detail.requested_reviewers.join(', ')}</p>}
