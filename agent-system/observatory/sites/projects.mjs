@@ -219,6 +219,11 @@ export async function projectOperation({ db, owner, namespace, application, body
       body.op === 'get' ? body.id : null).all(),
     ]);
     const rows = new Map(taskRows.map(row => [row.task_id, row]));
+    const tasksByProject = Map.groupBy(taskRows, row => row.project_id);
+    const milestonesByProject = Map.groupBy(milestones.results, row => row.project_id);
+    const integrationsByProject = Map.groupBy(integrations.results, row => row.project_id);
+    const gatesByTask = Map.groupBy(gates.results, row => row.task_id);
+    const gatesByDependentProject = Map.groupBy(gates.results, row => rows.get(row.task_id)?.project_id);
     return {
       taskRows,
       milestoneDependents(projectId) {
@@ -237,9 +242,8 @@ export async function projectOperation({ db, owner, namespace, application, body
         });
       },
       forProject(project) {
-        const linked = taskRows.filter(row => row.project_id === project.id);
-        const taskIds = new Set(linked.map(row => row.task_id));
-        const dependencies = gates.results.filter(gate => taskIds.has(gate.task_id));
+        const linked = tasksByProject.get(project.id) ?? [];
+        const dependencies = gatesByDependentProject.get(project.id) ?? [];
         const activeWorkers = new Set();
         const tasks = linked.map(row => {
           const task = JSON.parse(row.record);
@@ -251,8 +255,8 @@ export async function projectOperation({ db, owner, namespace, application, body
           const blockers = [...dispatch.blockers];
           if (['admitted', 'queued', 'scheduled'].includes(engine?.state)) {
             if (['paused', 'archived'].includes(project.status)) blockers.push({ type: 'project', id: project.id, state: project.status });
-            for (const gate of dependencies.filter(item => item.task_id === row.task_id && item.status !== 'accepted')) {
-              blockers.push({ type: 'milestone', id: gate.milestone_id, state: gate.status });
+            for (const gate of gatesByTask.get(row.task_id) ?? []) {
+              if (gate.status !== 'accepted') blockers.push({ type: 'milestone', id: gate.milestone_id, state: gate.status });
             }
           }
           return { id: row.task_id, title: task.title, version: row.version, created_at: row.created_at,
@@ -263,9 +267,9 @@ export async function projectOperation({ db, owner, namespace, application, body
             candidate_revision: ['verifying', 'succeeded'].includes(attempt?.state) ? attempt.candidate_revision ?? null : null,
             owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
         });
-        const projectMilestones = orderBySavedIds(milestones.results.filter(item => item.project_id === project.id),
+        const projectMilestones = orderBySavedIds(milestonesByProject.get(project.id) ?? [],
           project.milestone_order ?? []);
-        const projectIntegrations = integrations.results.filter(item => item.project_id === project.id);
+        const projectIntegrations = integrationsByProject.get(project.id) ?? [];
         return { linked, tasks, active_workers: activeWorkers.size, milestones: projectMilestones, dependencies,
           integrations: projectIntegrations.map(({ project_id, checks, observed_base, ...integration }) => ({
             ...integration, repository: application.repository,

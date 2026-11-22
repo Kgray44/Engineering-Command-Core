@@ -42,6 +42,18 @@ Visual inspection of six sampled frames per application found no blank bands. Hi
 
 During foreground Edge 157 navigation on Windows, the first Voyagewright Project Library load on staging revision `ba359a7` displaced the footer by 432 CSS pixels 643 ms after the click. The layout shift score was 0.0143. Layout Instability attributed the shift to the footer as the portfolio completed. The Project Library now reserves viewport height for the main column while the portfolio loads. A follow-up probe traced a separate 16-pixel movement to the loading paragraph margin collapsing through the workspace. The workspace now establishes its own formatting context to keep that margin inside it. A browser regression holds the Projects API response and compares both the workspace and footer positions before and after the cards render.
 
+### Large Project Library read and scroll
+
+The server groups Tasks, milestones, integration runs, and gates once per portfolio read. The existing Task Engine still calculates dispatch readiness. On Windows with Node 24 and local SQLite, the benchmark compared the indexed reader with the reader at `6ae7039`. Each pair read the same synthetic Projects, admitted Tasks, milestone gates, and integration rows. Project list responses were identical across all three sizes. Each variant had five warm-up calls and 13 measured calls with alternating order.
+
+| Projects | Tasks | Baseline median | Indexed median |
+|---:|---:|---:|---:|
+| 8 | 64 | 0.66 ms | 0.68 ms |
+| 64 | 768 | 11.17 ms | 7.64 ms |
+| 240 | 3,840 | 177.07 ms | 49.32 ms |
+
+The largest fixture also rendered 240 cards through the local Worker in Windows Chromium 157.0.8103.80 at 1,440 × 900 with motion enabled. A 4.2-second down-and-up sweep traversed 15,966 CSS pixels in each direction. The probe recorded 566 animation-frame intervals, 12.2 ms at p95, zero browser long tasks, zero unexpected layout shift, and zero CSS-hidden cards across 8,116 visible-card samples. This measured local response processing and browser behavior. Hosted D1 transfer time and intermittent compositor artifacts require separate observation.
+
 ### Project card dragging
 
 On Windows Chrome 157.0.8103.80, headless Playwright drove both themes through the shared local Command Core Worker on revision `346f6cb`. Each application used an isolated SQLite partition with eight synthetic Projects. The desktop viewport was 1,440 × 1,000 CSS pixels. Touch emulation used 390 × 1,100 CSS pixels. Motion was enabled. Each trial moved the first card into the next row using 26 paced input steps, waited for the insertion indicator, and required a successful reorder receipt and the same order after reload.
