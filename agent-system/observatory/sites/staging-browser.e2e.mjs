@@ -441,7 +441,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } });
   assert.equal(referenceReceipt.status, 200);
   const screenshotUrl = 'https://example.invalid/project/verification.png';
-  const runUrl = 'https://github.com/' + repository + '/actions/runs/87';
+  const runUrl = 'https://github.com/' + repository.toUpperCase() + '/actions/runs/87';
   for (const [kind, uri] of [['artifact', screenshotUrl], ['ci_run', runUrl], ['ci_run', runUrl.replace('/87', '/88')]]) {
     referenceReceipt = await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
       expected_version: referenceReceipt.body.version, operation_id: crypto.randomUUID(),

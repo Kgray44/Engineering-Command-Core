@@ -81,11 +81,15 @@ function latestProjectActivity(project, { tasks, milestones, integrations }) {
 }
 const artifactReferenceKinds = new Set(['artifact', 'document', 'url', 'test', 'pull_request', 'ci_run']);
 
+function projectRepositoryRoute(href, repository) {
+  const prefix = 'https://github.com/' + repository + '/';
+  return href?.toLowerCase().startsWith(prefix.toLowerCase()) ? href.slice(prefix.length) : null;
+}
+
 function collectProjectArtifact(artifacts, repository, task_id, reference, evidence) {
   if (typeof reference?.uri !== 'string' || (!evidence && !artifactReferenceKinds.has(reference.kind))) return;
   const href = safeActivityUrl(reference.uri);
-  const source = 'https://github.com/' + repository + '/';
-  const route = href?.startsWith(source) ? href.slice(source.length) : '';
+  const route = projectRepositoryRoute(href, repository) ?? '';
   let kind = evidence || reference.kind === 'test' ? 'verification' : 'artifact';
   if (/^pull\/\d+(?:[\/#]|$)/.test(route)) kind = 'pull_request';
   else if (/^actions\/runs\/\d+(?:[\/#]|$)/.test(route)) kind = 'ci_run';
@@ -374,7 +378,7 @@ export async function projectOperation({ db, owner, namespace, application, body
         collectProjectArtifact(artifactSources, application.repository, row.task_id, reference, { source: 'owner_review' });
       }
       for (const item of [...(engine?.links ?? []), ...(engine?.evidence ?? [])]) {
-        if (typeof item.uri === 'string' && item.uri.startsWith('https://github.com/' + application.repository + '/')) {
+        if (typeof item.uri === 'string' && projectRepositoryRoute(item.uri, application.repository) !== null) {
           github.push({ task_id: row.task_id, uri: item.uri, kind: item.kind, revision: item.revision ?? null });
         }
       }
