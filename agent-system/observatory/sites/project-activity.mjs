@@ -28,3 +28,13 @@ export async function readProjectActivity(db, owner, namespace) {
     ...(milestone_id ? { milestone: { id: milestone_id, name: milestone_name } } : {}),
   }));
 }
+
+export async function readPendingProjectReviews(db, owner, namespace) {
+  const { results } = await db.prepare(`
+    SELECT id, json_extract(metadata, '$.name') AS name
+    FROM projects WHERE owner_id = ? AND namespace = ? AND status <> 'archived'
+      AND json_extract(metadata, '$.owner_review') = 'pending'
+    ORDER BY updated_at DESC, id DESC LIMIT 12
+  `).bind(owner, namespace).all();
+  return results;
+}

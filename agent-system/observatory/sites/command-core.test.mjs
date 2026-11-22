@@ -608,7 +608,7 @@ test('Activity reads recent Project events from the current owner and verificati
   const verification = { 'x-observatory-verification': crypto.randomUUID() };
   const id = crypto.randomUUID();
   const operations = [
-    { op: 'create', id, fields: { name: 'Activity project', objective: 'Verify scoped events' } },
+    { op: 'create', id, fields: { name: 'Activity project', objective: 'Verify scoped events', owner_review: 'pending' } },
     { op: 'update', id, expected_version: 1, fields: { name: 'Updated activity project' } },
     { op: 'milestone', id, milestone_id: crypto.randomUUID(), name: 'Delivery check', status: 'planned', acceptance: 'Check evidence' },
   ];
@@ -618,12 +618,19 @@ test('Activity reads recent Project events from the current owner and verificati
   const live = await call(0, '/api/activity');
   assert.equal(live.status, 200);
   assert.deepEqual(live.body.project_events, []);
+  assert.deepEqual(live.body.pending_project_reviews, []);
+  assert.deepEqual((await call(1, '/api/activity', undefined, undefined, verification)).body.pending_project_reviews, []);
   assert.deepEqual((await call(1, '/api/activity', undefined, undefined, verification)).body.project_events, []);
   const scoped = await call(0, '/api/activity', undefined, undefined, verification);
   assert.equal(scoped.status, 200);
   assert.deepEqual(scoped.body.project_events.map(item => item.kind).sort(), ['milestone_changed', 'project_changed', 'project_created']);
   assert.ok(scoped.body.project_events.every(item => item.project.id === id && item.project.name === 'Updated activity project'));
   assert.ok(scoped.body.project_events.some(item => item.milestone?.name === 'Delivery check'));
+  assert.deepEqual(scoped.body.pending_project_reviews.map(({ id, name }) => ({ id, name })),
+    [{ id, name: 'Updated activity project' }]);
+  assert.equal((await call(0, '/api/projects', { op: 'update', id, expected_version: 2, fields: { owner_review: 'accepted' } },
+    undefined, verification)).status, 200);
+  assert.deepEqual((await call(0, '/api/activity', undefined, undefined, verification)).body.pending_project_reviews, []);
   assert.equal((await call(0, '/api/activity', undefined, 'unassigned', verification)).status, 403);
   assert.equal((await call(0, '/api/activity', undefined, undefined, { 'x-observatory-verification': 'invalid' })).status, 400);
   assert.equal((await call(0, '/api/activity', {})).status, 405);

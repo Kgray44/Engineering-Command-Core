@@ -10,7 +10,7 @@ Open a card to inspect the Project. Jump links lead to task, milestone, dependen
 
 ## Activity and attention
 
-Open **Activity** to scan all activity, focus on items that need attention, or browse recent work. The Center uses recorded Project changes, Task lifecycle states, failed attempts, explicit GitHub review requests, CI results, and worker observations. Prerequisite rows show the Task or capability holding up execution when available. Project and Task links take you to their source workspaces. GitHub cache and credential warnings link to the connection settings. Integration attention shows the recorded blocker and opens the exact run. Recently landed integrations require a recorded landed commit and link to the same integration history.
+Open **Activity** to scan all activity, focus on items that need attention, or browse recent work. The Center uses recorded Project changes, Task lifecycle states, failed attempts, explicit GitHub review requests, CI results, and worker observations. Prerequisite rows show the Task or capability holding up execution when available. Project and Task links take you to their source workspaces. Projects with a pending owner decision link directly to Acceptance. Failed-attempt alerts open the corresponding attempt in Task Control Center. GitHub cache and credential warnings link to the connection settings. Integration attention shows the recorded blocker and opens the exact run. Recently landed integrations require a recorded landed commit and link to the same integration history.
 
 ## Work and acceptance
 

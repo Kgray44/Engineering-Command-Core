@@ -363,7 +363,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   });
   const projectId = crypto.randomUUID();
   const project = await stage.run('/api/projects', { op: 'create', id: projectId,
-    fields: { name: 'Release project', objective: 'Trace the pull request to its Project' } });
+    fields: { name: 'Release project', objective: 'Trace the pull request to its Project', owner_review: 'pending' } });
   assert.equal(project.status, 201);
   const linkedTask = await stage.run('/api/projects', { op: 'register_task', id: projectId, operation_id: crypto.randomUUID(),
     fields: { title: 'Release review', objective: 'Review the exact source', primary: 'backend', profile_id: 'backend', criteria: ['Verify the diff'] } });
@@ -767,6 +767,11 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     JSON.stringify({ operation_id: crypto.randomUUID(), at: mergedAt, version: 1, kind: 'start', state: 'merged' }));
   putMerged(mergedId, 8, { merged_sha: 'e'.repeat(40), merged_at: mergedAt });
   putMerged(crypto.randomUUID(), 9, {});
+  await page.goto(stage.origin + '/#activity');
+  await page.getByRole('button', { name: 'All activity', exact: true }).click();
+  const reviewsPending = panel('Projects awaiting owner review');
+  await reviewsPending.getByRole('link', { name: 'Release project', exact: true }).click({ timeout: 5_000 });
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#project-acceptance h2'));
   await page.goto(stage.origin + '/#activity');
   await page.getByRole('button', { name: 'All activity', exact: true }).click();
   const attention = panel('Integration attention');

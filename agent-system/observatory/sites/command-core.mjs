@@ -7,7 +7,7 @@ import { sha256 } from './task-telemetry.mjs';
 import { createWorker } from './worker.mjs';
 import { workspaceSettings } from './workspace-settings.mjs';
 import { integrationAccess } from './integration-runs.mjs';
-import { readProjectActivity } from './project-activity.mjs';
+import { readPendingProjectReviews, readProjectActivity } from './project-activity.mjs';
 import { readDataHealth } from './data-health.mjs';
 import { taskExecutionCapacity } from '../task-execution-capacity.mjs';
 
@@ -254,7 +254,10 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           const verification = request.headers.get('x-observatory-verification');
           if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
           const namespace = verification ? 'verification:' + verification : 'live';
-          return response({ project_events: await readProjectActivity(scoped.DB, owner, namespace) });
+          const [project_events, pending_project_reviews] = await Promise.all([
+            readProjectActivity(scoped.DB, owner, namespace), readPendingProjectReviews(scoped.DB, owner, namespace),
+          ]);
+          return response({ project_events, pending_project_reviews });
         }
         if (url.pathname === '/api/settings/data') {
           if (request.method !== 'GET') return error('Method not allowed', 405);

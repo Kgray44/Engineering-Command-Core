@@ -367,7 +367,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
   </>;
 }
 
-export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, settings, onSettings, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, taskEditor, demo }) {
+export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, settings, onSettings, repository, repositoryMain, repositoryCI, workerAccess, workerDispatch, taskEditor, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const defaults = libraryDefaults(preferences);
@@ -392,10 +392,13 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
   const readVersion = useRef(0);
   const initialProjectSection = useRef(null);
   useEffect(() => {
-    if (!preferencesReady || !projectId || data?.project?.id !== projectId || initialProjectSection.current === projectId) return;
-    initialProjectSection.current = projectId;
-    if (preferences.project_section !== 'overview') onJump('project-' + preferences.project_section);
-  }, [data?.project?.id, onJump, preferences.project_section, preferencesReady, projectId]);
+    if (!preferencesReady || !projectId || data?.project?.id !== projectId) return;
+    const route = projectId + ':' + (initialSection ?? '');
+    if (initialProjectSection.current === route) return;
+    initialProjectSection.current = route;
+    const section = initialSection ?? preferences.project_section;
+    if (section !== 'overview') onJump('project-' + section);
+  }, [data?.project?.id, initialSection, onJump, preferences.project_section, preferencesReady, projectId]);
   const load = async signal => {
     const version = ++readVersion.current;
     const next = await projectRequest(null, headers, { id: projectId, signal });

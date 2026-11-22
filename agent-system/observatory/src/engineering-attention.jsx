@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { activityHref, activityId } from './github-activity.mjs';
-import { taskHref } from './task-workspace.mjs';
+import { taskAttemptHref, taskHref } from './task-workspace.mjs';
 
 const recent = rows => [...rows].sort((left, right) => (Date.parse(right.at) || 0) - (Date.parse(left.at) || 0)).slice(0, 12);
 const time = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : null;
@@ -9,7 +9,7 @@ const label = value => String(value).replaceAll('_', ' ');
 const dispositions = new Set(['failure', 'timed_out', 'startup_failure', 'action_required']);
 
 function useProjectActivity(headers, enabled) {
-  const [view, setView] = useState({ events: [], loading: true });
+  const [view, setView] = useState({ events: [], pendingReviews: [], loading: true });
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     if (!enabled) return;
@@ -22,7 +22,7 @@ function useProjectActivity(headers, enabled) {
         const response = await fetch('/api/activity', { headers, signal: controller.signal, cache: 'no-store' });
         if (!response.ok) throw Error('Project activity is unavailable.');
         const data = await response.json();
-        if (!controller.signal.aborted) setView({ events: data.project_events, loading: false });
+        if (!controller.signal.aborted) setView({ events: data.project_events, pendingReviews: data.pending_project_reviews ?? [], loading: false });
       } catch {
         if (!controller.signal.aborted) setView(previous => ({ ...previous, loading: false, stale: true }));
       } finally {
@@ -88,13 +88,16 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
   });
   const sections = [
     ['attention', 'Owner review', entries.filter(task => task.state === 'verifying')],
+    ['attention', 'Projects awaiting owner review', activity.pendingReviews.map(project => ({
+      id: project.id, label: project.name, href: '#projects/' + project.id + '?section=acceptance',
+    }))],
     ['attention', 'Waiting on prerequisites', entries.filter(task => !['archived', 'cancelled', 'completed'].includes(task.state) &&
       (task.blockers.length > 0 || (task.projectGate && ['admitted', 'blocked', 'queued', 'ready', 'scheduled'].includes(task.state)))).map(task => ({
       ...task, detail: issue(task),
     }))],
     ['attention', 'Blocked and failed Tasks', entries.filter(task => ['blocked', 'failed'].includes(task.state)).map(task => ({ ...task, detail: issue(task) }))],
     ['attention', 'Failed attempts', recent(attempts.filter(attempt => attempt.state === 'failed' && taskIndex.has(attempt.task_id))
-      .map(attempt => ({ id: attempt.id, label: taskIndex.get(attempt.task_id).title, href: taskHref(attempt.task_id), state: attempt.state,
+      .map(attempt => ({ id: attempt.id, label: taskIndex.get(attempt.task_id).title, href: taskAttemptHref(attempt.task_id, attempt.id), state: attempt.state,
         detail: 'Attempt ' + attempt.attempt_number, at: attempt.finished_at ?? attempt.started_at })))],
     ['attention', 'Pull requests awaiting review', recent(openPulls.filter(item => !item.draft && item.requested_review_count > 0)
       .map(item => ({ ...pullRow(item), state: 'review requested' })))],
@@ -125,7 +128,8 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
       {settings?.application && <button type="button" className="text-button" onClick={activity.refresh}>Refresh Project activity</button>}
     </div>
     <div className="attention-grid">{sections.filter(([group]) => filter === 'all' || group === filter).map(([, title, items]) => <Panel title={title} key={title}>
-      {title === 'Project changes' && activity.stale && <p role="status">Project activity could not refresh.{activity.events.length ? ' Showing the last read.' : ''}</p>}
+      {['Project changes', 'Projects awaiting owner review'].includes(title) && activity.stale &&
+        <p role="status">Project activity could not refresh.{items.length ? ' Showing the last read.' : ''}</p>}
       {items.length ? <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>
         <div><a href={item.href}>{item.label}</a>
           {item.detail && <small>{item.detail}</small>}
@@ -134,7 +138,7 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
           {item.task && <small><a href={taskHref(item.task)}>Open Task</a></small>}
         </div>
         {item.state && <Status value={item.state}/>}
-      </motion.li>)}</ul> : <p className="low">{title === 'Project changes' && activity.loading && settings?.application
+      </motion.li>)}</ul> : <p className="low">{['Project changes', 'Projects awaiting owner review'].includes(title) && activity.loading && settings?.application
         ? 'Loading Project changes…' : 'No matching records in the current feed.'}</p>}
     </Panel>)}</div>
   </>;
