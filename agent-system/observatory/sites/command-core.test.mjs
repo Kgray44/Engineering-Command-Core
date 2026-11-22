@@ -201,7 +201,7 @@ test('concurrent claim retries keep one Attempt and archive only affects the own
 });
 
 test('Project progress reports actual scoped execution, milestone gates and owner review', async t => {
-  const { call, task, one } = setup(t);
+  const { call, task, one, rpc } = setup(t);
   const project = request => call(0, '/api/projects', request);
   const id = crypto.randomUUID();
   const dependencyId = crypto.randomUUID();
@@ -225,6 +225,7 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   const read = async () => (await call(0, '/api/projects/' + id)).body;
   const detail = await read();
   assert.equal(detail.progress.tasks.blocked, 1);
+  assert.equal(detail.active_workers, 0);
   assert.equal(detail.progress.tasks.completed, 0);
   assert.equal(detail.progress.owner_review, 'pending');
   assert.deepEqual(detail.progress.integrations, { tracked: 1, merged: 1, deployed: 0 });
@@ -235,6 +236,11 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   assert.equal((await call(1, '/api/projects')).body.projects.length, 0);
   assert.equal((await project({ ...milestone, expected_version: 1, status: 'accepted' })).status, 200);
   assert.equal((await read()).progress.tasks.ready, 1);
+  const claim = await rpc(0, 'task_engine_v1', { application_id: 'aetherwake', worker_key: 'a'.repeat(64),
+    request: { op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() } });
+  assert.equal(claim.body.result.structuredContent.claim.task.id, task_id);
+  assert.equal((await read()).active_workers, 1);
+  assert.equal((await call(0, '/api/projects/' + dependencyId)).body.active_workers, 0);
 });
 
 test('explicit proposal writes carry only the owning repository and its publication credential', async t => {
@@ -403,4 +409,33 @@ test('Project milestone ordering and eligible Task moves preserve canonical reco
   assert.ok((await readFrom()).body.history.some(event => event.kind === 'task_moved_out' && event.task_id === task_id));
   await call(0, projects, { op: 'milestone_link', id: to, milestone_id: peer, task_id });
   assert.equal((await call(0, projects, { ...move, source_project_id: to, id: from })).status, 409);
+});
+
+test('Merge source discovery reads scoped Task and Project associations before an integration run exists', async t => {
+  const { call, task } = setup(t);
+  const projectId = crypto.randomUUID();
+  const head = 'b'.repeat(40);
+  const operationId = crypto.randomUUID();
+  for (const app of [0, 1]) {
+    const project = await call(app, '/api/projects', { op: 'create', id: projectId,
+      fields: { name: app ? 'Peer project' : 'Delivery project', objective: 'Review source relationships' } });
+    assert.equal(project.status, 201);
+    const created = await call(app, '/api/projects', { op: 'register_task', id: projectId,
+      operation_id: operationId, fields: { ...taskFields, title: app ? 'Peer review' : 'Source review' } });
+    assert.equal(created.status, 201);
+    const attached = await task(app, { op: 'command', task_id: created.body.task.id,
+      expected_version: created.body.version, operation_id: crypto.randomUUID(),
+      action: { type: 'associate', reference: { kind: 'pull_request', uri: 'https://github.com/' + fixture[app].repository + '/pull/81', revision: head } } });
+    assert.equal(attached.status, 200);
+  }
+  const path = '/api/integrations/v1?pr_number=81';
+  const primary = await call(0, path);
+  assert.equal(primary.status, 200);
+  assert.deepEqual(primary.body.associations.map(item => ({
+    title: item.task.title, project: item.project?.name, revisions: item.references.map(ref => ref.revision),
+  })), [{ title: 'Source review', project: 'Delivery project', revisions: [head] }]);
+  assert.equal((await call(1, path)).body.associations[0].task.title, 'Peer review');
+  assert.deepEqual((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.associations, []);
+  assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, '/api/integrations/v1?pr_number=81junk')).status, 400);
 });

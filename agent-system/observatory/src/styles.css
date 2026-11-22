@@ -541,7 +541,7 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 
 
 .merge-discovery { display: grid; gap: .85rem; }
-.merge-discovery-filters { display: grid; gap: .65rem; grid-template-columns: minmax(0, 1.65fr) repeat(2, minmax(0, 1fr)); }
+.merge-discovery-filters { display: grid; gap: .65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .merge-source-list { list-style: none; display: grid; gap: .35rem; padding: .15rem; margin: 0; max-height: 19rem; overflow: auto; }
 .merge-source-list button { display: flex; align-items: baseline; gap: .6rem; justify-content: space-between; width: 100%; text-align: left; }
 .merge-source-list button strong { overflow-wrap: anywhere; }

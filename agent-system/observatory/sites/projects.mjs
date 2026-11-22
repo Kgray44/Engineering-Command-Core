@@ -92,9 +92,13 @@ export async function projectOperation({ db, owner, namespace, application, body
         const linked = taskRows.filter(row => row.project_id === project.id);
         const taskIds = new Set(linked.map(row => row.task_id));
         const dependencies = gates.results.filter(gate => taskIds.has(gate.task_id));
+        const activeWorkers = new Set();
         const tasks = linked.map(row => {
           const task = JSON.parse(row.record);
           const engine = row.engine && JSON.parse(row.engine);
+          const attempt = engine?.attempts.at(-1);
+          if (attempt?.worker_id && attempt.lease_until > now &&
+              ['running', 'pausing', 'cancelling'].includes(engine.state)) activeWorkers.add(attempt.worker_id);
           const dispatch = storedTaskDispatch(row, rows, now);
           const blockers = [...dispatch.blockers];
           if (['admitted', 'queued', 'scheduled'].includes(engine?.state)) {
@@ -110,7 +114,7 @@ export async function projectOperation({ db, owner, namespace, application, body
         const projectMilestones = orderBySavedIds(milestones.results.filter(item => item.project_id === project.id),
           project.milestone_order ?? []);
         const projectIntegrations = integrations.results.filter(item => item.project_id === project.id);
-        return { linked, tasks, milestones: projectMilestones, dependencies, integrations: projectIntegrations.map(({ project_id, ...integration }) => ({ ...integration, repository: application.repository })),
+        return { linked, tasks, active_workers: activeWorkers.size, milestones: projectMilestones, dependencies, integrations: projectIntegrations.map(({ project_id, ...integration }) => ({ ...integration, repository: application.repository })),
           progress: projectProgress(project, tasks, projectMilestones, projectIntegrations) };
       },
     };

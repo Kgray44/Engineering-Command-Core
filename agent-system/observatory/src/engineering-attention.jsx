@@ -20,7 +20,7 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, runs, 
       .map(item => ({ id: activityId('runs', item), label: item.title ?? item.workflow, state: item.conclusion, href: activityHref('runs', activityId('runs', item)) })).filter(item => item.id)],
     ['Integration attention', runs.filter(run => ['blocked', 'checking', 'repairing', 'merge_ready'].includes(run.state))
       .map(run => ({ id: run.id, label: run.pr_number ? 'Pull request #' + run.pr_number : 'Task candidate ' + run.head_sha.slice(0, 10),
-        state: run.state, href: run.pr_number ? '#merge?pr=' + run.pr_number : '#merge?task=' + encodeURIComponent(run.task?.id ?? '') }))],
+        state: run.state, href: '#merge?run=' + run.id + (run.pr_number ? '&pr=' + run.pr_number : '') }))],
     ['Connections', [{ id: 'worker', label: dispatch.label, href: '#settings/workers' },
       ...(github?.main?.status !== 'available' ? [{ id: 'github', label: github?.main?.reason ?? 'GitHub main is unverified', href: '#settings/github' }] : [])]],
   ];

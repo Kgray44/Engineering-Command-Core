@@ -4,7 +4,7 @@ import { motion, useReducedMotion } from 'motion/react';
 import { taskHref } from './task-workspace.mjs';
 import { integrationLogFact, integrationWorkflowTiming } from './integration-analytics.mjs';
 import { codexThreadHref } from './task-engine-client.mjs';
-import { MergeSourcePicker, useMergeSource } from './merge-source-picker.jsx';
+import { MergeSourcePicker, useMergeSource, useMergeSourceContext } from './merge-source-picker.jsx';
 
 const endpoint = '/api/integrations/v1';
 const empty = { access: {}, runs: [], loading: true };
@@ -96,13 +96,13 @@ function Revisions({ run }) {
   </dl>;
 }
 
-export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask, initialPull, defaultState, demo }) {
+export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initialTask, initialPull, initialRun, defaultState, demo }) {
   const [pull, setPull] = useState(() => /^[1-9]\d*$/.test(initialPull ?? '') && Number.isSafeInteger(Number(initialPull)) ? Number(initialPull) : null);
   const { source, reload: reloadSource } = useMergeSource(demo ? null : pull, headers);
   const reviewedHead = source?.status === 'available' && source.detail?.number === pull && source.detail.state === 'open' &&
     !source.detail.draft && /^[a-f0-9]{40}$/.test(source.detail.head?.sha ?? '') ? source.detail.head.sha : null;
   const [mode, setMode] = useState(initialTask ? 'task' : 'pr');
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(() => /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/.test(initialRun ?? '') ? initialRun : null);
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -110,6 +110,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
   const observation = useRef({ id: null, polls: 0 });
   const reduce = useReducedMotion();
   const { runs, access, loading, error, reload } = useIntegrationRuns(headers, !demo);
+  const sourceContext = useMergeSourceContext(!demo && mode === 'pr' ? pull : null, headers, runs);
   const verification = headers?.['x-observatory-verification'];
   useEffect(() => {
     if (!selected) return;
@@ -185,7 +186,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, initialTask,
           <GitMerge size={16} aria-hidden="true"/> Integrate Task
         </button>
       </div>
-      {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs}
+      {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} main={main} context={sourceContext} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs}
         onRun={id => { setConfirmation(''); setSelected(id); }}/>}
       <form key={mode} onSubmit={event => {
         event.preventDefault();

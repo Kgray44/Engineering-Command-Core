@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { taskHref } from './task-workspace.mjs';
 import { activityHref, activityId, activityState, searchActivity } from './github-activity.mjs';
 
 export function useMergeSource(number, headers) {
@@ -23,21 +24,61 @@ export function useMergeSource(number, headers) {
   };
 }
 
-export function MergeSourcePicker({ group, number, onSelect, source, reload, runs, onRun, defaultState }) {
+export function useMergeSourceContext(number, headers, runs) {
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    if (!number) return;
+    const controller = new AbortController();
+    fetch('/api/integrations/v1?pr_number=' + number, { headers, signal: controller.signal, cache: 'no-store' })
+      .then(async response => {
+        const data = await response.json();
+        if (!controller.signal.aborted) setResult({ number, data: response.ok && data.associations ? data : null });
+      }).catch(() => {
+        if (!controller.signal.aborted) setResult({ number, data: null });
+      });
+    return () => controller.abort();
+  }, [number, headers, runs]);
+  return result?.number === number ? result : null;
+}
+
+function pullReadiness(pull, runs, group, main) {
+  const number = activityId('pulls', pull);
+  if (activityState('pulls', pull) === 'merged') return ['merged', 'Merged on GitHub'];
+  const run = runs.find(item => item.pr_number === number && item.head_sha === pull.revision);
+  if (!run) return runs.some(item => item.pr_number === number) ? ['stale', 'Different revision inspected'] : ['unknown', 'Awaiting inspection'];
+  if (group?.status !== 'available' || (run.evidence?.base_sha &&
+      (main?.status !== 'available' || run.evidence.base_sha !== main.revision))) return ['stale', 'Refresh required'];
+  if (run.state === 'merge_ready' && !run.evidence?.base_sha) return ['unknown', 'Base evidence missing'];
+  const labels = { merge_ready: 'Checks passed at last inspection', blocked: 'Blocked', checking: 'Checking',
+    repairing: 'Repairing', merged: 'Verified merge', deployed: 'Deployed' };
+  return [run.state, labels[run.state] ?? 'Awaiting inspection'];
+}
+
+export function MergeSourcePicker({ group, main, number, onSelect, source, context, reload, runs, onRun, defaultState }) {
   const [query, setQuery] = useState('');
   const [state, setState] = useState(defaultState === 'all' ? '' : defaultState ?? 'open');
-  const [oldest, setOldest] = useState(false);
+  const [sort, setSort] = useState('updated');
+  const [readiness, setReadiness] = useState('');
   const reduced = useReducedMotion();
-  const pulls = searchActivity('pulls', group?.items ?? [], { query, state, oldest });
+  const pulls = searchActivity('pulls', group?.items ?? [], { query, state, oldest: sort === 'oldest' })
+    .filter(pull => !readiness || pullReadiness(pull, runs, group, main)[0] === readiness);
+  if (sort === 'updated') pulls.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
   const detail = source?.detail;
-  const matchingRuns = runs.filter(run => run.pr_number === number);
+  const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
   return <div className="merge-discovery">
     <div className="merge-discovery-filters">
       <label>Search pull requests<input type="search" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <label>State<select value={state} onChange={event => setState(event.target.value)}>
         <option value="open">Open</option><option value="merged">Merged</option><option value="closed">Closed</option><option value="">All states</option>
       </select></label>
-      <label>Sort<select value={oldest ? 'oldest' : 'newest'} onChange={event => setOldest(event.target.value === 'oldest')}>
+      <label>Integration evidence<select value={readiness} onChange={event => setReadiness(event.target.value)}>
+        <option value="">All evidence states</option><option value="merge_ready">Checks passed at inspection</option>
+        <option value="blocked">Blocked</option><option value="checking">Checking</option>
+        <option value="repairing">Repairing</option><option value="stale">Refresh required</option>
+        <option value="unknown">Awaiting inspection</option><option value="merged">Merged</option>
+      </select></label>
+      <label>Sort<select value={sort} onChange={event => setSort(event.target.value)}>
+        <option value="updated">Recently updated</option>
         <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
       </select></label>
     </div>
@@ -46,9 +87,9 @@ export function MergeSourcePicker({ group, number, onSelect, source, reload, run
       {pulls.map(pull => {
         const id = activityId('pulls', pull);
         if (!id) return null;
-        const run = runs.find(item => item.pr_number === id);
+        const [, evidence] = pullReadiness(pull, runs, group, main);
         return <li key={id}><button type="button" className="quiet-button" aria-pressed={id === number} onClick={() => onSelect(id)}>
-          <strong>#{id} {pull.title}</strong><small>{activityState('pulls', pull)}{run && ' · Integration ' + run.state.replaceAll('_', ' ')}</small>
+          <strong>#{id} {pull.title}</strong><small>{activityState('pulls', pull)}{' · ' + evidence}</small>
         </button></li>;
       })}
     </ul>
@@ -74,8 +115,22 @@ export function MergeSourcePicker({ group, number, onSelect, source, reload, run
         {detail.requested_reviewers?.length > 0 && <p>Requested reviewers {detail.requested_reviewers.join(', ')}</p>}
         {detail.files?.length > 0 && <details><summary>Changed files</summary><ul>{detail.files.map(file => <li key={file.path}>{file.path}</li>)}</ul></details>}
       </>}
+      {context && <section aria-label="Linked engineering work">
+        <h4>Linked engineering work</h4>
+        {!context.data && <p>Task and Project associations are unavailable.</p>}
+        {context.data?.associations.length === 0 && <p>No Task or Project is linked to this pull request.</p>}
+        {context.data?.truncated && <p>Showing the first 50 records.</p>}
+        {context.data?.associations.length > 0 && <ul className="integration-evidence">{context.data.associations.map(item => <li key={item.task.id}>
+          <span><a href={taskHref(item.task.id)}>{item.task.title}</a>
+            {item.project && <small><a href={'#projects/' + item.project.id}>{item.project.name}</a></small>}</span>
+          <small>{!detail?.head?.sha ? 'PR association recorded' : item.references.some(ref => ref.revision === detail.head.sha)
+            ? 'Current head referenced' : 'Earlier revision referenced'}</small>
+        </li>)}</ul>}
+      </section>}
       {matchingRuns.length > 0 && <ul className="merge-source-list">{matchingRuns.map(run => <li key={run.id}>
-        <button type="button" className="quiet-button" onClick={() => onRun(run.id)}>{run.state.replaceAll('_', ' ')} · {run.head_sha.slice(0, 12)}</button>
+        <button type="button" className="quiet-button" onClick={() => onRun(run.id)}>{run.state.replaceAll('_', ' ')} · {run.head_sha.slice(0, 12)}
+          {run.updated_at && <small>{new Date(run.updated_at).toLocaleString()}</small>}
+        </button>
       </li>)}</ul>}
     </motion.section>}
   </div>;

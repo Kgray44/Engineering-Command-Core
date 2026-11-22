@@ -212,6 +212,17 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       return Response.json({}, { status: 404 });
     },
   });
+  const projectId = crypto.randomUUID();
+  const project = await stage.run('/api/projects', { op: 'create', id: projectId,
+    fields: { name: 'Release project', objective: 'Trace the pull request to its Project' } });
+  assert.equal(project.status, 201);
+  const linkedTask = await stage.run('/api/projects', { op: 'register_task', id: projectId, operation_id: crypto.randomUUID(),
+    fields: { title: 'Release review', objective: 'Review the exact source', primary: 'backend', profile_id: 'backend', criteria: ['Verify the diff'] } });
+  assert.equal(linkedTask.status, 201);
+  const taskId = linkedTask.body.task.id;
+  assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
+    expected_version: linkedTask.body.version, operation_id: crypto.randomUUID(),
+    action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } })).status, 200);
   await page.goto(stage.origin + '/#settings');
   const shell = page.locator('.app-shell[data-application="voyagewright"]');
   await shell.waitFor();
@@ -238,6 +249,10 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('heading', { name: 'Activity and attention' }).waitFor();
   await page.goto(stage.origin + '/#merge?pr=7');
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
+  const linkedWork = page.getByRole('region', { name: 'Linked engineering work' });
+  await linkedWork.getByText('Earlier revision referenced').waitFor();
+  assert.equal(await linkedWork.getByRole('link', { name: 'Release project' }).getAttribute('href'), '#projects/' + projectId);
+  assert.equal(await linkedWork.getByRole('link', { name: 'Release review' }).getAttribute('href'), '#tasks/' + taskId);
   await page.getByText(head, { exact: true }).waitFor();
   await page.getByText('Changed files', { exact: true }).click();
   await page.getByText('guide.md', { exact: true }).waitFor();
@@ -250,9 +265,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('button', { name: 'Inspect source' }).click();
   const receipt = await inspection;
   assert.equal(receipt.status(), 201);
-  assert.equal((await receipt.json()).run.head_sha, head);
+  const run = (await receipt.json()).run;
+  assert.equal(run.head_sha, head);
   assert.equal(receipt.request().postDataJSON().head_sha, head);
   assert.equal(receipt.request().postDataJSON().pr_number, 7);
+  await page.goto(stage.origin + '/#merge?run=' + run.id + '&pr=7');
+  await page.locator('#integration-detail-title').waitFor();
 });
 
 test('touch reorders Project cards across mobile grid rows and reloads the order', { timeout: 60_000 }, async t => {

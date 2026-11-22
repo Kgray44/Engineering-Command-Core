@@ -237,9 +237,12 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     }
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
-  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifacts = [], github = [], progress, integrations = [] } = data ?? {};
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifacts = [], github = [], progress, active_workers, integrations = [] } = data ?? {};
   const moveTask = tasks.find(item => item.id === moveTaskId);
   const controlTask = tasks.find(item => item.id === controlTaskId);
+  const nextTask = tasks.find(item => item.state === 'ready');
+  const blockedTasks = tasks.filter(item => item.blockers.length > 0);
+  const lastChange = history.at(-1);
   const targetProjects = (taskList.projects ?? []).filter(item => item.id !== projectId && item.status !== 'archived');
   const moveMilestone = (index, offset) => submit({ op: 'reorder_milestones', expected_version: project.version,
     milestone_ids: arrayMove(milestones.map(item => item.id), index, index + offset) });
@@ -287,8 +290,28 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
             {edit && <ProjectForm key={project.version} project={project} busy={busy}
               onSave={fields => submit({ op: 'update', expected_version: project.version, fields }, () => setEdit(false))}/>}
           </Panel>
+          <Panel title="Current work">
+            <DetailLine name="Task progress" value={progress.tasks.completed + ' of ' + progress.tasks.total + ' complete'}/>
+            <DetailLine name="Milestone progress" value={progress.milestones.accepted + ' of ' + progress.milestones.total + ' accepted'}/>
+            <DetailLine name="Workers with active Project leases" value={number(active_workers)}/>
+            <DetailLine name="Next runnable Task" value={nextTask ? <a href={taskHref(nextTask.id)}>{nextTask.title}</a> : 'No Task ready to claim'}/>
+            <DetailLine name="Recent change" value={lastChange ? <button type="button" className="text-button" onClick={() => onJump('project-history')}>
+              {lastChange.kind.replaceAll('_', ' ')} · {shortDate(lastChange.occurred_at)}
+            </button> : 'No recorded changes'}/>
+            {blockedTasks.length > 0 && <div>
+              <h3>Blocked Tasks</h3>
+              <ul className="project-list">{blockedTasks.slice(0, 5).map(task => <li key={task.id}>
+                <a href={taskHref(task.id)}>{task.title}</a><small>{task.blockers.length} {task.blockers.length === 1 ? 'blocker' : 'blockers'}</small>
+              </li>)}</ul>
+              <button type="button" className="text-button" onClick={() => onJump('project-dependencies')}>Inspect dependency evidence</button>
+            </div>}
+          </Panel>
           <Panel title="Acceptance requirements" kicker="REQUIRED OUTCOMES">
             <div className="objective">{project.acceptance || 'Unspecified'}</div>
+            <DetailLine name="Recorded technical state" value={project.technical_state?.replaceAll('_', ' ') || 'Unspecified'}/>
+            <DetailLine name="Landed integrations" value={progress.integrations.merged + ' of ' + progress.integrations.tracked + ' tracked'}/>
+            <DetailLine name="Delivery records" value={progress.integrations.deployed}/>
+            <DetailLine name="Owner review" value={project.owner_review || 'Unspecified'}/>
           </Panel>
         </div>
         <StickySectionAside className="detail-right">
@@ -406,7 +429,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         <ul className="project-list">{integrations.map(item => <li key={item.id}>
           {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <small>{item.head_sha.slice(0, 12)}</small>}
           <Status value={item.state}/>
-          {item.pr_number && <a className="text-button" href={'#merge?pr=' + item.pr_number}>Inspect integration</a>}
+          {item.pr_number && <a className="text-button" href={'#merge?pr=' + item.pr_number + '&run=' + item.id}>Inspect integration</a>}
         </li>)}</ul>
         <ul className="project-list">{github.map((item, index) => <li key={item.task_id + item.uri + index}>
           <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>

@@ -449,7 +449,8 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
   defaultState={preference.merge_state}
   initialTask={new URLSearchParams(mergeRoute?.[1]).get('task')}
   initialPull={new URLSearchParams(mergeRoute?.[1]).get('pr')}
-  pullGroup={github?.pulls}
+  initialRun={new URLSearchParams(mergeRoute?.[1]).get('run')}
+  main={github?.main} pullGroup={github?.pulls}
   acceptedTasks={tasks.filter(task=>task.owner_acceptance==='accepted')}/>}
 {page==='settings'&&<EngineeringSettings category={settingsRoute?.[1]} headers={verificationHeaders} settings={settings} onSettings={setSettings}
   github={github} dispatch={dispatchStatus} worker={engine.workerDispatch} execution={execution} engineState={engine.status} demo={demo}/>}
