@@ -24,6 +24,12 @@ const eventValidator = standalone(ajv, ajv.compile(traceSchema));
 const configuration = process.env.COMMAND_CORE_APPLICATIONS;
 const config = configuration ? JSON.parse(configuration) : null;
 if (config && !Array.isArray(config.applications)) throw Error('Command Core application configuration required');
+const host = process.env.COMMAND_CORE_HOST ?? 'sites';
+const stageRole = process.env.COMMAND_CORE_SITE_ROLE;
+if (!['sites', 'sites-stage'].includes(host)) throw Error('Unsupported Command Core hosting profile');
+if (host === 'sites-stage' && (!config || !['aetherwake', 'voyagewright'].includes(stageRole))) {
+  throw Error('Sites staging requires application configuration and an explicit Site role');
+}
 const commandCore = config ? {
   applications: config.applications.map(({ id, name, repository, origin, binding }) => ({ id, name, repository, origin, binding })),
   ...(config.portfolio ? { portfolio: { id: config.portfolio.id, name: config.portfolio.name } } : {}),
@@ -51,8 +57,13 @@ try {
         import validate from ${JSON.stringify(join(temporary, 'validator.mjs'))};
         import validateEvent from ${JSON.stringify(join(temporary, 'event-validator.mjs'))};
         import { createCommandCore } from './sites/command-core.mjs';
+        import { createSitesStage } from './sites/sites-stage.mjs';
         const options = { validate, validateEvent, assets: ${JSON.stringify(assets)}, sourceRevision: ${JSON.stringify(sourceRevision)} };
-        export default ${commandCore ? 'createCommandCore({ ...options, ...' + JSON.stringify(commandCore) + ', trustedIdentity: request => request.headers.get("oai-authenticated-user-id") })' : 'createWorker(options)'};`,
+        const configured = ${JSON.stringify(commandCore)};
+        export default ${host === 'sites-stage' ? 'createSitesStage({ ...options, ...configured, role: ' +
+          JSON.stringify(stageRole) + ' })' : commandCore ?
+            'createCommandCore({ ...options, ...configured, trustedIdentity: request => request.headers.get("oai-authenticated-user-id") })' :
+            'createWorker(options)'};`,
       resolveDir: project,
     },
     bundle: true,

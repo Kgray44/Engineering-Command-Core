@@ -32,4 +32,6 @@ The Sites-facing build expects the host to supply a verified visitor identity. O
 
 A scoped native worker configuration uses `repository`, `application_id` and `connector_namespace` together, with dedicated checkout roots and per-application credentials. Omit those fields for the existing legacy Aetherwake connector. The native source-repair adapter is Aetherwake-specific. Voyagewright verification integration belongs to its existing Sounding Line authority.
 
+The owner-private [Phase 1B Sites runbook](PHASE1B-SITES.md) describes the two-Site deployment and its single shared engine.
+
 After an approved cutover, common fixes land in this repository. Keep Aetherwake's pinned original source as the recovery fallback until the owner authorizes retirement. Apply any essential pre-cutover production fixes in Aetherwake and port the exact reviewed source delta to Command Core.

@@ -12,6 +12,7 @@ import { taskDigest, writeSnapshot } from './context.mjs';
 import { createClaimTelemetryHooks, processHasExited, readInterruptedClaim, retainActiveClaim, reconcileAbandonedClaim } from './claim-telemetry.mjs';
 import { observeCodexStream } from './provider-events.mjs';
 import { openLocalRepairConnector, openObservatoryConnector } from './observatory-connector.mjs';
+import { openCommandCoreStageConnector } from './command-core-stage-connector.mjs';
 import { readObservatoryConnection, recoverWorkerTelemetry } from './observatory-sync.mjs';
 import { availableTransferCredential, transferReviewedCandidate } from './integration-transfer.mjs';
 import { repairablePath, repairDiffPaths, usageFromCodex } from '../../agent-system/observatory/sites/source-repair.mjs';
@@ -1017,6 +1018,8 @@ async function main(configPath) {
   const credential = process.env.AADS_TASK_WORKER_KEY;
   const transferToken = process.env.AADS_INTEGRATION_PUSH_TOKEN;
   delete process.env.AADS_INTEGRATION_PUSH_TOKEN;
+  const siteServiceToken = process.env.COMMAND_CORE_SITE_SERVICE_TOKEN;
+  delete process.env.COMMAND_CORE_SITE_SERVICE_TOKEN;
   if (!credential || credential.length < 32) throw Error('AADS_TASK_WORKER_KEY is required');
   const config = JSON.parse(await readFile(configPath, 'utf8'));
   const repository = config.repository ?? aetherwakeRepository;
@@ -1076,6 +1079,13 @@ async function main(configPath) {
   const appServer = config.executor_transport === 'app_server';
   const repairEnabled = config.integration_source_repair === true;
   const ciAutomation = config.integration_ci_automation === true;
+  const stagedTransport = config.worker_mcp_url === undefined ? null : openCommandCoreStageConnector({
+    endpoint: config.worker_mcp_url, application: app, workerKey: credential, siteServiceToken,
+  });
+  if (stagedTransport && (repairEnabled || ciAutomation || integrationGit || !scope?.length ||
+      config.executor_transport !== 'app_server' || !config.worker_id)) {
+    throw Error('Staged worker requires an explicit identity, Task scope and App Server execution');
+  }
   if (ciAutomation && verification) throw Error('Automatic CI reruns require a live worker');
   if (repairEnabled && repository !== aetherwakeRepository) throw Error('No source-repair adapter configured for this application');
   if (repairEnabled && (!appServer || !author || verification)) throw Error('Source repair requires a live App Server worker with isolated checkout provisioning');
@@ -1094,6 +1104,7 @@ async function main(configPath) {
     return pending;
   };
   function connection() {
+    if (stagedTransport) return stagedTransport;
     let connector;
     function use(operation) {
       const current = connector ??= openObservatoryConnector({cwd:root,tool,executable:config.codex_bin});

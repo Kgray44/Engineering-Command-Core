@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createCommandCore } from './command-core.mjs';
+import { openCommandCoreStageConnector } from '../../../scripts/agent/command-core-stage-connector.mjs';
 
 const fixture = [
   { id: 'aetherwake', name: 'Aetherwake', repository: 'synthetic/one', binding: 'ONE', origin: 'https://one.fixture.test' },
@@ -260,4 +261,40 @@ test('explicit proposal writes carry only the owning repository and its publicat
     assert.equal(payload.branch, 'observatory-proposed-tasks');
     assert.equal(JSON.parse(Buffer.from(payload.content, 'base64').toString()).repository, fixture[index].repository);
   }
+});
+
+test('staging worker transport claims only in its own partition with both ingress and executor credentials', async t => {
+  const { task, env } = setup(t);
+  const applications = fixture;
+  const engine = createCommandCore({ applications, validate: () => true, trustedIdentity: () => null,
+    trustedWorkerIngress: (request, _env, context) => context?.origin === new URL(request.url).origin });
+  const { body: registered } = await task(0, { op: 'register', operation_id: crypto.randomUUID(), fields: taskFields });
+  const taskId = registered.task.id;
+  assert.equal((await task(0, { op: 'command', task_id: taskId, expected_version: registered.version,
+    operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const connect = (originIndex, { appIndex = originIndex, accessIndex = originIndex, keyIndex = originIndex } = {}) =>
+    openCommandCoreStageConnector({
+      endpoint: applications[originIndex].origin + '/worker/mcp', application: applications[appIndex].id,
+      workerKey: env[applications[keyIndex].binding].OBSERVATORY_TASK_WORKER_KEY, siteServiceToken: 'fixture-secret',
+      fetcher: (url, init) => {
+        const headers = new Headers(init.headers);
+        assert.equal(headers.get('OAI-Sites-Authorization'), 'Bearer fixture-secret');
+        assert.equal(init.redirect, 'error');
+        assert.equal(Object.hasOwn(JSON.parse(init.body).params.arguments ?? {}, 'worker_key'), false);
+        return engine.fetch(new Request(url, init), env, { origin: applications[accessIndex].origin });
+      },
+    });
+  const claim = { op: 'claim', worker_id: crypto.randomUUID(), operation_id: crypto.randomUUID(), task_ids: [taskId] };
+  const tool = 'staging.task_engine_v1';
+  const worker = connect(0);
+  await worker.ready();
+  await assert.rejects(connect(1, { accessIndex: 0 }).ready(), { status: 401 });
+  await assert.rejects(connect(1, { keyIndex: 0 }).ready(), { status: 403 });
+  await assert.rejects(connect(0, { appIndex: 1 }).call({ request: claim }, tool), { status: 403 });
+  await assert.rejects(worker.call({ request: { op: 'list' } }, tool), { status: 403 });
+  await assert.rejects(worker.call({ request: { op: 'command' } }, tool), { status: 403 });
+  await assert.rejects(connect(1).call({ task_id: taskId }, 'staging.sync_task_telemetry'), { status: 404 });
+  assert.equal((await worker.call({ task_id: taskId }, 'staging.sync_task_telemetry')).baseline, null);
+  const claimed = await worker.call({ request: claim, worker_key: 'never-sent-in-the-body' }, tool);
+  assert.equal(claimed.claim.task.id, taskId);
 });

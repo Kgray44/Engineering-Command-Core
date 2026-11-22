@@ -2,9 +2,12 @@ import { applicationId, repositoryName, uuid } from './application-config.mjs';
 import { readBounded } from './github.mjs';
 import { projectOperation } from './projects.mjs';
 import { MAX_SYNC_BYTES } from './sync.mjs';
+import { isTaskWorkerKey } from './task-engine.mjs';
+import { sha256 } from './task-telemetry.mjs';
 import { createWorker } from './worker.mjs';
 
 const identityHeader = 'oai-authenticated-user-id';
+const stagingWorkerOps = new Set(['claim', 'report', 'worker_pulse', 'recover_worker_candidate']);
 const environmentKeys = [
   'DB', 'OBSERVATORY_TASK_ENGINE_OWNER_ID', 'OBSERVATORY_TASK_WORKER_KEY', 'OBSERVATORY_CI_OWNER_ID',
   'OBSERVATORY_INTEGRATION_MERGE_OWNER_ID', 'OBSERVATORY_INTEGRATION_PUBLISH_OWNER_ID',
@@ -38,7 +41,7 @@ function scopedEnvironment(env, binding) {
 }
 
 export function createCommandCore({ applications, portfolio = { id: 'engineering', name: 'Engineering' },
-  legacyApplication, trustedIdentity, ...workerOptions }) {
+  legacyApplication, trustedIdentity, trustedWorkerIngress, ...workerOptions }) {
   if (typeof trustedIdentity !== 'function') throw Error('Verified request identity adapter required');
   if (!Array.isArray(applications) || !applications.length || !applicationId.test(portfolio.id)) throw Error('Invalid portfolio');
   const byId = new Map();
@@ -68,6 +71,13 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
     if (!runtime) return null;
     const scoped = scopedEnvironment(env, runtime.binding);
     if (scoped.OBSERVATORY_TASK_ENGINE_OWNER_ID !== owner) return null;
+    if (trustedWorkerIngress) {
+      delete scoped.GITHUB_INTEGRATION_MERGE_TOKEN;
+      delete scoped.GITHUB_ACTIONS_TOKEN;
+      delete scoped.OBSERVATORY_INTEGRATION_TRANSFER_ENABLED;
+      delete scoped.GITHUB_PROPOSAL_TOKEN;
+      delete scoped.GITHUB_INTEGRATION_PUBLISH_TOKEN;
+    }
     return scoped;
   }
 
@@ -96,18 +106,65 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
     });
   }
 
+  async function workerRequest(request, env, context, runtime, url) {
+    if (!trustedWorkerIngress || !await trustedWorkerIngress(request, env, context)) {
+      return error('Worker ingress authorization required', 401);
+    }
+    const owner = scopedEnvironment(env, runtime.binding).OBSERVATORY_TASK_ENGINE_OWNER_ID;
+    const scoped = owner && resolve(env, owner, runtime);
+    const workerKey = request.headers.get('authorization')?.match(/^Bearer (.+)$/)?.[1];
+    if (!scoped || !isTaskWorkerKey(workerKey) || !isTaskWorkerKey(scoped.OBSERVATORY_TASK_WORKER_KEY) ||
+        await sha256(workerKey) !== await sha256(scoped.OBSERVATORY_TASK_WORKER_KEY)) {
+      return error('Executor authorization required', 403);
+    }
+    if (request.method !== 'POST') return error('Method not allowed', 405);
+    if (request.headers.has('origin') || request.headers.has('sec-fetch-site')) return error('Worker client required', 403);
+    if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+      return error('Expected JSON', 415);
+    }
+    if (!await checkPartition(env, runtime, scoped)) return error('Application partition unavailable', 503);
+    let message;
+    try { message = JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)); }
+    catch { return error('Invalid or oversized RPC request', 400); }
+    if (message?.jsonrpc !== '2.0' || !['string', 'number'].includes(typeof message.id)) return error('Invalid RPC envelope', 400);
+    if (message.method === 'server/discover') {
+      return response({ jsonrpc: '2.0', id: message.id, result: { supportedVersions: ['2026-07-28'] } });
+    }
+    const { name, arguments: args } = message.params ?? {};
+    if (message.method !== 'tools/call' || args?.application_id !== runtime.application.id) {
+      return error('Worker application scope required', 403);
+    }
+    const { application_id: _applicationId, ...params } = args;
+    if (name === 'task_engine_v1' && stagingWorkerOps.has(params.request?.op)) {
+      params.worker_key = workerKey;
+    } else if (name === 'sync_task_telemetry') {
+      if (typeof params.task_id !== 'string' || params.verification !== undefined &&
+          (typeof params.verification !== 'string' || !uuid.test(params.verification))) return error('Invalid Task telemetry scope', 400);
+      const namespace = params.verification ? 'verification:' + params.verification : 'live';
+      const task = await scoped.DB.prepare('SELECT task_id FROM proposals WHERE owner_id = ? AND namespace = ? AND task_id = ? AND engine IS NOT NULL')
+        .bind(owner, namespace, params.task_id).first();
+      if (!task) return error('Task unavailable in this application', 404);
+    } else return error('Worker scope does not allow this operation', 403);
+    const forwarded = new Request(new URL('/mcp', url), {
+      method: 'POST', headers: { [identityHeader]: owner, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...message, params: { name, arguments: params } }),
+    });
+    return runtime.worker.fetch(forwarded, scoped);
+  }
+
   return {
-    async fetch(request, env) {
+    async fetch(request, env, context) {
       const url = new URL(request.url);
       if (url.pathname === '/healthz' && request.method === 'GET') return response({ status: 'ready', service: 'engineering-command-core' });
       const originRuntime = byOrigin.get(url.origin);
-      const owner = await trustedIdentity(request, env);
-      if (!owner) return error('Authenticated caller required', 401);
       if (!originRuntime) return error('Application origin unavailable', 404);
-      const headers = new Headers(request.headers);
-      headers.set(identityHeader, owner);
-      request = new Request(request, { headers });
       try {
+        if (trustedWorkerIngress && url.pathname === '/worker/mcp') return await workerRequest(request, env, context, originRuntime, url);
+        const owner = await trustedIdentity(request, env, context);
+        if (!owner) return error('Authenticated caller required', 401);
+        const headers = new Headers(request.headers);
+        headers.set(identityHeader, owner);
+        request = new Request(request, { headers });
         if (url.pathname === '/mcp') {
           if (request.method !== 'POST') return error('Method not allowed', 405);
           const origin = request.headers.get('origin');
@@ -117,11 +174,11 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           let message;
           try { message = JSON.parse(await readBounded(request.body, MAX_SYNC_BYTES)); }
           catch { return error('Invalid or oversized RPC request', 400); }
+          const allowed = [...byId.values()].filter(app => resolve(env, owner, app));
+          if (!allowed.length) return error('Application access denied', 403);
           if (message?.jsonrpc !== '2.0' || !['string', 'number'].includes(typeof message.id)) return error('Invalid RPC envelope', 400);
           const rpc = result => response({ jsonrpc: '2.0', id: message.id, result });
           const reject = (code, messageText) => response({ jsonrpc: '2.0', id: message.id, error: { code, message: messageText } });
-          const allowed = [...byId.values()].filter(app => resolve(env, owner, app));
-          if (!allowed.length) return error('Application access denied', 403);
           const named = message.params?.name;
           const args = message.params?.arguments ?? {};
           const forward = (runtime, scoped, payload) => runtime.worker.fetch(new Request(url, {
@@ -167,6 +224,9 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           return response({ portfolio, applications: [...byId.values()].filter(app => resolve(env, owner, app)).map(app => app.application) });
         }
         if (!await checkPartition(env, originRuntime, scoped)) return error('Application partition unavailable', 503);
+        if (url.pathname === '/api/status' && request.method === 'GET') {
+          return response({ status: 'ready', application: originRuntime.application, revision: workerOptions.sourceRevision ?? null });
+        }
         if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {
           let body;
           if (request.method === 'GET') body = url.pathname === '/api/projects' ? { op: 'list' } : { op: 'get', id: url.pathname.slice('/api/projects/'.length) };
