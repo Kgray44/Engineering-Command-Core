@@ -50,5 +50,8 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.waitForURL(/#tasks\/task_/, { timeout: 7000 });
   await page.goto(stage.origin + '/' + projectHash);
   await page.getByRole('link', { name: 'Synthetic browser task', exact: true }).waitFor();
+  await page.getByText('0 of 1 Tasks complete · 0 running · 0 blocked · 0 verifying', { exact: true }).waitFor();
+  await page.getByRole('link', { name: 'All projects' }).click();
+  await page.getByText('0/1 Tasks complete · 0 running · 0 blocked · 0/1 milestones accepted', { exact: true }).waitFor();
   assert.equal(part.sqlite.prepare("SELECT count(*) AS count FROM proposals WHERE project_id IS NOT NULL").get().count, 1);
 });

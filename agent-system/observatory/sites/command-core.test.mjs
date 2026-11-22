@@ -42,17 +42,18 @@ function setup(t) {
   const engine = createCommandCore({
     applications: fixture, assets: {}, trustedIdentity: request => request.headers.get('oai-authenticated-user-id'), validate: () => true, validateEvent: () => true, sourceRevision: 'd'.repeat(40),
     fetcher: async (url, init) => {
-      requests.push({ url, credential: new Headers(init?.headers).get('authorization') });
+      requests.push({ url, credential: new Headers(init?.headers).get('authorization'), method: init?.method, body: init?.body });
+      if (init?.method === 'PUT') return Response.json({}, { status: 201 });
       return Response.json(String(url).endsWith('/git/ref/heads/main')
         ? { ref: 'refs/heads/main', object: { sha: 'a'.repeat(40) } }
         : { message: 'Synthetic provider response' }, { status: String(url).endsWith('/git/ref/heads/main') ? 200 : 404 });
     },
   });
-  const call = async (app, path, body, identity = owner) => {
+  const call = async (app, path, body, identity = owner, extraHeaders = {}) => {
     const origin = fixture[app].origin;
     const response = await engine.fetch(new Request(origin + path, {
       method: body ? 'POST' : 'GET',
-      headers: { 'oai-authenticated-user-id': identity, 'content-type': 'application/json', origin },
+      headers: { 'oai-authenticated-user-id': identity, 'content-type': 'application/json', origin, ...extraHeaders },
       ...(body ? { body: JSON.stringify(body) } : {}),
     }), env);
     return { status: response.status, body: await response.json() };
@@ -196,4 +197,67 @@ test('concurrent claim retries keep one Attempt and archive only affects the own
   assert.equal((await task(0, { op: 'get', task_id })).body.attempts.length, 1);
   assert.equal((await call(0, '/api/projects', { op: 'update', id, status: 'archived', expected_version: 1 })).status, 200);
   assert.equal((await call(1, '/api/projects/' + id)).body.project.status, 'planned');
+});
+
+test('Project progress reports actual scoped execution, milestone gates and owner review', async t => {
+  const { call, task, one } = setup(t);
+  const project = request => call(0, '/api/projects', request);
+  const id = crypto.randomUUID();
+  const dependencyId = crypto.randomUUID();
+  for (const projectId of [id, dependencyId]) {
+    assert.equal((await project({ op: 'create', id: projectId, fields: {
+      name: 'Fixture', objective: 'Verify reported progress', owner_review: projectId === id ? 'pending' : '',
+    } })).status, 201);
+  }
+  const milestone_id = crypto.randomUUID();
+  const milestone = { op: 'milestone', id: dependencyId, milestone_id, name: 'Foundation', acceptance: 'Evidence', status: 'planned' };
+  assert.equal((await project(milestone)).status, 201);
+  const registration = await project({ op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = registration.body.task.id;
+  assert.equal((await project({ op: 'milestone_gate', id, task_id, milestone_id })).status, 200);
+  assert.equal((await task(0, { op: 'command', task_id, expected_version: registration.body.version,
+    operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const integrationId = crypto.randomUUID();
+  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, 42, 'merged', 1, ?, '{}', ?)")
+    .run('synthetic-owner', integrationId, task_id, crypto.randomUUID(), 'a'.repeat(40),
+      new Date().toISOString(), JSON.stringify({ operation_id: crypto.randomUUID() }));
+  const read = async () => (await call(0, '/api/projects/' + id)).body;
+  const detail = await read();
+  assert.equal(detail.progress.tasks.blocked, 1);
+  assert.equal(detail.progress.tasks.completed, 0);
+  assert.equal(detail.progress.owner_review, 'pending');
+  assert.deepEqual(detail.progress.integrations, { tracked: 1, merged: 1, deployed: 0 });
+  assert.equal(detail.integrations[0].repository, fixture[0].repository);
+  assert.deepEqual(detail.tasks[0].blockers, [{ type: 'milestone', id: milestone_id, state: 'planned' }]);
+  const portfolio = (await call(0, '/api/projects')).body;
+  assert.deepEqual(portfolio.projects.find(item => item.id === id).progress, detail.progress);
+  assert.equal((await call(1, '/api/projects')).body.projects.length, 0);
+  assert.equal((await project({ ...milestone, expected_version: 1, status: 'accepted' })).status, 200);
+  assert.equal((await read()).progress.tasks.ready, 1);
+});
+
+test('explicit proposal writes carry only the owning repository and its publication credential', async t => {
+  const { call, env, requests } = setup(t);
+  env.ONE.GITHUB_PROPOSAL_TOKEN = 'one-publish-fixture';
+  env.TWO.GITHUB_PROPOSAL_TOKEN = 'two-publish-fixture';
+  const headers = { 'x-observatory-publish': 'github', 'x-observatory-request-id': crypto.randomUUID() };
+  const write = (app, repository, owner = 'synthetic-owner') => call(app, '/api/tasks', { ...taskFields, repository }, owner, headers);
+  assert.equal((await write(0, fixture[1].repository)).status, 400);
+  assert.equal((await write(1, fixture[1].repository, 'unassigned')).status, 403);
+  assert.equal(requests.some(entry => entry.method === 'PUT'), false);
+  for (const app of [0, 1]) {
+    const result = await write(app, fixture[app].repository);
+    assert.equal(result.status, 201);
+    assert.equal(result.body.github.state, 'published');
+    assert.match(result.body.github.url, new RegExp('github.com/' + fixture[app].repository + '/'));
+  }
+  const mutations = requests.filter(entry => entry.method === 'PUT');
+  assert.equal(mutations.length, 2);
+  for (const [index, mutation] of mutations.entries()) {
+    assert.equal(mutation.credential, 'Bearer ' + [env.ONE, env.TWO][index].GITHUB_PROPOSAL_TOKEN);
+    assert.ok(mutation.url.startsWith('https://api.github.com/repos/' + fixture[index].repository + '/contents/'));
+    const payload = JSON.parse(mutation.body);
+    assert.equal(payload.branch, 'observatory-proposed-tasks');
+    assert.equal(JSON.parse(Buffer.from(payload.content, 'base64').toString()).repository, fixture[index].repository);
+  }
 });

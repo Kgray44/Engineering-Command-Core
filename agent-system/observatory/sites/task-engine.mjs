@@ -95,6 +95,10 @@ function waitState(task,lifecycle,rows,now,checks) {
   return {state:blockers.length?'blocked':lifecycle.start_at>now?'scheduled':'ready',blockers};
 }
 
+export function storedTaskDispatch(row, rows, now) {
+  return waitState(record(row), details(row), rows, now);
+}
+
 function hasCycle(id, task, rows) {
   const visited = new Set();
   const queue = [...task.prerequisites.task_ids];
@@ -555,7 +559,7 @@ async function recoverWorkerCandidate(lifecycle, body, now) {
   return { lifecycle:{...lifecycle,state:'verifying',recovered_candidate:true}, previousFailure, previousFailureKind };
 }
 
-export async function readTaskRows({ db, owner, namespace, now = Date.now() }) {
+export async function readTaskRows({ db, owner, namespace, now = Date.now(), reconcileExpired = true }) {
   const query = (sql, ...args) => db.prepare(sql).bind(...args);
   const result = await query('SELECT * FROM proposals WHERE owner_id = ? AND namespace = ? ORDER BY created_at DESC, task_id DESC',
     owner, namespace).all();
@@ -569,6 +573,7 @@ export async function readTaskRows({ db, owner, namespace, now = Date.now() }) {
     }
     for (const row of result.results) row.verified_main_candidates = revisions.get(row.task_id);
   }
+  if (!reconcileExpired) return result.results;
   return Promise.all(result.results.map(async row => {
     if (!row.engine) return row;
     const lifecycle = details(row);

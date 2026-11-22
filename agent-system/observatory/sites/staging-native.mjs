@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -16,6 +16,8 @@ const task_id = 'task_' + taskUUID;
 const executable = process.env.COMMAND_CORE_NATIVE_CODEX;
 const storageGuard = process.env.COMMAND_CORE_RESERVE_GUARD;
 const root = process.env.COMMAND_CORE_NATIVE_ROOT;
+const model = process.env.COMMAND_CORE_NATIVE_MODEL;
+if (model !== undefined && !/^[a-zA-Z0-9_.-]{1,100}$/.test(model)) throw Error('Invalid staging model');
 if (process.platform !== 'win32' || !executable || !root || !storageGuard) {
   throw Error('Windows, a signed-in Codex executable, an isolated root and Windows ReserveGuard are required');
 }
@@ -65,7 +67,8 @@ try {
   await runClaim({ claim, send, workspace, executable, signal: AbortSignal.timeout(90_000),
     identify: (path, pin) => checkoutIdentity(path, pin, { repository }), managedConnection,
     providerStream: 'codex_app_server', execute: async options => {
-      const connector = await openLocalRepairConnector({ cwd: workspace, executable, signal: options.signal });
+      const connector = await openLocalRepairConnector({ cwd: workspace, executable, signal: options.signal,
+        ...(model ? { spawnProcess: (file, args, launch) => spawn(file, [...args, '-c', 'model=' + JSON.stringify(model)], launch) } : {}) });
       try {
         await options.onProviderProcess(connector.processId);
         return await executeAppServer(connector, options);
@@ -83,7 +86,7 @@ try {
   const telemetry = await rpc('sync_task_telemetry', { task_id });
   const baseline = JSON.parse(telemetry.body.result.content[0].text).baseline;
   process.stdout.write(JSON.stringify({ lifecycle: body.lifecycle.state, candidate_verified: true, attempt_state: attempt.state,
-    session_observed: Boolean(attempt.session_id), telemetry_records: baseline?.projection.records.length ?? 0,
+    session_observed: Boolean(attempt.session_id), model: attempt.execution_identity?.model ?? null, telemetry_records: baseline?.projection.records.length ?? 0,
     telemetry_events: baseline?.projection.events.length ?? 0 }) + '\n');
 } finally {
   await stage.close();

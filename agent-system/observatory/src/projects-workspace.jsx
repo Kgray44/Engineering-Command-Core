@@ -109,7 +109,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, onNewTask
     }
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
-  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_milestones = [], artifacts = [], github = [] } = data ?? {};
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_milestones = [], artifacts = [], github = [], progress, integrations = [] } = data ?? {};
   const results = projects.filter(item => (!filter || item.status === filter) &&
     [item.name, item.description, item.objective].some(value => value?.toLowerCase().includes(query.toLowerCase())));
   return <div className="projects-workspace">
@@ -126,6 +126,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, onNewTask
       </div>
       <ul className="project-list">{results.map(item => <li key={item.id}>
         <a className="text-button" href={'#projects/' + item.id}>{item.name}</a> <Status value={item.status}/><small>{item.priority}</small>
+        {item.progress && <small>{item.progress.tasks.completed}/{item.progress.tasks.total} Tasks complete · {item.progress.tasks.active} running · {item.progress.tasks.blocked} blocked · {item.progress.milestones.accepted}/{item.progress.milestones.total} milestones accepted{item.progress.owner_review === 'pending' ? ' · Owner review pending' : ''}</small>}
       </li>)}</ul>
       {!results.length && <p>No projects match the current view.</p>}
       {edit && <ProjectForm busy={busy} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
@@ -163,15 +164,18 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, onNewTask
           {addingMilestone && <MilestoneForm busy={busy} onSave={fields => submit({ op: 'milestone', ...fields }, () => setAddingMilestone(false))}/>}
         </Panel>
         <Panel title="Execution and telemetry">
+          <p>{progress.tasks.completed} of {progress.tasks.total} Tasks complete · {progress.tasks.active} running · {progress.tasks.blocked} blocked · {progress.tasks.verifying} verifying</p>
           <dl className="project-metrics">
             <dt>Tasks</dt><dd>{tasks.length}</dd>
             <dt>Accepted Tasks</dt><dd>{tasks.filter(task => task.owner_acceptance === 'accepted').length}</dd>
             <dt>Accepted milestones</dt><dd>{milestones.filter(item => item.status === 'accepted').length}</dd>
             <dt>Attempts</dt><dd>{telemetry.attempts}</dd>
+            <dt>Retries</dt><dd>{telemetry.retries}</dd>
             <dt>Failed or orphaned</dt><dd>{telemetry.failures}</dd>
             <dt>Attempts with recorded token usage</dt><dd>{telemetry.measured_attempts}</dd>
             <dt>Recorded attempt duration</dt><dd>{telemetry.execution_ms === null ? 'Unavailable' : number(Math.round(telemetry.execution_ms / 1000)) + ' s'}</dd>
-            <dt>Execution cost</dt><dd>Unavailable</dd>
+            <dt>Execution cost</dt><dd>{number(telemetry.costs)}</dd>
+            <dt>CI usage</dt><dd>{number(telemetry.ci_usage)}</dd>
             <dt>Input tokens</dt><dd>{number(telemetry.input_tokens)}</dd>
             <dt>Cached input tokens</dt><dd>{number(telemetry.cached_input_tokens)}</dd>
             <dt>Output tokens</dt><dd>{number(telemetry.output_tokens)}</dd>
@@ -181,6 +185,11 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, onNewTask
       <Panel title="Tasks" right={project.status !== 'archived' && <button className="primary-button" onClick={() => onNewTask(project)}>New project task</button>}>
         <ul className="project-list">{tasks.map(task => <li key={task.id}>
           <a className="text-button" href={taskHref(task.id)}>{task.title}</a> <Status value={task.state}/>
+          {task.branch && <small>{task.branch}</small>}
+          {task.blockers.map(item => <small key={item.type + ':' + item.id}>
+            {item.type === 'milestone' ? dependencies.find(gate => gate.milestone_id === item.id)?.name ?? item.id :
+              item.type === 'project' ? project.name : tasks.find(related => related.id === item.id)?.title ?? item.id} · {item.state}
+          </small>)}
           {task_milestones.filter(link => link.task_id === task.id).map(link => <small key={link.milestone_id}>{milestones.find(item => item.id === link.milestone_id)?.name}</small>)}
         </li>)}</ul>
         {!tasks.length && <p>No linked tasks.</p>}
@@ -219,6 +228,11 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, onNewTask
         </details>}
       </Panel>
       <Panel title="GitHub and verification">
+        <p>{progress.integrations.merged} of {progress.integrations.tracked} tracked integrations merged · {progress.integrations.deployed} deployed</p>
+        <ul className="project-list">{integrations.map(item => <li key={item.id}>
+          {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a> : <small>{item.head_sha.slice(0, 12)}</small>}
+          <Status value={item.state}/>
+        </li>)}</ul>
         <ul className="project-list">{github.map((item, index) => <li key={item.task_id + item.uri + index}>
           <a className="text-button" href={item.uri} target="_blank" rel="noreferrer">{item.kind || 'GitHub evidence'}</a>
           <a className="text-button" href={taskHref(item.task_id)}>{tasks.find(task => task.id === item.task_id)?.title}</a>

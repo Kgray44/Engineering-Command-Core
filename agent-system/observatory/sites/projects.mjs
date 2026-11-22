@@ -1,5 +1,5 @@
 import { accountEngineeringTokens } from '../src/engineering-token-accounting.mjs';
-import { taskAttemptRecord } from './task-engine.mjs';
+import { readTaskRows, storedTaskDispatch, taskAttemptRecord } from './task-engine.mjs';
 import { combinedTelemetry } from './task-telemetry.mjs';
 import { uuid } from './application-config.mjs';
 
@@ -39,6 +39,22 @@ function projectFields(fields, repository) {
   return result;
 }
 
+function projectProgress(project, tasks, milestones, integrations) {
+  const byState = states => Object.fromEntries(states.map(state => [state, tasks.filter(task => task.state === state).length]));
+  const active = tasks.filter(task => ['running', 'pausing', 'cancelling'].includes(task.state)).length;
+  return {
+    tasks: { total: tasks.length, active, ...byState(['blocked', 'ready', 'verifying', 'failed']),
+      completed: tasks.filter(task => ['completed', 'accepted'].includes(task.state) ||
+        (task.state === 'archived' && task.owner_acceptance === 'accepted')).length,
+      accepted: tasks.filter(task => task.owner_acceptance === 'accepted').length },
+    milestones: { total: milestones.length, accepted: milestones.filter(item => item.status === 'accepted').length },
+    integrations: { tracked: integrations.length, merged: integrations.filter(item => ['merged', 'deployed'].includes(item.state)).length,
+      deployed: integrations.filter(item => item.state === 'deployed').length },
+    technical_state: project.technical_state || null,
+    owner_review: project.owner_review || null,
+  };
+}
+
 export async function projectOperation({ db, owner, namespace, application, body, registerTask }) {
   if (!isObject(body)) return fail(400, 'Invalid Projects request');
   const scope = (sql, ...args) => db.prepare(sql).bind(owner, namespace, ...args);
@@ -47,12 +63,51 @@ export async function projectOperation({ db, owner, namespace, application, body
     ...JSON.parse(row.metadata), id: row.id, application_id: application.id, owner: row.owner_id,
     status: row.status, version: row.version, created_at: row.created_at, updated_at: row.updated_at,
   });
-  if (body.op === 'list') {
-    const [{ results }, unassigned] = await Promise.all([
-      scope('SELECT * FROM projects WHERE owner_id = ? AND namespace = ? ORDER BY updated_at DESC, id').all(),
-      scope('SELECT count(*) AS total FROM proposals WHERE owner_id = ? AND namespace = ? AND project_id IS NULL').first(),
+  async function readProgress() {
+    const now = Date.now();
+    const [taskRows, milestones, gates, integrations] = await Promise.all([
+      readTaskRows({ db, owner, namespace, now, reconcileExpired: false }),
+      scope('SELECT id, project_id, version, name, acceptance, status, updated_at FROM milestones WHERE owner_id = ? AND namespace = ? ORDER BY updated_at, id').all(),
+      scope('SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status FROM project_task_gates g JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id WHERE g.owner_id = ? AND g.namespace = ?').all(),
+      scope('SELECT r.id, r.task_id, r.pr_number, r.head_sha, r.state, t.project_id FROM integration_runs r JOIN proposals t ON t.owner_id = r.owner_id AND t.namespace = r.namespace AND t.task_id = r.task_id WHERE r.owner_id = ? AND r.namespace = ? AND t.project_id IS NOT NULL').all(),
     ]);
-    return success({ application, projects: results.map(serialize), unassigned_tasks: unassigned.total });
+    const rows = new Map(taskRows.map(row => [row.task_id, row]));
+    return {
+      taskRows,
+      forProject(project) {
+        const linked = taskRows.filter(row => row.project_id === project.id);
+        const taskIds = new Set(linked.map(row => row.task_id));
+        const dependencies = gates.results.filter(gate => taskIds.has(gate.task_id));
+        const tasks = linked.map(row => {
+          const task = JSON.parse(row.record);
+          const engine = row.engine && JSON.parse(row.engine);
+          const dispatch = storedTaskDispatch(row, rows, now);
+          const blockers = [...dispatch.blockers];
+          if (['admitted', 'queued', 'scheduled'].includes(engine?.state)) {
+            if (['paused', 'archived'].includes(project.status)) blockers.push({ type: 'project', id: project.id, state: project.status });
+            for (const gate of dependencies.filter(item => item.task_id === row.task_id && item.status !== 'accepted')) {
+              blockers.push({ type: 'milestone', id: gate.milestone_id, state: gate.status });
+            }
+          }
+          return { id: row.task_id, title: task.title, version: row.version, priority: row.priority, branch: engine?.attempts.at(-1)?.branch ?? null,
+            state: blockers.length ? 'blocked' : dispatch.state, blockers,
+            owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
+        });
+        const projectMilestones = milestones.results.filter(item => item.project_id === project.id);
+        const projectIntegrations = integrations.results.filter(item => item.project_id === project.id);
+        return { linked, tasks, milestones: projectMilestones, dependencies, integrations: projectIntegrations.map(({ project_id, ...integration }) => ({ ...integration, repository: application.repository })),
+          progress: projectProgress(project, tasks, projectMilestones, projectIntegrations) };
+      },
+    };
+  }
+  if (body.op === 'list') {
+    const [{ results }, view] = await Promise.all([
+      scope('SELECT * FROM projects WHERE owner_id = ? AND namespace = ? ORDER BY updated_at DESC, id').all(),
+      readProgress(),
+    ]);
+    const projects = results.map(serialize);
+    return success({ application, projects: projects.map(project => ({ ...project, progress: view.forProject(project).progress })),
+      unassigned_tasks: view.taskRows.filter(row => !row.project_id).length });
   }
   if (!isId(body.id)) return fail(400, 'Invalid Project ID');
   const at = new Date().toISOString();
@@ -76,20 +131,20 @@ export async function projectOperation({ db, owner, namespace, application, body
   const current = await getProject(body.id);
   if (!current) return fail(404, 'Project not found');
   if (body.op === 'get') {
-    const [tasks, milestoneRows, history, milestoneHistory, relationshipHistory, gates, associations, incremental, checkpoint] = await Promise.all([
-      scope('SELECT task_id, version, priority, record, engine FROM proposals WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY created_at, task_id', body.id).all(),
-      scope('SELECT id, project_id, version, name, acceptance, status, updated_at FROM milestones WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY updated_at, id', body.id).all(),
+    const [view, history, milestoneHistory, relationshipHistory, associations, incremental, checkpoint] = await Promise.all([
+      readProgress(),
       scope("SELECT 'project_changed' AS kind, version, status, occurred_at FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY version", body.id).all(),
       scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
       scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
-      scope('SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status FROM project_task_gates g JOIN proposals t USING (owner_id, namespace, task_id) JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id WHERE g.owner_id = ? AND g.namespace = ? AND t.project_id = ?', body.id).all(),
       scope('SELECT task_id, milestone_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
       scope('SELECT t.* FROM task_telemetry t JOIN proposals p USING (owner_id, namespace, task_id) WHERE t.owner_id = ? AND t.namespace = ? AND p.project_id = ?', body.id).all(),
       scope('SELECT payload FROM private_projection WHERE owner_id = ? AND namespace = ?').first(),
     ]);
+    const project = serialize(current);
+    const { linked, ...summary } = view.forProject(project);
     const projectTasks = [], projectAttempts = [], artifacts = [], github = [];
-    const telemetry = { attempts: 0, failures: 0, execution_ms: null, costs: null };
-    const summaries = tasks.results.map(row => {
+    const telemetry = { attempts: 0, retries: 0, failures: 0, execution_ms: null, costs: null, ci_usage: null };
+    for (const row of linked) {
       const task = JSON.parse(row.record);
       const engine = row.engine ? JSON.parse(row.engine) : null;
       projectTasks.push(task);
@@ -99,6 +154,7 @@ export async function projectOperation({ db, owner, namespace, application, body
           github.push({ task_id: row.task_id, uri: item.uri, kind: item.kind });
         }
       }
+      telemetry.retries += Math.max(0, (engine?.attempts.length ?? 0) - 1);
       for (const attempt of engine?.attempts ?? []) {
         telemetry.attempts++;
         if (['failed', 'orphaned'].includes(attempt.state)) telemetry.failures++;
@@ -106,9 +162,7 @@ export async function projectOperation({ db, owner, namespace, application, body
         const elapsed = Date.parse(attempt.finished_at) - Date.parse(attempt.started_at);
         if (Number.isFinite(elapsed) && elapsed >= 0) telemetry.execution_ms = (telemetry.execution_ms ?? 0) + elapsed;
       }
-      return { id: row.task_id, title: task.title, version: row.version, priority: row.priority,
-        state: engine?.state ?? task.state, owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
-    });
+    }
     const ids = new Set(projectTasks.map(task => task.id));
     const projected = combinedTelemetry(checkpoint && JSON.parse(checkpoint.payload), incremental.results);
     const events = (projected?.events ?? []).filter(event => ids.has(event.task_id) && event.repository === application.repository);
@@ -116,8 +170,8 @@ export async function projectOperation({ db, owner, namespace, application, body
     Object.assign(telemetry, { measured_attempts: measured.byAttempt.filter(attempt => attempt.observed.totalTokens !== null).length,
       input_tokens: measured.observed.inputTokens, cached_input_tokens: measured.observed.cachedInputTokens,
       output_tokens: measured.observed.outputTokens });
-    return success({ project: serialize(current), tasks: summaries, milestones: milestoneRows.results, artifacts, github,
-      history: [...history.results, ...milestoneHistory.results, ...relationshipHistory.results].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)), dependencies: gates.results, task_milestones: associations.results, telemetry });
+    return success({ project, ...summary, artifacts, github,
+      history: [...history.results, ...milestoneHistory.results, ...relationshipHistory.results].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)), task_milestones: associations.results, telemetry });
   }
   if (body.op === 'register_task') {
     if (current.status === 'archived') return fail(409, 'Project is archived');
