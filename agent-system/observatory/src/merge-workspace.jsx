@@ -187,7 +187,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
           <GitMerge size={16} aria-hidden="true"/> Integrate Task
         </button>
       </div>
-      {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} main={main} context={sourceContext} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs}
+      {mode === 'pr' && <MergeSourcePicker key={defaultState} defaultState={defaultState} group={pullGroup} main={main} context={sourceContext} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs} headers={headers}
         onRun={id => { setConfirmation(''); setSelected(id); }}/>}
       <form key={mode} onSubmit={event => {
         event.preventDefault();

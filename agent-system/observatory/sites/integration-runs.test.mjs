@@ -255,6 +255,15 @@ test('GitHub integration correlates jobs with required checks and rejects log ev
   const github = githubIntegration(fetcher,'fixture-read-token');
   const integration = {pr_number:5,head_sha:head,evidence:{base_sha:base}};
   assert.equal((await github.inspect(integration)).jobs[0].required_check,true);
+  pr.base.sha = merged;
+  assert.equal((await github.inspect(integration)).reason, 'base_drift');
+  assert.equal((await github.inspect(integration)).checks, undefined);
+  const preview = await github.preview(integration);
+  assert.equal(preview.reason, 'base_drift');
+  assert.equal(preview.checks[0].state, 'failed');
+  assert.equal(preview.jobs[0].required_check, true);
+  assert.equal((await github.preview({ ...integration, head_sha: merged })).checks, undefined);
+  pr.base.sha = base;
   checkUrl = 'https://api.github.com/repos/'+repo.full_name+'/check-runs/56';
   assert.equal((await github.inspect(integration)).jobs[0].required_check,false);
   infrastructure=false;

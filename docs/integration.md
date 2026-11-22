@@ -7,3 +7,5 @@ Select **Pull requests** to search the configured repository's bounded feed. Cho
 Open a run in **Integration history** for the source, check state, prior repair attempts, action receipts, and verified landed revision when available. Failed workflow and job links open the check at GitHub. Rerun, repair, publication, and merge controls depend on current backend eligibility and authorization. The integration engine verifies exact source, review, checks, and landed ancestry. Branch protection remains authoritative.
 
 The two owner-private staging Sites support evidence inspection. Production GitHub mutation gates remain in the [Phase 1B runbook](../PHASE1B-SITES.md). Keep qualification PRs draft and use fixtures to exercise write controls.
+
+In **Merge Control Center**, use **Preview required checks** to read the configured check contexts, exact-head results, and available failed job links without creating an integration run. The preview retains independent blockers such as a draft PR, conflict, or changed target base. Starting protected integration still requires its own inspection and exact-candidate review.

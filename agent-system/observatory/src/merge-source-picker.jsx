@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { taskHref } from './task-workspace.mjs';
 import { activityHref, activityId, activityState, searchActivity } from './github-activity.mjs';
@@ -54,7 +54,50 @@ function pullReadiness(pull, runs, group, main) {
   return [run.state, labels[run.state] ?? 'Awaiting inspection'];
 }
 
-export function MergeSourcePicker({ group, main, number, onSelect, source, context, reload, runs, onRun, defaultState }) {
+function PullCheckPreview({ number, head, headers }) {
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const request = useRef(null);
+  useEffect(() => () => request.current?.abort(), []);
+  const read = async () => {
+    if (request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setLoading(true);
+    setResult(null);
+    try {
+      const response = await fetch('/api/integrations/v1?' + new URLSearchParams({ pr_number: number, head_sha: head }),
+        { headers, signal: controller.signal, cache: 'no-store' });
+      const body = await response.json();
+      if (!controller.signal.aborted) setResult(response.ok ? body : { detail: body.error });
+    } catch {
+      if (!controller.signal.aborted) setResult({ detail: 'GitHub check preview is unavailable.' });
+    } finally {
+      if (!controller.signal.aborted) {
+        request.current = null;
+        setLoading(false);
+      }
+    }
+  };
+  return <section aria-label="Pull request check preview">
+    <h4>Exact-head check preview</h4>
+    <button type="button" className="quiet-button" disabled={loading} onClick={read}>Preview required checks</button>
+    {loading && <p role="status">Reading GitHub checks…</p>}
+    {result && <>
+      <p>Selected head <code>{head.slice(0, 12)}</code></p>
+      {result.detail && <p role="status">{result.detail}</p>}
+      {result.check_error && <p>{result.check_error}</p>}
+      {result.checks?.length ? <ul className="integration-evidence">{result.checks.map(check => <li key={JSON.stringify([check.context, check.app, check.source])}>
+        <span>{check.context}</span><strong>{check.state}</strong>
+      </li>)}</ul> : <p>No required check evidence available for this head.</p>}
+      {!!result.jobs?.length && <ul className="integration-evidence">{result.jobs.map(job => <li key={job.job_id}>
+        <a href={job.url}>{job.name ?? 'Failed job ' + job.job_id}</a><strong>{job.conclusion}</strong>
+      </li>)}</ul>}
+    </>}
+  </section>;
+}
+
+export function MergeSourcePicker({ group, main, number, onSelect, source, context, reload, runs, onRun, defaultState, headers }) {
   const [query, setQuery] = useState('');
   const [state, setState] = useState(defaultState === 'all' ? '' : defaultState ?? 'open');
   const [sort, setSort] = useState('updated');
@@ -114,6 +157,8 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
         <p>{detail.changed_files ?? 'Unknown'} files · +{detail.additions ?? '?'} / −{detail.deletions ?? '?'}</p>
         {detail.requested_reviewers?.length > 0 && <p>Requested reviewers {detail.requested_reviewers.join(', ')}</p>}
         {detail.files?.length > 0 && <details><summary>Changed files</summary><ul>{detail.files.map(file => <li key={file.path}>{file.path}</li>)}</ul></details>}
+        {source.status === 'available' && detail.state === 'open' && /^[0-9a-f]{40}$/.test(detail.head?.sha ?? '') &&
+          <PullCheckPreview key={detail.head.sha} number={number} head={detail.head.sha} headers={headers}/>}
       </>}
       {context && <section aria-label="Linked engineering work">
         <h4>Linked engineering work</h4>

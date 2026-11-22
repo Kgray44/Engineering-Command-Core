@@ -243,7 +243,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const repository = 'synthetic/voyagewright';
   const head = 'b'.repeat(40);
   const base = 'a'.repeat(40);
-  const branch = (ref, sha) => ({ ref, sha, repo: { full_name: repository } });
+  const providerRepository = { id: 19, full_name: repository };
+  const branch = (ref, sha) => ({ ref, sha, repo: providerRepository });
   const pull = {
     number: 7, title: 'Synthetic proposal for staging', body: 'Review the exact source revision.',
     user: { login: 'synthetic-author' }, state: 'open', changed_files: 1, additions: 5, deletions: 2,
@@ -261,7 +262,20 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       if (url.pathname.endsWith('/pulls')) return Response.json([pull]);
       if (url.pathname.endsWith('/files')) return Response.json([{ filename: 'guide.md', status: 'modified', additions: 5, deletions: 2 }]);
       if (url.pathname.endsWith('/reviews') || url.pathname.endsWith('/commits')) return Response.json([]);
-      if (url.pathname.endsWith('/git/ref/heads/main')) return Response.json({ ref: 'refs/heads/main', object: { sha: base } });
+      if (url.pathname.endsWith('/git/ref/heads/main')) return Response.json({ ref: 'refs/heads/main', object: { sha: 'd'.repeat(40), type: 'commit' } });
+      if (url.pathname.endsWith('/rules/branches/main')) return Response.json([{ type: 'required_status_checks',
+        parameters: { required_status_checks: [{ context: 'Verification', integration_id: 9 }] } }]);
+      if (url.pathname.endsWith('/check-runs')) return Response.json({ total_count: 1, check_runs: [
+        { id: 77, name: 'Verification', head_sha: head, app: { id: 9 }, conclusion: 'failure' },
+      ] });
+      if (url.pathname.endsWith('/commits/' + head + '/status')) return Response.json({ sha: head, total_count: 0, statuses: [] });
+      if (url.pathname.endsWith('/actions/runs')) return Response.json({ total_count: 1, workflow_runs: [
+        { id: 8, workflow_id: 34, run_attempt: 1, head_sha: head, status: 'completed', conclusion: 'failure',
+          repository: providerRepository, head_repository: providerRepository },
+      ] });
+      if (url.pathname.endsWith('/actions/runs/8/attempts/1/jobs')) return Response.json({ total_count: 1, jobs: [
+        { id: 15, run_id: 8, head_sha: head, status: 'completed', conclusion: 'failure', name: 'Failed verification', steps: [] },
+      ] });
       return Response.json({}, { status: 404 });
     },
   });
@@ -407,6 +421,13 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await linkedWork.getByRole('link', { name: 'Release project' }).getAttribute('href'), '#projects/' + projectId);
   assert.equal(await linkedWork.getByRole('link', { name: 'Release review' }).getAttribute('href'), '#tasks/' + taskId);
   await page.getByText(head, { exact: true }).waitFor();
+  const preview = page.getByRole('region', { name: 'Pull request check preview' });
+  await preview.getByRole('button', { name: 'Preview required checks' }).click();
+  await preview.getByText('The observed main revision changed. Inspect the new base before proceeding.', { exact: true }).waitFor();
+  await preview.getByText('Verification', { exact: true }).waitFor();
+  assert.equal(await preview.getByRole('link', { name: 'Failed verification' }).getAttribute('href'),
+    'https://github.com/' + repository + '/actions/runs/8/job/15');
+  await page.getByText('No integration runs recorded.', { exact: true }).waitFor();
   await page.getByText('Changed files', { exact: true }).click();
   await page.getByText('guide.md', { exact: true }).waitFor();
   assert.equal(await page.getByRole('link', { name: 'Open on GitHub' }).getAttribute('href'), pull.html_url);
