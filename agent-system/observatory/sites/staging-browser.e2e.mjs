@@ -1242,3 +1242,40 @@ test('all engineering workspaces fit the 390-pixel viewport', { timeout: 60_000 
     assert.ok(dimensions.page <= dimensions.viewport, destination + ': ' + JSON.stringify(dimensions));
   }
 });
+
+
+test('workspace motion responds to keyboard selection and reduced-motion preferences', { timeout: 60_000 }, async t => {
+  const { stage, page, browser } = await browserStage(t);
+  await page.goto(stage.origin);
+  const chart = page.getByRole('group', { name: 'Engineering tasks created over the last fourteen days' });
+  const days = chart.getByRole('button');
+  await days.first().focus();
+  const readout = page.locator('.throughput-selection .workspace-readout');
+  const initial = await readout.textContent();
+  await days.first().press('Enter');
+  await page.waitForFunction(text => document.querySelector('.throughput-selection')?.textContent !== text, initial);
+  assert.equal(await days.first().getAttribute('aria-pressed'), 'true');
+  assert.equal(await days.first().evaluate(node => node === document.activeElement), true);
+  await page.waitForFunction(() => {
+    const readout = document.querySelector('.throughput-selection .workspace-readout');
+    return getComputedStyle(readout).opacity === '1' && getComputedStyle(readout).transform === 'none';
+  });
+
+  const disclosure = page.getByText('Execution and evidence details', { exact: true });
+  await disclosure.press('Enter');
+  await page.getByText('Execution attempts', { exact: true }).waitFor();
+  await disclosure.press('Enter');
+  await page.getByText('Execution attempts', { exact: true }).waitFor({ state: 'hidden' });
+
+  const reduced = await browser.newPage({
+    reducedMotion: 'reduce', extraHTTPHeaders: { authorization: 'Bearer ' + stage.proof },
+  });
+  await reduced.goto(stage.origin);
+  const reducedDay = reduced.getByRole('group', { name: 'Engineering tasks created over the last fourteen days' })
+    .getByRole('button').first();
+  await reducedDay.press('Enter');
+  assert.equal(await reducedDay.getAttribute('aria-pressed'), 'true');
+  assert.equal(await reducedDay.locator('span').evaluate(node => getComputedStyle(node).transform), 'none');
+  assert.equal(await reduced.locator('.ambient-canvas').evaluate(node => getComputedStyle(node).display), 'none');
+  await reduced.close();
+});

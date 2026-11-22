@@ -1,3 +1,4 @@
+import {useWorkspaceMotion} from './workspace-motion.jsx';
 import React, {useEffect,useMemo,useRef,useState} from 'react';
 import {motion,useReducedMotion} from 'motion/react';
 import {Activity, ArrowRight, CheckCircle2, ClipboardCheck, FileCheck2, Flag, GitCommitHorizontal, Search, SlidersHorizontal} from 'lucide-react';
@@ -36,6 +37,7 @@ function ExecutorHeartbeat({taskId, attempt, state, audits}) {
 
 export function TaskTimeline({task,canonical,github,telemetrySource,attempts,events,audits,evidence,records,executorAttempt,executorState,onOpenAttempt}) {
   const reduce=useReducedMotion();
+  const filterMotion=useWorkspaceMotion();
   const known=useMemo(()=>taskEngineeringActivity({task,canonical,attempts,audits,evidence,events,github,telemetrySource}),[task,canonical,attempts,audits,evidence,events,github,telemetrySource]);
   const items=useMemo(()=>buildTaskTimeline({task,attempts,events,audits,evidence,records,engineeringEvents:known.events,telemetrySource}),
     [task,attempts,events,audits,evidence,records,known,telemetrySource]);
@@ -119,7 +121,8 @@ export function TaskTimeline({task,canonical,github,telemetrySource,attempts,eve
         <SlidersHorizontal size={15} aria-hidden="true"/> Filters{activeFilters>0&&` (${activeFilters})`}
       </button>
     </div>
-    <div className="task-filters task-timeline-filter-fields" id="timeline-filter-fields" hidden={!filtersOpen}>
+    <div id="timeline-filter-fields" hidden={!filtersOpen}>
+      {filtersOpen&&<motion.div className="task-filters task-timeline-filter-fields" {...filterMotion}>
       {filters.map(([field,label])=><label className="task-filter" key={field}>{label}<select value={criteria[field]??''}
         onChange={event=>updateCriterion(field,event.target.value)}><option value="">All</option>
         {[...new Set(items.map(item=>item[field]).filter(Boolean))].sort().map(value=>
@@ -127,6 +130,7 @@ export function TaskTimeline({task,canonical,github,telemetrySource,attempts,eve
       </select></label>)}
       <label>From<input type="date" value={criteria.from??''} onChange={event=>updateCriterion('from',event.target.value)}/></label>
       <label>Through<input type="date" value={criteria.through??''} onChange={event=>updateCriterion('through',event.target.value)}/></label>
+      </motion.div>}
     </div>
     {(query||activeFilters>0)&&<div className="task-result-bar">
       <span role="status">{visible.length} of {items.length} events</span>

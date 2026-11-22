@@ -1,3 +1,4 @@
+import {MotionBar,MotionRow} from './workspace-motion.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity, ArrowLeft, ArrowUpRight, CheckCircle2, CircleX, Clock3, GitMerge, GitPullRequest, Search, Workflow
@@ -64,7 +65,7 @@ export function GitHubActivityList({ kind, group, filters, setFilters, ui, ci })
         {[...stateCounts].sort((a,b)=>b[1]-a[1]).map(([state, count])=><button key={state} type="button"
           className="quiet-button" aria-pressed={filters.state===state} onClick={()=>update('state',filters.state===state?'':state)}>
           <Status value={state}/><strong>{count}</strong>
-          <span className="workspace-meter" aria-hidden="true"><span style={{inlineSize:(100*count/items.length)+'%'}}/></span>
+          <span className="workspace-meter" aria-hidden="true"><MotionBar horizontal style={{inlineSize:(100*count/items.length)+'%'}}/></span>
         </button>)}
       </div>
     </Panel></Rise>}
@@ -108,10 +109,10 @@ export function GitHubActivityList({ kind, group, filters, setFilters, ui, ci })
             <Status value={activityState(kind, row) || 'unavailable'}/>
             <time dateTime={row.created_at || undefined}>{stamp(row.created_at)}</time>
             <ArrowUpRight size={16} aria-hidden="true"/></>;
-          return <li key={id ?? row.url}>
+          return <MotionRow key={id ?? row.url}>
             {id ? <a className="github-activity-row" href={activityHref(kind, id)}>{body}</a>
               : <div className="github-activity-row">{body}</div>}
-          </li>;
+          </MotionRow>;
         })}
       </ul>
     </Panel></Rise>

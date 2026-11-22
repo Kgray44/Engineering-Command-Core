@@ -1,3 +1,4 @@
+import {useWorkspaceMotion} from './workspace-motion.jsx';
 import { defaultPreferences } from './workspace-preferences.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { GitMerge, GitPullRequest, RefreshCw } from 'lucide-react';
@@ -111,6 +112,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
   const [confirmation, setConfirmation] = useState('');
   const observation = useRef({ id: null, polls: 0 });
   const reduce = useReducedMotion();
+  const formMotion = useWorkspaceMotion();
   const { runs, access, loading, error, reload } = useIntegrationRuns(headers, !demo);
   const sourceContext = useMergeSourceContext(!demo && mode === 'pr' ? pull : null, headers, runs);
   const verification = headers?.['x-observatory-verification'];
@@ -192,7 +194,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
       </div>
       {mode === 'pr' && <MergeSourcePicker preferences={preferences} group={pullGroup} main={main} context={sourceContext} number={pull} onSelect={setPull} source={source} reload={reloadSource} runs={runs} headers={headers}
         onRun={id => { setConfirmation(''); setSelected(id); }}/>}
-      <form key={mode} onSubmit={event => {
+      <motion.form key={mode} {...formMotion} onSubmit={event => {
         event.preventDefault();
         const fields = new FormData(event.currentTarget);
         const repair_limit = Number(fields.get('repair_limit'));
@@ -207,7 +209,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
           {[1, 2, 3, 4, 5].map(limit => <option key={limit} value={limit}>{limit}</option>)}
         </select></label>
         <button className="primary-button" disabled={busy || loading || (mode === 'pr' ? !reviewedHead : !acceptedTasks.length)}>Inspect source</button>
-      </form>
+      </motion.form>
     </section>
     <section className="panel integration-runs" aria-labelledby="integration-runs-title">
       <h2 id="integration-runs-title">Integration history</h2>

@@ -1,5 +1,6 @@
+import {MotionRow,useWorkspaceMotion} from './workspace-motion.jsx';
 import { useEffect, useState } from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { motion } from 'motion/react';
 import { activityHref, activityId, pullReviewRequestStatus } from './github-activity.mjs';
 import { taskAttemptHref, taskHref } from './task-workspace.mjs';
 
@@ -42,7 +43,7 @@ function useProjectActivity(headers, enabled) {
 }
 
 export function EngineeringAttention({ tasks, attempts, github, dispatch, worker, runs, runError, summaries, settings, headers, Panel, Status, demo }) {
-  const reduced = useReducedMotion();
+  const laneMotion = useWorkspaceMotion();
   const activity = useProjectActivity(headers, !demo && Boolean(settings?.application));
   const [localFilter, setFilter] = useState(null);
   const preferences = settings?.preferences.values;
@@ -140,7 +141,7 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
       {['Project changes', 'Projects awaiting owner review'].includes(title) && activity.stale &&
         <p role="status">Project activity could not refresh.{items.length ? ' Showing the last read.' : ''}</p>}
       {projectFeed(title) && activity.loading && !items.length && <p role="status">Loading Project changes…</p>}
-      {items.length > 0 && <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>
+      {items.length > 0 && <ul className="attention-items">{items.map(item => <MotionRow key={item.id}>
         <div><a href={item.href}>{item.label}</a>
           {item.detail && <small>{item.detail}</small>}
           {time(item.at) && <time dateTime={item.at}>{time(item.at)}</time>}
@@ -148,7 +149,7 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
           {item.task && <small><a href={taskHref(item.task)}>Open Task</a></small>}
         </div>
         {item.state && <Status value={item.state}/>}
-      </motion.li>)}</ul>}
+      </MotionRow>)}</ul>}
     </Panel>;
 
   return <>
@@ -162,10 +163,10 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
       const entries=populated.filter(([kind])=>kind===group);
       if(!entries.length)return null;
       const title=group==='attention'?'Needs attention':'Recent work';
-      return <section className="attention-lane" key={group} aria-label={title}>
+      return <motion.section className="attention-lane" key={group} aria-label={title} {...laneMotion}>
         <h2>{title}</h2>
         <div className="attention-grid">{entries.map(renderSection)}</div>
-      </section>;
+      </motion.section>;
     })}
     {!populated.length && <p className="notice" role="status">No matching records in the current feed.</p>}
     {empty.length > 0 && <details className="panel workspace-disclosure attention-empty">

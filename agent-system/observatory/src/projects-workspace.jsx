@@ -1,3 +1,4 @@
+import {useWorkspaceMotion} from './workspace-motion.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import { ProjectAppearance, ProjectCardGrid, ProjectIcon } from './project-cards.jsx';
@@ -39,6 +40,7 @@ function Options({ values }) {
 }
 
 function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTemplates = [] }) {
+  const formMotion = useWorkspaceMotion();
   const [draft, setDraft] = useState(() => ({
     scope: project.scope ?? '',
     acceptance: project.acceptance ?? '',
@@ -61,7 +63,7 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
       Object.entries(defaults).filter(([field]) => !edited.current.has(field)),
     ) }));
   };
-  return <form className="form project-definition-form" onSubmit={event => {
+  return <motion.form {...formMotion} className="form project-definition-form" onSubmit={event => {
     event.preventDefault();
     const { participants, milestone_suggestions, ...fields } = object(event.currentTarget);
     onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean),
@@ -104,7 +106,7 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
     </details>
     <ProjectAppearance project={project}/>
     <button className="primary-button" disabled={busy}>{project.id ? 'Save project' : 'Create project'}</button>
-  </form>;
+  </motion.form>;
 }
 
 function MilestoneForm({ milestone, suggestedName, onSave, busy }) {

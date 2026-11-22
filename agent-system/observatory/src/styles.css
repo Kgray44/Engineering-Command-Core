@@ -1023,3 +1023,44 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
   gap: .35rem .75rem;
 }
 .merge-source-detail > h3 { scroll-margin-block-start: 1.25rem; }
+
+
+/* Keep native disclosures and form focus while smoothing their state changes. */
+.workspace-readout { display: inline-block; }
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell {
+    --workspace-motion-fast: 150ms;
+    --workspace-motion-standard: 210ms;
+    --workspace-motion-ease: cubic-bezier(.22,1,.36,1);
+  }
+  .main :where(.quiet-button,.primary-button,.icon-button,.text-button,.back,
+    .settings-card,.project-card-link,.overview-review-links a,.github-activity-row,
+    summary,select,input,textarea) {
+    transition-property: background-color, color, border-color, box-shadow, opacity;
+    transition-duration: var(--workspace-motion-fast);
+    transition-timing-function: var(--workspace-motion-ease);
+  }
+  .main :where(summary,.text-button,.back):hover { color: var(--accent); }
+
+  /* On supporting browsers, animate the native content box in both directions. */
+  @supports selector(details::details-content) and (interpolate-size: allow-keywords) {
+    .main details::details-content {
+      interpolate-size: allow-keywords;
+      block-size: 0;
+      opacity: 0;
+      overflow: clip;
+      transition: block-size var(--workspace-motion-standard) var(--workspace-motion-ease),
+        opacity var(--workspace-motion-fast) ease,
+        content-visibility var(--workspace-motion-standard) allow-discrete,
+        overflow var(--workspace-motion-standard) allow-discrete;
+    }
+    .main details[open]::details-content {
+      block-size: auto;
+      opacity: 1;
+      overflow: visible;
+    }
+    @starting-style {
+      .main details[open]::details-content { block-size: 0; opacity: 0; overflow: clip; }
+    }
+  }
+}
