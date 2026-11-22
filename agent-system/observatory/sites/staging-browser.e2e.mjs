@@ -89,6 +89,19 @@ test('Projects workspace performs live project and Task mutations through the sh
   for (const label of ['Implementation completed', 'Technical verification', 'PR checks', 'PR merged', 'Functionality delivered', 'Owner review']) {
     await acceptanceSection.getByText(label, { exact: true }).waitFor();
   }
+  await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.locator('select[name="technical_state"]').selectOption('verified');
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
+  const projectHistory = page.locator('#project-history');
+  await projectHistory.getByText('Project verification recorded', { exact: true }).waitFor({ timeout: 5_000 });
+  await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.locator('select[name="technical_state"]').selectOption('delivered');
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
+  await projectHistory.getByText('Project delivery recorded', { exact: true }).waitFor();
+  await page.reload();
+  await acceptanceSection.getByText(/^Last recorded verification/).waitFor();
+  await acceptanceSection.getByText(/^Last recorded delivery/).waitFor();
+  await acceptanceSection.getByText('0 recorded deployments', { exact: true }).waitFor();
   await acceptanceSection.getByRole('combobox', { name: 'Review decision' }).selectOption('pending');
   await acceptanceSection.getByRole('button', { name: 'Save owner review' }).click();
   const pendingReview = acceptanceSection.locator('strong').getByText('Awaiting owner review', { exact: true });

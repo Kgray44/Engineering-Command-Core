@@ -164,8 +164,12 @@ function MilestoneEvidence({ milestone, tasks, links, dependents, history, Statu
   </section>;
 }
 
-function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSave, onJump, Panel, DetailLine }) {
+function ProjectAcceptance({ project, tasks, integrations, progress, history, busy, onSave, onJump, Panel, DetailLine }) {
   const completed = tasks.filter(task => task.candidate_revision);
+  const lastRecorded = stage => history.findLast(event =>
+    event.kind === 'project_technical_state_changed' && event.technical_state === stage);
+  const lastVerification = lastRecorded('verified');
+  const lastDelivery = lastRecorded('delivered');
   const decisions = Object.entries(projectReviewLabels);
   const currentReview = project.owner_review ?? '';
   if (!Object.hasOwn(projectReviewLabels, currentReview)) decisions.push([currentReview, currentReview]);
@@ -173,12 +177,18 @@ function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSav
     <h3>Acceptance requirements</h3>
     <p className="objective">{project.acceptance || 'No requirements recorded.'}</p>
     <DetailLine name="Implementation completed" value={completed.length + ' of ' + tasks.length + ' Tasks with a completed candidate'}/>
-    <DetailLine name="Technical verification" value={project.technical_state === 'verified' ? 'Project verification recorded' : 'No current Project verification recorded'}/>
+    <DetailLine name="Current recorded technical stage" value={project.technical_state?.replaceAll('_', ' ') || 'Unspecified'}/>
+    <DetailLine name="Technical verification" value={lastVerification
+      ? <>Last recorded verification <time dateTime={lastVerification.occurred_at}>{shortDate(lastVerification.occurred_at)}</time></>
+      : 'No Project verification recorded'}/>
     <DetailLine name="PR checks" value={integrations.some(run => run.required_checks?.length)
       ? <button type="button" className="text-button" onClick={() => onJump('project-verification')}>Review recorded PR checks</button>
       : 'No exact-revision check evidence recorded'}/>
     <DetailLine name="PR merged" value={progress.integrations.merged + ' of ' + progress.integrations.tracked + ' recorded integrations'}/>
-    <DetailLine name="Functionality delivered" value={progress.integrations.deployed + ' recorded deployments'}/>
+    <DetailLine name="Functionality delivered" value={lastDelivery
+      ? <>Last recorded delivery <time dateTime={lastDelivery.occurred_at}>{shortDate(lastDelivery.occurred_at)}</time></>
+      : 'No Project delivery recorded'}/>
+    <DetailLine name="Integration deployments" value={progress.integrations.deployed + ' recorded deployments'}/>
     <DetailLine name="Owner review" value={Object.hasOwn(projectReviewLabels, currentReview) ? projectReviewLabels[currentReview] : currentReview}/>
     {completed.length > 0 && <details>
       <summary>Completed Task candidates</summary>
@@ -693,7 +703,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       <Panel id="project-evidence" title="Artifacts and reports">
         <ProjectArtifacts tasks={tasks} artifacts={artifact_sources}/>
       </Panel>
-      <ProjectAcceptance project={project} tasks={tasks} integrations={integrations} progress={progress} busy={busy}
+      <ProjectAcceptance project={project} tasks={tasks} integrations={integrations} progress={progress} history={history} busy={busy}
         Panel={Panel} DetailLine={DetailLine} onJump={onJump} onSave={owner_review => submit({
           op: 'update', expected_version: project.version, fields: { owner_review },
         })}/>

@@ -13,6 +13,10 @@ const milestones = ['planned', 'verified', 'integrated', 'accepted'];
 const reviewHistoryLabels = {
   pending: 'Owner review requested', accepted: 'Owner accepted Project', declined: 'Owner declined Project', '': 'Owner review cleared',
 };
+const technicalHistoryLabels = {
+  in_progress: 'Project work marked in progress', verified: 'Project verification recorded',
+  integrated: 'Project integration recorded', delivered: 'Project delivery recorded', '': 'Project technical stage cleared',
+};
 const executionHistoryLimit = 120;
 const heartbeatHistoryLimit = 40;
 const projectTaskActivity = {
@@ -289,12 +293,13 @@ export async function projectOperation({ db, owner, namespace, application, body
       readProgress(),
       scope(`WITH snapshots AS (
           SELECT version, status, occurred_at, json_extract(metadata, '$.owner_review') AS owner_review,
-            json_remove(metadata, '$.owner_review') AS configuration
+            json_extract(metadata, '$.technical_state') AS technical_state,
+            json_remove(metadata, '$.owner_review', '$.technical_state') AS configuration
           FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ?
         )
         SELECT CASE WHEN version = 1 THEN 'project_created'
           WHEN configuration <> lag(configuration) OVER (ORDER BY version) THEN 'project_configuration_changed'
-          ELSE 'project_changed' END AS kind, version, status, occurred_at, owner_review
+          ELSE 'project_changed' END AS kind, version, status, occurred_at, owner_review, technical_state
         FROM snapshots ORDER BY version`, body.id).all(),
       scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
       scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
@@ -362,12 +367,22 @@ export async function projectOperation({ db, owner, namespace, application, body
         };
       });
     let previousReview = '';
-    const projectHistory = history.results.flatMap(({ owner_review, ...event }) => {
+    let previousTechnicalStage = '';
+    const projectHistory = history.results.flatMap(({ owner_review, technical_state, ...event }) => {
       const review = owner_review ?? '';
-      const changed = review !== previousReview;
+      const stage = technical_state ?? '';
+      const events = [event];
+      if (review !== previousReview) events.push({
+        kind: 'project_owner_review_changed', version: event.version, occurred_at: event.occurred_at,
+        name: Object.hasOwn(reviewHistoryLabels, review) ? reviewHistoryLabels[review] : 'Owner review updated',
+      });
+      if (stage !== previousTechnicalStage) events.push({
+        kind: 'project_technical_state_changed', version: event.version, occurred_at: event.occurred_at, technical_state: stage,
+        name: Object.hasOwn(technicalHistoryLabels, stage) ? technicalHistoryLabels[stage] : 'Project technical stage updated',
+      });
       previousReview = review;
-      return changed ? [event, { kind: 'project_owner_review_changed', version: event.version, occurred_at: event.occurred_at,
-        name: Object.hasOwn(reviewHistoryLabels, review) ? reviewHistoryLabels[review] : 'Owner review updated' }] : [event];
+      previousTechnicalStage = stage;
+      return events;
     });
     const linkable_tasks = project.status === 'archived' ? [] : view.taskRows
       .filter(row => !row.project_id && taskId(row.task_id))
