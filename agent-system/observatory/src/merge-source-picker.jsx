@@ -222,6 +222,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
   const githubUrl = detail?.url ?? summary?.url;
   const matchingRuns = context?.data?.runs ?? runs.filter(run => run.pr_number === number);
   return <div className="merge-discovery">
+    <div className="merge-source-browser" role="region" aria-label="Find pull requests">
     <div className="merge-discovery-filters">
       <label>Search pull requests<input type="search" placeholder="Title, branch, Project, or Task" value={query} onChange={event => setQuery(event.target.value)}/></label>
       <label>State<select value={state} onChange={event => setState(event.target.value)}>
@@ -240,6 +241,7 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
     {group?.status && group.status !== 'available' && <p className="notice integration-discovery-notice" role="status">Pull request feed {group.status}. {group.reason}</p>}
     {visibleDiscovery?.unavailable && <p role="status">Linked Project and Task search is unavailable.</p>}
     {visibleDiscovery?.truncated && <p role="status">Showing the first 200 linked records for the current pull request feed.</p>}
+    <p className="merge-result-count" aria-live="polite">{pulls.length} {pulls.length===1?'pull request':'pull requests'}</p>
     <ul className="merge-source-list">
       {pulls.map(pull => {
         const id = activityId('pulls', pull);
@@ -257,7 +259,8 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
       })}
     </ul>
     {!pulls.length && <p className="low">No pull requests match the current view.</p>}
-    {number && <motion.section key={number} className="merge-source-detail"
+    </div>
+    {number ? <motion.section key={number} className="merge-source-detail" aria-label="Selected pull request"
       initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reduced ? 0 : .18 }}>
       <h3>#{number} {detail?.title ?? summary?.title ?? 'Pull request'}</h3>
       <p role="status">{!source ? 'Reading GitHub source…' : source.reason || source.error ||
@@ -311,6 +314,8 @@ export function MergeSourcePicker({ group, main, number, onSelect, source, conte
           {run.updated_at && <small>{new Date(run.updated_at).toLocaleString()}</small>}
         </button>
       </li>)}</ul>}
-    </motion.section>}
+    </motion.section> : <aside className="merge-source-empty"><h3>Source inspection</h3>
+      <p className="low">Select a pull request to see its source, linked work, and check evidence.</p>
+    </aside>}
   </div>;
 }

@@ -50,12 +50,30 @@ export function GitHubActivityList({ kind, group, filters, setFilters, ui, ci })
     : [['All workflow runs', showTotal(runTotal), Workflow, repoMeta], ['Recent active runs', countRecent(activeRun), Clock3, recentMeta],
       ['Recent passed runs', countRecent(x => x === 'success'), CheckCircle2, recentMeta],
       ['Recent failed runs', countRecent(failedRun), CircleX, recentMeta]];
+  const stateCounts = new Map();
+  for (const item of items) {
+    const state = activityState(kind, item);
+    if (state) stateCounts.set(state, (stateCounts.get(state) ?? 0) + 1);
+  }
   const update = (key, value) => setFilters({ ...filters, [key]: value });
 
   return <>
-    {!pr && ci && <CIControls {...ci} Panel={Panel} Rise={Rise}/>}
-    <div className="metrics github-activity-metrics">{stats.map(([name, value, Icon, meta], index) =>
-      <Metric key={name} name={name} value={value} Icon={Icon} index={index} meta={meta}/>)}</div>
+    {recentKnown && stateCounts.size>0 && <Rise><Panel title={pr?'Recent pull request status':'Recent workflow outcomes'}
+      right={<span className="panel-meta">{items.length} loaded · {group.status==='stale'?'cached':'observed'}</span>}>
+      <div className="github-status-breakdown" role="group" aria-label="Filter by recent status">
+        {[...stateCounts].sort((a,b)=>b[1]-a[1]).map(([state, count])=><button key={state} type="button"
+          className="quiet-button" aria-pressed={filters.state===state} onClick={()=>update('state',filters.state===state?'':state)}>
+          <Status value={state}/><strong>{count}</strong>
+          <span className="workspace-meter" aria-hidden="true"><span style={{inlineSize:(100*count/items.length)+'%'}}/></span>
+        </button>)}
+      </div>
+    </Panel></Rise>}
+    {(!pr || pullTotals) && <details className="workspace-disclosure github-repository-counts">
+      <summary>{pr?'Repository-wide pull request totals':'Repository and run counts'}</summary>
+      <div className="metrics github-activity-metrics">{stats.map(([name, value, Icon, meta], index) =>
+        <Metric key={name} name={name} value={value} Icon={Icon} index={index} meta={meta}/>)}</div>
+    </details>}
+    {!pr && ci && <CIControls {...ci} Panel={Panel} Rise={Rise}/>} 
     <Rise><Panel title={entityName(kind)} right={<span className="panel-meta">{rows.length} of {items.length} recent results</span>}>
       {pr && !pullTotals && <p className="low">Repository totals are unavailable{group?.totals?.reason ? ' · ' + group.totals.reason : ''}.</p>}
       {pr && pullTotals && <p className="low">{pullTotals.stale ? 'Cached repository totals' : 'Repository totals'} · {stamp(pullTotals.observedAt)}</p>}

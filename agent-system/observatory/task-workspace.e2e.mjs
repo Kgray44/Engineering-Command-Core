@@ -612,7 +612,9 @@ test('owner schedules an engine Task, observes blockers and controls the queue',
   await receiptDetail.getByText('Observatory first received',{exact:true}).waitFor();
   assert.equal(await receiptDetail.getByText(traceReceivedAt,{exact:true}).count(), 1);
   assert.equal(await receiptDetail.locator('time').getAttribute('datetime'), '2026-01-01T08:00:00.000Z');
+  await timeline.getByText('Event sources and coverage',{exact:true}).click();
   await timeline.getByText(/First-receipt timestamps are available for 7 of 7 journal events/).waitFor();
+  await timeline.getByText('Event sources and coverage',{exact:true}).click();
   const reportedEvidence=page.locator('#task-evidence').getByRole('region',{name:'Reported verification activity'});
   await reportedEvidence.getByText(/Reported deployment validation · succeeded/).click();
   await reportedEvidence.getByText('Reported by the source journal',{exact:true}).waitFor();

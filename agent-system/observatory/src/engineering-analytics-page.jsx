@@ -83,8 +83,12 @@ function TrendChart({ days }) {
 function Counts({ entries, empty }) {
   const rows = Object.entries(entries ?? {}).filter(([, value]) => Number.isFinite(value) && value > 0)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return rows.length ? <dl className="analytics-counts">
-    {rows.map(([key, value]) => <div key={key}><dt>{label(key)}</dt><dd>{count(value)}</dd></div>)}
+  return rows.length ? <dl className="analytics-distribution">
+    {rows.map(([key, value]) => <div key={key}>
+      <dt>{label(key)}</dt><dd>{count(value)}
+        <span className="workspace-meter" aria-hidden="true"><span style={{inlineSize:(100*value/rows[0][1])+'%'}}/></span>
+      </dd>
+    </div>)}
   </dl> : <p className="low">{empty}</p>;
 }
 
@@ -218,12 +222,18 @@ export function EngineeringAnalyticsPage({ records, events, github, execution, r
     </Panel></Rise>
     <div className="analytics-grid">
       <Rise><Panel title="Delivery and reliability" right={<BarChart3 size={18} className="muted-icon"/>}>
+        <div className="workspace-stat-grid">
+          <div><strong>{count(data.pulls.mergedInWindow)}</strong><span>Loaded PRs merged in period</span></div>
+          <div><strong>{count(data.ci.succeeded)}</strong><span>Recent successful runs</span></div>
+          <div><strong>{count(data.ci.failed)}</strong><span>Recent failed runs</span></div>
+        </div>
+        <details className="workspace-disclosure"><summary>Repository totals and timing coverage</summary>
         <MetricRows fields={[
           ['All pull requests', count(totals?.total)], ['Pull requests loaded', count(data.pulls.total)], ['Loaded PRs opened in period', count(data.pulls.createdInWindow)],
-          ['Loaded PRs merged in period', count(data.pulls.mergedInWindow)], ['All workflow runs', count(runTotal)], ['Recent CI run window', count(data.ci.total)],
-          ['Recent successful runs', count(data.ci.succeeded)], ['Recent failed runs', count(data.ci.failed)],
+          ['All workflow runs', count(runTotal)], ['Recent CI run window', count(data.ci.total)],
           ['Median recorded attempt', spanTime(data.attempts.medianMs)], ['Attempts with both time boundaries', count(data.attempts.timed)]
         ]}/>
+        </details>
       </Panel></Rise>
       <StickySectionAside><Rise><Panel title="Recent failed CI runs" right={<a className="text-button" href={activityHref('runs')}>All CI runs <ArrowUpRight size={15}/></a>}>
         {recent.length ? <ul className="github-meta-list">{recent.map(item => {

@@ -1152,3 +1152,34 @@ test('Aetherwake workspace controls fit at phone width and project actions stay 
   assert.ok(style.padding >= 30);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 });
+
+
+test('Overview and Activity put actionable information ahead of supporting detail', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t, {
+    browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
+  });
+  await page.goto(stage.origin);
+  const chart = page.getByRole('group', { name: 'Engineering tasks created over the last fourteen days' });
+  const days = chart.getByRole('button');
+  await days.last().waitFor();
+  assert.equal(await days.count(), 14);
+  await days.first().focus();
+  await days.first().press('Enter');
+  assert.equal(await days.first().getAttribute('aria-pressed'), 'true');
+  assert.equal(await days.last().getAttribute('aria-pressed'), 'false');
+  const detail = page.locator('details').filter({ has: page.getByText('Execution and evidence details', { exact: true }) });
+  assert.equal(await detail.evaluate(node => node.open), false);
+  await detail.getByText('Execution and evidence details', { exact: true }).click();
+  await detail.getByText('Execution attempts', { exact: true }).waitFor();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+
+  const menu = page.getByRole('button', { name: 'Workspace navigation' });
+  await menu.click();
+  await page.getByRole('navigation', { name: 'Engineering workspaces' }).getByRole('button', { name: 'Activity' }).click();
+  const empty = page.locator('details.attention-empty');
+  await empty.waitFor();
+  assert.equal(await empty.evaluate(node => node.open), false);
+  assert.equal(await page.getByRole('heading', { name: 'Failed attempts', exact: true }).count(), 0);
+  await empty.locator('summary').click();
+  await empty.getByText('Failed attempts', { exact: true }).waitFor();
+});

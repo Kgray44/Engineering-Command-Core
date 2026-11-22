@@ -563,8 +563,17 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
               onSave={fields => submit({ op: 'update', expected_version: project.version, fields }, () => setEdit(false))}/>}
           </Panel>
           <Panel id="project-current-work" title="Current work">
-            <DetailLine name="Task progress" value={progress.tasks.completed + ' of ' + progress.tasks.total + ' complete'}/>
-            <DetailLine name="Milestone progress" value={progress.milestones.accepted + ' of ' + progress.milestones.total + ' accepted'}/>
+            <div className="project-momentum">
+              {[
+                ['Task progress', progress.tasks.completed, progress.tasks.total, 'complete'],
+                ['Milestone progress', progress.milestones.accepted, progress.milestones.total, 'accepted'],
+              ].map(([label, value, total, outcome])=><div className="project-progress-card" key={label}>
+                <h3>{label}</h3>
+                <div><strong>{value}</strong> of {total} {outcome}</div>
+                {total>0 && <progress aria-label={label} value={value} max={total}/>}
+              </div>)}
+            </div>
+            <div className="project-work-signals">
             <DetailLine name="Workers with active Project leases" value={number(active_workers)}/>
             <DetailLine name="Next runnable Task" value={nextTask ? <a href={taskHref(nextTask.id)}>{nextTask.title}</a> : 'No Task ready to claim'}/>
             <DetailLine name="Latest recorded integration" value={latestIntegration ? <>
@@ -585,7 +594,8 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
             <DetailLine name="Recent change" value={lastChange ? <button type="button" className="text-button" onClick={() => onJump('project-history')}>
               {historyLabel(lastChange)} · {shortDate(lastChange.occurred_at)}
             </button> : 'No recorded changes'}/>
-            {blockedTasks.length > 0 && <div>
+            </div>
+            {blockedTasks.length > 0 && <div className="project-blocker-summary">
               <h3>Blocked Tasks</h3>
               <ul className="project-list">{blockedTasks.slice(0, 5).map(task => <li key={task.id}>
                 <a href={taskHref(task.id)}>{task.title}</a><small>{task.blockers.length} {task.blockers.length === 1 ? 'blocker' : 'blockers'}</small>

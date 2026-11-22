@@ -83,15 +83,28 @@ export function TaskTimeline({task,canonical,github,telemetrySource,attempts,eve
     setSelected(id);
   }
 
+
+  const keyCounts = new Set(['Formal Task Engine attempts','Known executor sessions','Dated engineering events','Linked pull requests']);
+  const overviewCounts = known.counts.filter(([label])=>keyCounts.has(label));
+  const supportingCounts = known.counts.filter(([label])=>!keyCounts.has(label));
+  const countsByType = new Map();
+  for (const item of items) countsByType.set(item.type,(countsByType.get(item.type)??0)+1);
+
   return <section className="task-timeline" aria-label="Task timeline">
-    <dl className="github-facts task-telemetry-coverage">
-      {known.counts.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value??'Unavailable'}</dd></div>)}
+    <dl className="workspace-stat-grid task-timeline-highlights">
+      {overviewCounts.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value??'Unavailable'}</dd></div>)}
     </dl>
-    <p className="low">{known.coverage} Trace events are ordered by journal occurrence. {journalReceiptSummary(items)}</p>
+    <details className="workspace-disclosure timeline-coverage">
+      <summary>Event sources and coverage</summary>
+      <dl className="github-facts task-telemetry-coverage">
+        {supportingCounts.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value??'Unavailable'}</dd></div>)}
+      </dl>
+      <p className="low">{known.coverage} Trace events are ordered by journal occurrence. {journalReceiptSummary(items)}</p>
+    </details>
     <div className="task-timeline-toolbar">
       <nav aria-label="Timeline filters" className="task-timeline-filters">
         {categories.filter(kind=>kind==='All'||items.some(item=>item.type===kind)).map(kind=>
-          <button type="button" className="quiet-button" key={kind} aria-pressed={filter===kind} onClick={()=>{setFilter(kind);setLimit(14);}}>{kind}</button>)}
+          <button type="button" className="quiet-button" key={kind} aria-pressed={filter===kind} onClick={()=>{setFilter(kind);setLimit(14);}}>{kind}<span className="timeline-category-count" aria-hidden="true">{kind==='All'?items.length:countsByType.get(kind)}</span></button>)}
       </nav>
       <ExecutorHeartbeat taskId={task.id} attempt={executorAttempt} state={executorState} audits={audits}/>
     </div>
