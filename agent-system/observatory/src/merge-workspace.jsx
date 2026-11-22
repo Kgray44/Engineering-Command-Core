@@ -213,14 +213,24 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
       <h2 id="integration-runs-title">Integration history</h2>
       {loading && <p role="status">Loading integration runs…</p>}
       {!loading && !runs.length && <p className="muted">No integration runs recorded.</p>}
-      <ul>{runs.map(item => <li key={item.id}><button className="quiet-button" aria-pressed={selected === item.id} onClick={() => {
-        setConfirmation('');
-        setSelected(item.id);
-      }}>
-        {item.pr_number ? 'PR #' + item.pr_number : 'Task candidate ' + item.head_sha.slice(0, 8)}
-        <span>{labels[item.id === run?.id ? run.state : item.state]}<small>{item.created_at && new Date(item.created_at).toLocaleString()}
-          {' · Recorded span ' + integrationRunDuration(item)}</small></span>
-      </button></li>)}</ul>
+      {runs.length > 0 && <ul>{runs.map(item => {
+        const recorded = item.id === run?.id ? run : item;
+        const landed = recorded.evidence?.merged_sha;
+        const reason = recorded.state === 'blocked' ? recorded.evidence?.reason : null;
+        const repairs = (recorded.repair_attempts?.length ?? 0) + (recorded.source_repairs?.length ?? 0);
+        return <li key={item.id}><button type="button" className="quiet-button" aria-pressed={selected === item.id} onClick={() => {
+          setConfirmation('');
+          setSelected(item.id);
+        }}>
+          <strong>{recorded.pr_number ? 'PR #' + recorded.pr_number : 'Task candidate'} · {labels[recorded.state]}</strong>
+          <small>Source <code title={recorded.head_sha}>{recorded.head_sha.slice(0, 12)}</code>
+            {landed && <> · Landed <code title={landed}>{landed.slice(0, 12)}</code></>}</small>
+          {reason && <small>Blocker · {reason.replaceAll('_', ' ')}</small>}
+          {repairs > 0 && <small>{repairs} {repairs === 1 ? 'repair attempt' : 'repair attempts'}</small>}
+          <small>{recorded.created_at && new Date(recorded.created_at).toLocaleString()}
+            {' · Recorded span ' + integrationRunDuration(recorded)}</small>
+        </button></li>;
+      })}</ul>}
     </section>
     <div role="status" aria-live="polite" className="integration-message">{message}</div>
     {run && <motion.section key={run.id} initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}

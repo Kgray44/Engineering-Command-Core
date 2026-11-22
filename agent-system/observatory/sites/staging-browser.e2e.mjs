@@ -694,6 +694,13 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.ok(await selectedTitle.evaluate(node => node.offsetHeight <= 64),
     'The short selected PR title should remain readable beside linked-work metadata');
   assert.ok(await desktop.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+  const emptyHistory = desktop.getByRole('region', { name: 'Integration history' });
+  await emptyHistory.getByText('No integration runs recorded.', { exact: true }).waitFor();
+  const historyBounds = await emptyHistory.boundingBox();
+  const sourceBounds = await desktop.getByRole('region', { name: 'Integration sources' }).boundingBox();
+  assert.ok(historyBounds.height <= 200 && historyBounds.height < sourceBounds.height / 2,
+    'Empty integration history should remain compact beside a long candidate inspection');
+  assert.ok(sourceBounds.width > historyBounds.width, 'Inspecting the source gets the wider desktop column');
   await capture(desktop, 'voyagewright-merge-source.png');
   await desktop.close();
   const inspection = page.waitForResponse(response => response.url().endsWith('/api/integrations/v1') && response.request().method() === 'POST');
@@ -708,7 +715,9 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.goto(stage.origin + '/#merge?run=' + run.id + '&pr=7');
   await page.locator('#integration-detail-title').waitFor();
   await page.getByText('Recorded run span', { exact: false }).waitFor();
-  assert.match(await page.getByRole('region', { name: 'Integration history' }).innerText(), /Recorded span \d+ s/);
+  const savedRun = page.getByRole('region', { name: 'Integration history' }).getByRole('button', { name: /PR #7/ });
+  assert.match(await savedRun.innerText(), /Recorded span \d+ s/);
+  assert.equal(await savedRun.locator('code[title="' + head + '"]').textContent(), head.slice(0, 12));
   const mergedId = crypto.randomUUID();
   const mergedAt = new Date().toISOString();
   const insertRun = part.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, NULL, NULL, ?, ?, 'merged', 1, ?, ?, ?)");
