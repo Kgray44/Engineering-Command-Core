@@ -56,13 +56,16 @@ test('Projects workspace performs live project and Task mutations through the sh
     const mask = getComputedStyle(node);
     const grid = getComputedStyle(node, '::before');
     return { mask: mask.maskImage, animation: grid.animationName, period: grid.animationDuration, tile: grid.backgroundSize,
+      gradients: (grid.backgroundImage.match(/linear-gradient\(/g) ?? []).length,
       keyframes: node.getAnimations({ subtree: true }).flatMap(animation => animation.effect.getKeyframes()) };
   });
   assert.match(gridLayer.mask, /linear-gradient/);
   assert.equal(gridLayer.animation, 'grid-travel');
   assert.equal(gridLayer.period, '40s');
-  assert.deepEqual(gridLayer.tile.split(', '), ['58px 58px', '58px 58px']);
-  assert.ok(gridLayer.keyframes.some(keyframe => keyframe.transform === 'translate(58px, 58px)'));
+  // Chromium versions may serialize repeated background sizes as a single value.
+  assert.equal(gridLayer.gradients, 2);
+  assert.match(gridLayer.tile, /^58px 58px(?:,\s*58px 58px)?$/);
+  assert.ok(gridLayer.keyframes.some(keyframe => keyframe.transform?.replaceAll(' ', '') === 'translate(58px,58px)'));
   assert.ok(gridLayer.keyframes.every(keyframe => !('backgroundPosition' in keyframe)));
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
