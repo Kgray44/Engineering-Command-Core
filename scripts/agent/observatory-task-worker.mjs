@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { aetherwakeRepository, applicationId, repositoryName } from '../../agent-system/observatory/sites/application-config.mjs';
 import { taskExecutionCapacity } from '../../agent-system/observatory/task-execution-capacity.mjs';
 import { taskDigest, writeSnapshot } from './context.mjs';
 import { createClaimTelemetryHooks, processHasExited, readInterruptedClaim, retainActiveClaim, reconcileAbandonedClaim } from './claim-telemetry.mjs';
@@ -19,8 +20,13 @@ const runFile = promisify(execFile);
 const verificationId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const taskIdPattern = new RegExp('^task_' + verificationId.source.slice(1));
 const attemptIdPattern = new RegExp('^attempt_' + verificationId.source.slice(1));
-const repoUrl = /^(?:https:\/\/github\.com\/|git@github\.com:)Kgray44\/Aetherwake(?:\.git)?$/i;
-const tool = 'aetherwake_engineering_observatory.task_engine_v1';
+const repositoryOrigin = repository => 'https://github.com/' + repository + '.git';
+function repositoryMatches(origin, repository) {
+  const normalized = repository.toLowerCase();
+  return ['https://github.com/', 'git@github.com:'].some(prefix =>
+    [prefix + normalized, prefix + normalized + '.git'].includes(origin.toLowerCase()));
+}
+const legacyToolNamespace = 'aetherwake_engineering_observatory';
 const reportSafetyMarginMs = 1_500;
 const reportTimeoutMs = 5_000;
 
@@ -72,22 +78,21 @@ async function checkoutLocation(read, fastReadback) {
   return Promise.all(['--show-toplevel','HEAD','--absolute-git-dir'].map(arg=>read('rev-parse',arg)));
 }
 
-export async function checkoutIdentity(path, base, { fastReadback = process.env.AADS_GIT_FAST_READBACK==='1', readGit = git } = {}) {
+export async function checkoutIdentity(path, base, { fastReadback = process.env.AADS_GIT_FAST_READBACK==='1', readGit = git, repository = aetherwakeRepository } = {}) {
   const read = (...args) => readGit(path,...args);
   const [[root, revision, gitDir], origin, branch, dirty] = await Promise.all([
     checkoutLocation(read,fastReadback), read('remote', 'get-url', 'origin'),
     read('symbolic-ref', '--short', 'HEAD'), read('status', '--porcelain', '--untracked-files=normal'),
   ]);
-  if (await realpath(root) !== path || !repoUrl.test(origin) || !branch.startsWith('codex/aads-task-') ||
+  if (await realpath(root) !== path || !repositoryMatches(origin, repository) || !branch.startsWith('codex/aads-task-') ||
       relative(path, await realpath(gitDir)) !== '.git') {
-    throw Error('Executor requires a dedicated Aetherwake checkout and task branch');
+    throw Error('Executor requires a dedicated application checkout and task branch');
   }
   await read('merge-base', '--is-ancestor', base, revision);
   return { branch, revision, dirty: Boolean(dirty) };
 }
 
 const provisionRevision = /^[a-f0-9]{40}$/;
-const provisionOrigin = 'https://github.com/Kgray44/Aetherwake.git';
 
 // Git can report raw paths, credentials and remote output even on a local fetch.
 // Classify that output here and retain only approved descriptions.
@@ -127,11 +132,11 @@ async function workerTelemetryDirectory(root, taskId, workspace) {
   return !await existingPrivateDirectory(current) && await existingPrivateDirectory(legacy) ? legacy : current;
 }
 
-export async function verifyRetainedCandidate(workspace, marker) {
+export async function verifyRetainedCandidate(workspace, marker, repository = aetherwakeRepository) {
   if (marker.workspace!==workspace || marker.candidateRevision===marker.revision ||
       !await existingPrivateDirectory(workspace)) return false;
   try {
-    const result=await checkoutIdentity(workspace,marker.revision,{readGit:(cwd,...args)=>git(cwd,'--no-lazy-fetch',...args)});
+    const result=await checkoutIdentity(workspace,marker.revision,{repository,readGit:(cwd,...args)=>git(cwd,'--no-lazy-fetch',...args)});
     return !result.dirty && result.branch===marker.branch && result.revision===marker.candidateRevision;
   } catch { return false; }
 }
@@ -177,8 +182,8 @@ async function releaseWorkspaceLock({directory,owner}) {
   });
 }
 
-export async function prepareRecoveredCandidate(workspace, marker) {
-  if (!await verifyRetainedCandidate(workspace,marker) || !await existingPrivateDirectory(join(workspace,'.git'))) return false;
+export async function prepareRecoveredCandidate(workspace, marker, repository = aetherwakeRepository) {
+  if (!await verifyRetainedCandidate(workspace,marker,repository) || !await existingPrivateDirectory(join(workspace,'.git'))) return false;
   const lock=workspaceLock(workspace,marker.attemptId);
   const info=await lstat(lock.directory).catch(error=>{if(error.code!=='ENOENT')throw error;});
   // Older workers wrote an empty file without an owner. Recover the candidate
@@ -212,8 +217,8 @@ function gitProvisioningIdentity(settings) {
 // Only worker-approved claims can reach this provisioner. The Task controls the
 // pinned revision; the worker owns the origin and every filesystem destination.
 export async function provisionTaskWorkspace({ root, task, attempt, interruptedCheckout, author, signal,
-  cloneOrigin = provisionOrigin, gitCache, observe = (_name, action) => action() }) {
-  if (!taskIdPattern.test(task?.id ?? '') || task.repository !== 'Kgray44/Aetherwake' ||
+  repository = aetherwakeRepository, cloneOrigin = repositoryOrigin(repository), gitCache, observe = (_name, action) => action() }) {
+  if (!taskIdPattern.test(task?.id ?? '') || task.repository !== repository ||
       !provisionRevision.test(attempt?.revision ?? '')) throw Error('Invalid Task checkout identity');
   const { name, email } = gitProvisioningIdentity(author);
   const parent = await realpath(root);
@@ -229,7 +234,7 @@ export async function provisionTaskWorkspace({ root, task, attempt, interruptedC
       if (!existing.isDirectory() || existing.isSymbolicLink() || await realpath(destination) !== destination) {
         throw Error('Task checkout is not an isolated directory');
       }
-      const identity = await checkoutIdentity(destination, attempt.revision);
+      const identity = await checkoutIdentity(destination, attempt.revision, { repository });
       if (identity.branch !== branch || identity.revision !== attempt.revision ||
           (identity.dirty && (!attempt.resume_session_id || (attempt.resume_requires_clean && !interruptedCheckout)))) {
         throw Error('Existing Task checkout requires reconciliation');
@@ -294,12 +299,12 @@ export async function provisionTaskWorkspace({ root, task, attempt, interruptedC
     if (pinned.stdout.trim() !== 'commit') {
       throw checkoutFailure('verify pinned commit', {checkoutCategory:'revision_unavailable'});
     }
-    await run('set repository origin', 'remote', 'add', 'origin', provisionOrigin);
+    await run('set repository origin', 'remote', 'add', 'origin', repositoryOrigin(repository));
     await run('set Git author name', 'config', '--local', 'user.name', name);
     await run('set Git author email', 'config', '--local', 'user.email', email);
     await observe('checkout_materialization',() => run('materialize pinned branch', '-c',
       'core.hooksPath=' + join(staging, '.git', 'aads-disabled-hooks'), 'switch', '--quiet', '-c', branch, attempt.revision));
-    const candidate = await checkoutIdentity(staging, attempt.revision)
+    const candidate = await checkoutIdentity(staging, attempt.revision, { repository })
       .catch(error=>{ throw checkoutFailure('verify materialized checkout',error); });
     if (candidate.branch !== branch || candidate.revision !== attempt.revision || candidate.dirty) {
       throw checkoutFailure('verify materialized checkout', {checkoutCategory:'identity_mismatch'});
@@ -478,7 +483,7 @@ export function codexTaskPrompt(task, attempt, { objectiveSource, executionNotes
     '- '+kind+' '+uri+(revision?' @ '+revision:'')))];
   const deliverables = [...new Set(task.deliverables??[])];
   return [
-    'Carry out the approved Aetherwake engineering Task in this dedicated checkout only.',
+    'Carry out the approved engineering Task in this dedicated checkout only.',
     'Follow repository governance and the current sandbox. Make scoped changes and run relevant tests.',
     'Use targeted repository searches and governance sections. Keep command output focused and reuse facts already read unless the source changed or needs independent verification.',
     'Leave changes in the checkout. The Task worker will create the local candidate commit.',
@@ -1014,6 +1019,16 @@ async function main(configPath) {
   delete process.env.AADS_INTEGRATION_PUSH_TOKEN;
   if (!credential || credential.length < 32) throw Error('AADS_TASK_WORKER_KEY is required');
   const config = JSON.parse(await readFile(configPath, 'utf8'));
+  const repository = config.repository ?? aetherwakeRepository;
+  const app = config.application_id;
+  const name = config.connector_namespace ?? legacyToolNamespace;
+  if (typeof repository !== 'string' || !repositoryName.test(repository) || /\/(?:\.|\.\.)$/.test(repository) ||
+    !/^[a-z][a-z0-9_]{0,63}$/.test(name) || (app !== undefined && (typeof app !== 'string' || !applicationId.test(app))) ||
+    ((repository !== aetherwakeRepository || app !== undefined) && (!app || name === legacyToolNamespace))) {
+    throw Error('Explicit repository, application and separate Command Core connector are required');
+  }
+  const tool = name + '.task_engine_v1';
+  const appScope = app ? { application_id: app } : {};
   const workerId = config.worker_id ?? randomUUID();
   if (!verificationId.test(workerId)) throw Error('Worker ID must be a UUID v4');
   if (config.executor_transport!==undefined && !['exec','app_server'].includes(config.executor_transport)) {
@@ -1044,7 +1059,7 @@ async function main(configPath) {
     gitCache=await realpath(config.provision_git_cache);
     const withinWorker=relative(root,gitCache);
     if (!withinWorker||(!isAbsolute(withinWorker)&&!withinWorker.startsWith('..'))||
-        !repoUrl.test(await git(gitCache,'remote','get-url','origin'))) throw Error('Provisioning cache must use the trusted Aetherwake repository outside worker checkouts');
+        !repositoryMatches(await git(gitCache,'remote','get-url','origin'), repository)) throw Error('Provisioning cache must use the configured repository outside worker checkouts');
   }
   const workspaces = new Map();
   for (const [id, path] of Object.entries(config.workspaces ?? {})) {
@@ -1062,6 +1077,7 @@ async function main(configPath) {
   const repairEnabled = config.integration_source_repair === true;
   const ciAutomation = config.integration_ci_automation === true;
   if (ciAutomation && verification) throw Error('Automatic CI reruns require a live worker');
+  if (repairEnabled && repository !== aetherwakeRepository) throw Error('No source-repair adapter configured for this application');
   if (repairEnabled && (!appServer || !author || verification)) throw Error('Source repair requires a live App Server worker with isolated checkout provisioning');
   if (scope !== undefined && (!Array.isArray(scope) || !scope.length || scope.length > 500 ||
       !scope.every(id => taskIdPattern.test(id)))) throw Error('Invalid automatic checkout Task scope');
@@ -1092,7 +1108,7 @@ async function main(configPath) {
     return {
       close: () => connector?.close(),
       ready: requestSignal => use(current=>current.ready(requestSignal)),
-      call: (args,toolName,options) => use(current=>current.call(args,toolName,options)),
+      call: (args,toolName,options) => use(current=>current.call({ ...args, ...appScope },toolName,options)),
     };
   }
   const control = connection();
@@ -1152,7 +1168,7 @@ async function main(configPath) {
     const request = (op, extra) => sendIntegration({ op, operation_id: randomUUID(), id: job.integration_id,
       claim_id: job.claim_id, worker_id: workerId, expected_version: version, ...extra });
     const outcome = await transferReviewedCandidate({ job, workspace, scratchRoot: root, token: transferToken,
-      gitBin: integrationGit, signal, authorize: async (tree_sha, shallow_base) => {
+      gitBin: integrationGit, signal, repository, authorize: async (tree_sha, shallow_base) => {
         const { run } = await request('integration_begin', { tree_sha, ...(shallow_base ? { shallow_base } : {}) });
         version = run.version;
         verified = run.transfer.status === 'verified';
@@ -1160,7 +1176,7 @@ async function main(configPath) {
       } });
     if (!verified && !signal.aborted) await request('integration_report', { status: outcome.status });
   }
-  const managedConnection = { call:args => delivery.call(args,'aetherwake_engineering_observatory.sync_task_telemetry') };
+  const managedConnection = { repository, call: args => delivery.call(args, name + '.sync_task_telemetry') };
   let nextPulse = 0;
   let lastWorkerState;
   let pulseRequest;
@@ -1192,10 +1208,10 @@ async function main(configPath) {
       const taskId=taskIds[recoveryCursor++%taskIds.length];
       const telemetryDirectory=await workerTelemetryDirectory(root,taskId,workspaces.get(taskId));
       try {
-        await reconcileAbandonedClaim({directory:telemetryDirectory,taskId,
+        await reconcileAbandonedClaim({directory:telemetryDirectory,taskId,repository,
           readTask:id=>recovery.call({request:{op:'get',task_id:id},...(verification?{verification}:{})}),
           recoverCandidate:async marker=>{
-            if (!await prepareRecoveredCandidate(workspaces.get(taskId)??join(root,taskId),marker)) return false;
+            if (!await prepareRecoveredCandidate(workspaces.get(taskId)??join(root,taskId),marker,repository)) return false;
             const request={op:'recover_worker_candidate',task_id:taskId,attempt_id:marker.attemptId,
               operation_id:marker.recoveryOperationId,candidate_recovery:{key:marker.recoveryKey,
                 revision:marker.candidateRevision,session_id:marker.sessionId,branch:marker.branch}};
@@ -1221,19 +1237,21 @@ async function main(configPath) {
           // Do not spend a new claim's lease on local App Server startup.
           await control.ready(signal);
           const recoveryKey=appServer?randomBytes(32).toString('hex'):undefined;
-          const request = { op:'claim', operation_id:randomUUID(), conversation_continuation:appServer,
+          const request = { op:'claim', operation_id:randomUUID(), worker_id:workerId, conversation_continuation:appServer,
             ...(recoveryKey?{recovery_commitment:createHash('sha256').update(recoveryKey).digest('hex')}:{}),
             live_addenda:appServer, separate_execution_notes:true, ...(scope ? { task_ids:scope } : {}) };
           const result = await send(request).catch(error => {
             if (error.status && error.status < 500) throw error;
             return send(request);
           });
+          if (result.claim && result.claim.task.repository !== repository) throw Error('Claim repository differs from the configured application');
           if (result.claim && !signal.aborted) {
             const workspace = workspaces.get(result.claim.task.id);
             const taskId = result.claim.task.id;
             const telemetryDirectory = await workerTelemetryDirectory(root,taskId,workspace);
             const job = runClaim({ claim:result.claim, send, workspace, executable:config.codex_bin, signal, recoveryKey,
               verificationNamespace:verification ?? null,managedConnection,telemetryDirectory,
+              identify: (path, revision) => checkoutIdentity(path, revision, { repository }),
               ...(config.executor_transport==='app_server' ? {
                   execute:async options=>{
                     // The persistent conversation belongs to this attempt process.
@@ -1246,7 +1264,7 @@ async function main(configPath) {
                     finally { executor.close(); }
                   },providerStream:'codex_app_server',
               } : {}),
-              ...(workspace ? {} : {prepareWorkspace:input => provisionTaskWorkspace({root, author, gitCache, ...input})}),
+              ...(workspace ? {} : {prepareWorkspace:input => provisionTaskWorkspace({root, author, gitCache, repository, ...input})}),
               admitStorage }).catch(() => {
                 console.error('Attempt reporting failed. The Task lease will require reconciliation.');
               }).finally(() => active.delete(job));

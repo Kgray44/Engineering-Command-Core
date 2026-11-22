@@ -1,0 +1,42 @@
+name: Command Core verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: agent-system/observatory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: agent-system/observatory/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Verify compatibility and shared engine
+        run: |
+          npm test
+          npm run test:sites
+          node --test ../../tests/agent-journal-export.test.mjs
+      - name: Build configured shared Worker and React assets
+        env:
+          COMMAND_CORE_APPLICATIONS: >-
+            {"legacyApplication":"aetherwake","applications":[{"id":"aetherwake","name":"Aetherwake","repository":"Kgray44/Aetherwake","origin":"https://aetherwake.example.test","binding":"AETHERWAKE"},{"id":"voyagewright","name":"Voyagewright","repository":"Kgray44/treasurehuntSoT","origin":"https://voyagewright.example.test","binding":"VOYAGEWRIGHT"}]}
+        run: npm run build:sites
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Exercise Task, Merge and Projects workspaces
+        env:
+          OBSERVATORY_ENGINE_E2E: '1'
+        run: node --test task-workspace.e2e.mjs sites/staging-browser.e2e.mjs

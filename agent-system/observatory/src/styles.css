@@ -463,3 +463,13 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
   .integration-revisions div { grid-template-columns: minmax(0, 1fr); }
   .integration-evidence li { flex-wrap: wrap; }
 }
+.projects-workspace { display: grid; gap: 18px; }
+.project-list { list-style: none; margin: 14px 0; padding: 0; }
+.project-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 0; }
+.project-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.projects-workspace details { margin: 12px 0; }
+.projects-workspace summary { cursor: pointer; }
+.projects-workspace summary .status { margin-inline-start: 8px; }
+.projects-workspace details .form { margin-block: 10px; }
+.project-metrics { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; }
+.project-metrics dd { margin: 0; font-variant-numeric: tabular-nums; }

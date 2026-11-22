@@ -67,7 +67,7 @@ export async function projectJournal({ task, directory, cache, generatedAt }) {
     generated_at: generatedAt ?? new Date().toISOString(),
     records: [...unique.values(), ...attempts],
     events
-  }, validRecord, validEvent);
+  }, validRecord, validEvent, Date.now(), task.repository);
   const serialized = JSON.stringify(projection) + '\n';
   if (Buffer.byteLength(serialized) > MAX_SYNC_BYTES) throw Error('Sanitized projection exceeds the Sites upload limit');
   return serialized;

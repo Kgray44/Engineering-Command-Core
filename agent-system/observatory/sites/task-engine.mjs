@@ -627,6 +627,9 @@ const workerFreshnessMs = 60_000;
 
 export async function taskOperation({ db, owner, namespace, body, access, validate, revision, repository, projectId, projectAware = false, now = Date.now() }) {
   if (!body || !['list', 'get', 'register', 'command', ...workerOperations].includes(body.op)) return failure(400, 'Invalid Task operation');
+  if (projectAware && [body.repository, body.fields?.repository, body.action?.fields?.repository].some(value => value !== undefined && value !== repository)) {
+    return failure(400, 'Repository differs from the configured application');
+  }
   if (workerOperations.has(body.op) && access !== 'worker') return failure(403, 'Executor authorization required');
   if (body.op === 'command' && access !== 'owner' && !agentCommands.has(body.action?.type)) return failure(403, 'Owner action required');
   if (access === 'worker' && !workerOperations.has(body.op)) return failure(403, 'Executor scope does not allow this operation');
@@ -719,6 +722,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     ...await view(currentRow), ...(access === 'owner' ? { worker_dispatch: await observeDispatch(currentRow) } : {}),
   }) : failure(404, 'Task not found');
 
+  if (body.op === 'claim' && body.worker_id !== undefined && !operationId.test(body.worker_id)) return failure(400, 'Invalid worker identity');
   if (body.op === 'claim' && !validWorkerScope(body.task_ids)) return failure(400, 'Invalid executor Task scope');
   if (body.op === 'claim' && body.recovery_commitment !== undefined &&
       (typeof body.recovery_commitment !== 'string' || !recoveryProof.test(body.recovery_commitment))) {
@@ -802,6 +806,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     }
     catch (error) { return failure(400, error.message); }
     if (!validate(task) || task.prerequisites.task_ids.some(id => !taskId(id))) return failure(400, 'Invalid Task record');
+    if (projectAware && task.prerequisites.task_ids.some(id => !rows.has(id))) return failure(400, 'Task dependency is outside this application registry');
     if (hasCycle(id, task, rows)) return failure(409, 'Dependency cycle');
     const priority = body.fields.priority ?? 'normal';
     if (!priorities.includes(priority)) return failure(400, 'Invalid priority');
@@ -850,6 +855,7 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
       revision: lifecycle.followup_revision ?? task.revision, state: 'running', started_at: timestamp(now), lease: crypto.randomUUID(),
       lease_until: Math.min(now + leaseMs, deadline), deadline, spec_version: lifecycle.spec_version ?? 1,
       ...(body.live_addenda === true ? { live_addenda: true } : {}),
+      ...(body.worker_id ? { worker_id: body.worker_id } : {}),
       ...(body.recovery_commitment ? {recovery_commitment:body.recovery_commitment} : {}),
       ...(lifecycle.changed_assumption ? { changed_assumption:lifecycle.changed_assumption } : {}),
     };
@@ -900,6 +906,8 @@ export async function taskOperation({ db, owner, namespace, body, access, valida
     return failure(400, 'Invalid Task specification');
   }
   if (nextTask.prerequisites.task_ids.some(id => !taskId(id))) return failure(400, 'Invalid dependency ID');
+  if (projectAware && nextTask.prerequisites.task_ids.some(id => !rows.has(id)) &&
+      JSON.stringify(nextTask.prerequisites) !== JSON.stringify(task.prerequisites)) return failure(400, 'Task dependency is outside this application registry');
   if (['admit', 'edit'].includes(body.action?.type) && hasCycle(task.id, nextTask, rows)) return failure(409, 'Dependency cycle');
   const action = body.action;
   const latest = lifecycle.attempts.at(-1);

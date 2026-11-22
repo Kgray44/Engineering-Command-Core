@@ -21,6 +21,14 @@ const validator = standalone(ajv, ajv.compile(schema));
 const traceSchema = JSON.parse(await readFile(join(project, '../contracts/trace-v1.schema.json'), 'utf8'));
 const eventValidator = standalone(ajv, ajv.compile(traceSchema));
 
+const configuration = process.env.COMMAND_CORE_APPLICATIONS;
+const config = configuration ? JSON.parse(configuration) : null;
+if (config && !Array.isArray(config.applications)) throw Error('Command Core application configuration required');
+const commandCore = config ? {
+  applications: config.applications.map(({ id, name, repository, origin, binding }) => ({ id, name, repository, origin, binding })),
+  ...(config.portfolio ? { portfolio: { id: config.portfolio.id, name: config.portfolio.name } } : {}),
+  ...(config.legacyApplication ? { legacyApplication: config.legacyApplication } : {}),
+} : null;
 const ui = join(project, 'dist');
 const assets = {
   '/': { type: 'text/html; charset=utf-8', content: await readFile(join(ui, 'index.html'), 'utf8') },
@@ -42,7 +50,9 @@ try {
       contents: `import { createWorker } from './sites/worker.mjs';
         import validate from ${JSON.stringify(join(temporary, 'validator.mjs'))};
         import validateEvent from ${JSON.stringify(join(temporary, 'event-validator.mjs'))};
-        export default createWorker({ validate, validateEvent, assets: ${JSON.stringify(assets)}, sourceRevision: ${JSON.stringify(sourceRevision)} });`,
+        import { createCommandCore } from './sites/command-core.mjs';
+        const options = { validate, validateEvent, assets: ${JSON.stringify(assets)}, sourceRevision: ${JSON.stringify(sourceRevision)} };
+        export default ${commandCore ? 'createCommandCore({ ...options, ...' + JSON.stringify(commandCore) + ', trustedIdentity: request => request.headers.get("oai-authenticated-user-id") })' : 'createWorker(options)'};`,
       resolveDir: project,
     },
     bundle: true,
@@ -55,4 +65,3 @@ try {
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }
-

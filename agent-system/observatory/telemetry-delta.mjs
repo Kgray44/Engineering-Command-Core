@@ -49,6 +49,7 @@ export function telemetryDelta(snapshot, baseline) {
 }
 
 export function applyTelemetryDelta(current, change) {
+  if (current && change.repository && current.repository !== change.repository) throw Error('Telemetry repository changed');
   const records = index(current?.records ?? [], recordKey);
   const events = index(current?.events ?? [], eventKey);
   for (const [id, record] of index(change.records, recordKey)) {
@@ -69,7 +70,7 @@ export function applyTelemetryDelta(current, change) {
     events.set(id, event);
   }
   return {
-    export_version: 1, repository: 'Kgray44/Aetherwake', authority: 'local-task-records',
+    export_version: 1, repository: change.repository ?? current?.repository ?? 'Kgray44/Aetherwake', authority: 'local-task-records',
     generated_at: change.generated_at, records: [...records.values()], events: [...events.values()],
   };
 }

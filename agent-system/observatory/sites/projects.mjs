@@ -1,3 +1,6 @@
+import { accountEngineeringTokens } from '../src/engineering-token-accounting.mjs';
+import { taskAttemptRecord } from './task-engine.mjs';
+import { combinedTelemetry } from './task-telemetry.mjs';
 import { uuid } from './application-config.mjs';
 
 const statuses = ['planned', 'active', 'paused', 'archived'];
@@ -73,32 +76,48 @@ export async function projectOperation({ db, owner, namespace, application, body
   const current = await getProject(body.id);
   if (!current) return fail(404, 'Project not found');
   if (body.op === 'get') {
-    const [tasks, milestoneRows, history, gates, associations] = await Promise.all([
+    const [tasks, milestoneRows, history, milestoneHistory, relationshipHistory, gates, associations, incremental, checkpoint] = await Promise.all([
       scope('SELECT task_id, version, priority, record, engine FROM proposals WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY created_at, task_id', body.id).all(),
       scope('SELECT id, project_id, version, name, acceptance, status, updated_at FROM milestones WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY updated_at, id', body.id).all(),
-      scope('SELECT version, status, occurred_at FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY version', body.id).all(),
+      scope("SELECT 'project_changed' AS kind, version, status, occurred_at FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY version", body.id).all(),
+      scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
+      scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
       scope('SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status FROM project_task_gates g JOIN proposals t USING (owner_id, namespace, task_id) JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id WHERE g.owner_id = ? AND g.namespace = ? AND t.project_id = ?', body.id).all(),
       scope('SELECT task_id, milestone_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
+      scope('SELECT t.* FROM task_telemetry t JOIN proposals p USING (owner_id, namespace, task_id) WHERE t.owner_id = ? AND t.namespace = ? AND p.project_id = ?', body.id).all(),
+      scope('SELECT payload FROM private_projection WHERE owner_id = ? AND namespace = ?').first(),
     ]);
-    const telemetry = { attempts: 0, failures: 0, measured_attempts: 0, input_tokens: null, cached_input_tokens: null, output_tokens: null };
+    const projectTasks = [], projectAttempts = [], artifacts = [], github = [];
+    const telemetry = { attempts: 0, failures: 0, execution_ms: null, costs: null };
     const summaries = tasks.results.map(row => {
       const task = JSON.parse(row.record);
       const engine = row.engine ? JSON.parse(row.engine) : null;
+      projectTasks.push(task);
+      artifacts.push(...(task.artifacts ?? []).map(artifact => ({ task_id: row.task_id, ...artifact })));
+      for (const item of [...(engine?.links ?? []), ...(engine?.evidence ?? [])]) {
+        if (typeof item.uri === 'string' && item.uri.startsWith('https://github.com/' + application.repository + '/')) {
+          github.push({ task_id: row.task_id, uri: item.uri, kind: item.kind });
+        }
+      }
       for (const attempt of engine?.attempts ?? []) {
         telemetry.attempts++;
         if (['failed', 'orphaned'].includes(attempt.state)) telemetry.failures++;
-        const usage = attempt.usage;
-        if (!usage?.complete) continue;
-        telemetry.measured_attempts++;
-        for (const key of ['input_tokens', 'cached_input_tokens', 'output_tokens']) {
-          if (Number.isSafeInteger(usage[key])) telemetry[key] = (telemetry[key] ?? 0) + usage[key];
-        }
+        projectAttempts.push(taskAttemptRecord(task, attempt));
+        const elapsed = Date.parse(attempt.finished_at) - Date.parse(attempt.started_at);
+        if (Number.isFinite(elapsed) && elapsed >= 0) telemetry.execution_ms = (telemetry.execution_ms ?? 0) + elapsed;
       }
       return { id: row.task_id, title: task.title, version: row.version, priority: row.priority,
         state: engine?.state ?? task.state, owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
     });
-    return success({ project: serialize(current), tasks: summaries, milestones: milestoneRows.results,
-      history: history.results, dependencies: gates.results, task_milestones: associations.results, telemetry });
+    const ids = new Set(projectTasks.map(task => task.id));
+    const projected = combinedTelemetry(checkpoint && JSON.parse(checkpoint.payload), incremental.results);
+    const events = (projected?.events ?? []).filter(event => ids.has(event.task_id) && event.repository === application.repository);
+    const measured = accountEngineeringTokens({ tasks: projectTasks, attempts: projectAttempts, events, days: [], cutoff: Date.now(), sourceConflicts: 0 });
+    Object.assign(telemetry, { measured_attempts: measured.byAttempt.filter(attempt => attempt.observed.totalTokens !== null).length,
+      input_tokens: measured.observed.inputTokens, cached_input_tokens: measured.observed.cachedInputTokens,
+      output_tokens: measured.observed.outputTokens });
+    return success({ project: serialize(current), tasks: summaries, milestones: milestoneRows.results, artifacts, github,
+      history: [...history.results, ...milestoneHistory.results, ...relationshipHistory.results].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)), dependencies: gates.results, task_milestones: associations.results, telemetry });
   }
   if (body.op === 'register_task') {
     if (current.status === 'archived') return fail(409, 'Project is archived');
@@ -127,9 +146,9 @@ export async function projectOperation({ db, owner, namespace, application, body
     }
     const values = [body.name.trim(), body.acceptance.trim(), body.status, at];
     const row = body.expected_version === undefined
-      ? await scope("INSERT INTO milestones (owner_id, namespace, id, project_id, name, acceptance, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id, version, status",
-        body.milestone_id, body.id, ...values).first()
-      : await db.prepare('UPDATE milestones SET name = ?, acceptance = ?, status = ?, updated_at = ?, version = version + 1 WHERE owner_id = ? AND namespace = ? AND id = ? AND project_id = ? AND version = ? RETURNING id, version, status')
+      ? await scope("INSERT INTO milestones (owner_id, namespace, id, project_id, name, acceptance, status, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE owner_id = ? AND namespace = ? AND id = ? AND status <> 'archived') ON CONFLICT DO NOTHING RETURNING id, version, status",
+        body.milestone_id, body.id, ...values, owner, namespace, body.id).first()
+      : await db.prepare('UPDATE milestones SET name = ?, acceptance = ?, status = ?, updated_at = ?, version = version + 1 WHERE owner_id = ? AND namespace = ? AND id = ? AND project_id = ? AND version = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.owner_id = milestones.owner_id AND p.namespace = milestones.namespace AND p.id = milestones.project_id AND p.status <> \'archived\') RETURNING id, version, status')
         .bind(...values, owner, namespace, body.milestone_id, body.id, body.expected_version).first();
     return row ? success({ milestone: row }, body.expected_version === undefined ? 201 : 200) : fail(409, 'Milestone identity or version changed');
   }
@@ -138,8 +157,9 @@ export async function projectOperation({ db, owner, namespace, application, body
   if (!task || (task.project_id && task.project_id !== body.id)) return fail(404, 'Task not found in Project scope');
   if (body.op === 'link_task') {
     if (task.project_id === body.id) return success({ linked: true });
-    const row = await db.prepare('UPDATE proposals SET project_id = ? WHERE owner_id = ? AND namespace = ? AND task_id = ? AND project_id IS NULL AND version = ? RETURNING task_id')
-      .bind(body.id, owner, namespace, body.task_id, body.expected_version).first();
+    if (!Number.isSafeInteger(body.expected_version) || body.expected_version < 1) return fail(400, 'Expected Task version required');
+    const row = await db.prepare('UPDATE proposals SET project_id = ? WHERE owner_id = ? AND namespace = ? AND task_id = ? AND project_id IS NULL AND version = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.owner_id = proposals.owner_id AND p.namespace = proposals.namespace AND p.id = ? AND p.status <> \'archived\') RETURNING task_id')
+      .bind(body.id, owner, namespace, body.task_id, body.expected_version, body.id).first();
     return row ? success({ linked: true }) : fail(409, 'Task association changed');
   }
   if (task.project_id !== body.id || !isId(body.milestone_id)) return fail(400, 'Task and milestone identities required');
@@ -147,7 +167,11 @@ export async function projectOperation({ db, owner, namespace, application, body
   if (!milestone) return fail(404, 'Milestone not found');
   if (body.op === 'milestone_link') {
     if (milestone.project_id !== body.id) return fail(403, 'Milestone belongs to a different Project');
-    await scope('INSERT OR IGNORE INTO project_task_milestones VALUES (?, ?, ?, ?, ?)', body.id, body.task_id, body.milestone_id).run();
+    const row = await scope("INSERT INTO project_task_milestones SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM projects WHERE owner_id = ? AND namespace = ? AND id = ? AND status <> 'archived') ON CONFLICT DO NOTHING RETURNING task_id",
+      body.id, body.task_id, body.milestone_id, owner, namespace, body.id).first();
+    if (!row && !await scope('SELECT task_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND task_id = ? AND milestone_id = ?', body.task_id, body.milestone_id).first()) {
+      return fail(409, 'Project state changed');
+    }
   } else {
     if (milestone.project_id === body.id) return fail(400, 'Milestone gate requires a different Project');
     if (JSON.parse(task.engine ?? '{}').executor) return fail(409, 'Set milestone gates before Task admission');
@@ -166,9 +190,10 @@ export async function projectOperation({ db, owner, namespace, application, body
       SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM reachable WHERE id = ?)
         AND EXISTS (SELECT 1 FROM proposals WHERE owner_id = ? AND namespace = ? AND task_id = ?
           AND project_id = ? AND json_extract(engine, '$.executor') IS NULL)
+        AND EXISTS (SELECT 1 FROM projects WHERE owner_id = ? AND namespace = ? AND id = ? AND status <> 'archived')
       ON CONFLICT DO NOTHING RETURNING task_id
     `).bind(owner, namespace, milestone.project_id, owner, namespace, body.task_id, body.milestone_id,
-      body.id, owner, namespace, body.task_id, body.id).first();
+      body.id, owner, namespace, body.task_id, body.id, owner, namespace, body.id).first();
     if (!linked) return fail(409, 'Milestone gate would create a cycle or Task state changed');
   }
   return success({ linked: true });

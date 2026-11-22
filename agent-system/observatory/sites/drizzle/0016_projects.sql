@@ -5,6 +5,13 @@ CREATE TABLE application_partition (
   portfolio_id TEXT NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE migration_receipt (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  source_digest TEXT NOT NULL,
+  content_digest TEXT NOT NULL,
+  counts TEXT NOT NULL CHECK (json_valid(counts))
+);
+--> statement-breakpoint
 CREATE TABLE projects (
   owner_id TEXT NOT NULL,
   namespace TEXT NOT NULL,
@@ -97,6 +104,32 @@ BEGIN
   SELECT RAISE(ABORT, 'Invalid project scope');
 END;
 --> statement-breakpoint
+CREATE TABLE project_relationship_events (
+  event_id INTEGER PRIMARY KEY,
+  owner_id TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  milestone_id TEXT,
+  kind TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  FOREIGN KEY (owner_id, namespace, project_id) REFERENCES projects (owner_id, namespace, id)
+);
+--> statement-breakpoint
+CREATE TRIGGER project_task_created AFTER INSERT ON proposals
+WHEN NEW.project_id IS NOT NULL
+BEGIN
+  INSERT INTO project_relationship_events(owner_id, namespace, project_id, task_id, kind, occurred_at)
+  VALUES (NEW.owner_id, NEW.namespace, NEW.project_id, NEW.task_id, 'task_registered', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+--> statement-breakpoint
+CREATE TRIGGER project_task_linked AFTER UPDATE OF project_id ON proposals
+WHEN NEW.project_id IS NOT NULL AND NEW.project_id IS NOT OLD.project_id
+BEGIN
+  INSERT INTO project_relationship_events(owner_id, namespace, project_id, task_id, kind, occurred_at)
+  VALUES (NEW.owner_id, NEW.namespace, NEW.project_id, NEW.task_id, 'task_linked', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+--> statement-breakpoint
 CREATE TABLE project_task_milestones (
   owner_id TEXT NOT NULL,
   namespace TEXT NOT NULL,
@@ -117,3 +150,16 @@ CREATE TABLE project_task_gates (
   FOREIGN KEY (owner_id, namespace, task_id) REFERENCES proposals (owner_id, namespace, task_id),
   FOREIGN KEY (owner_id, namespace, milestone_id) REFERENCES milestones (owner_id, namespace, id)
 );
+--> statement-breakpoint
+CREATE TRIGGER project_milestone_task_link AFTER INSERT ON project_task_milestones
+BEGIN
+  INSERT INTO project_relationship_events(owner_id, namespace, project_id, task_id, milestone_id, kind, occurred_at)
+  VALUES (NEW.owner_id, NEW.namespace, NEW.project_id, NEW.task_id, NEW.milestone_id, 'milestone_linked', strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+END;
+--> statement-breakpoint
+CREATE TRIGGER project_milestone_gate_set AFTER INSERT ON project_task_gates
+BEGIN
+  INSERT INTO project_relationship_events(owner_id, namespace, project_id, task_id, milestone_id, kind, occurred_at)
+  SELECT NEW.owner_id, NEW.namespace, p.project_id, NEW.task_id, NEW.milestone_id, 'milestone_gate_set', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  FROM proposals p WHERE p.owner_id = NEW.owner_id AND p.namespace = NEW.namespace AND p.task_id = NEW.task_id;
+END;

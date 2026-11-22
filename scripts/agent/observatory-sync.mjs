@@ -179,7 +179,7 @@ export async function recoverWorkerTelemetry({taskId, telemetryDirectory, verifi
   if (config && config.verification!==verification) return null;
   const name = key(JSON.stringify([taskId,journal]));
   const source = await jsonFile(join(queue,name+'.source'));
-  if (source?.task?.id!==taskId || source.task.repository!=='Kgray44/Aetherwake' ||
+  if (source?.task?.id!==taskId || source.task.repository !== (connector?.repository ?? 'Kgray44/Aetherwake') ||
       source.journal!==journal || source.activityOnly) return null;
   const statePath=join(queue,name+'.state');
   const checkpoint=await jsonFile(statePath);
@@ -194,7 +194,7 @@ export async function startObservatorySync({ task, journal, directory = observat
   managedConnection, activityOnly = false }) {
   const config = await readObservatoryConnection(directory) ??
     (managedConnection ? { version:1,verification:verificationNamespace ?? undefined } : null);
-  if (!config || task.repository !== 'Kgray44/Aetherwake') return null;
+  if (!config || task.repository !== (managedConnection?.repository ?? 'Kgray44/Aetherwake')) return null;
   if (!identity(task.id) || (verificationNamespace !== undefined && (config.verification ?? null) !== verificationNamespace)) {
     throw Error('Invalid Observatory telemetry namespace or Task identity');
   }

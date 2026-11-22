@@ -134,4 +134,3 @@ if (process.argv[1] && import.meta.url===pathToFileURL(resolve(process.argv[1]))
   try {process.exitCode=runCli(process.argv.slice(2));}
   catch(e){console.error('Evidence verification error: '+e.message);process.exitCode=2;}
 }
-

@@ -40,7 +40,7 @@ function setup(t) {
   };
   const requests = [];
   const engine = createCommandCore({
-    applications: fixture, assets: {}, validate: () => true, validateEvent: () => true, sourceRevision: 'd'.repeat(40),
+    applications: fixture, assets: {}, trustedIdentity: request => request.headers.get('oai-authenticated-user-id'), validate: () => true, validateEvent: () => true, sourceRevision: 'd'.repeat(40),
     fetcher: async (url, init) => {
       requests.push({ url, credential: new Headers(init?.headers).get('authorization') });
       return Response.json(String(url).endsWith('/git/ref/heads/main')
@@ -136,4 +136,64 @@ test('a Project milestone gate blocks claims until the dependency is accepted', 
   assert.equal(await claim(), null);
   assert.equal((await project({ ...milestone, status: 'accepted', expected_version: 1 })).status, 200);
   assert.equal((await claim()).task.id, task_id);
+});
+test('application authorization and storage identity fail closed', async t => {
+  const { call, env, rpc } = setup(t);
+  env.TWO.OBSERVATORY_TASK_ENGINE_OWNER_ID = 'different-owner';
+  assert.equal((await call(1, '/api/projects')).status, 403);
+  const applications = await rpc(0, 'list_applications', {});
+  assert.deepEqual(applications.body.result.structuredContent.applications.map(app => app.id), ['aetherwake']);
+  assert.equal((await rpc(0, 'task_engine_v1', { application_id: ['aetherwake', 'voyagewright'], request: { op: 'list' } })).body.error.code, -32602);
+  assert.equal((await rpc(0, 'task_engine_v1', { application_id: 'voyagewright', request: { op: 'list' } })).status, 403);
+  env.TWO.OBSERVATORY_TASK_ENGINE_OWNER_ID = env.ONE.OBSERVATORY_TASK_ENGINE_OWNER_ID;
+  const original = env.TWO.DB;
+  env.TWO.DB = env.ONE.DB;
+  assert.equal((await call(1, '/api/projects')).status, 503);
+  env.TWO.DB = original;
+  env.TWO.GITHUB_READ_TOKEN = env.ONE.GITHUB_READ_TOKEN;
+  assert.equal((await call(0, '/api/projects')).status, 503);
+});
+
+test('application Task dependencies and telemetry reject a request for the other repository', async t => {
+  const { task, rpc, requests } = setup(t);
+  const scoped = (app, name, params) => rpc(0, name, { application_id: fixture[app].id, ...params });
+  const body = { op: 'register', operation_id: crypto.randomUUID(), fields: taskFields };
+  const remote = await task(1, body);
+  const mismatch = await task(0, { ...body, fields: { ...taskFields, repository: fixture[1].repository } });
+  assert.equal(mismatch.status, 400);
+  assert.equal(requests.some(({url}) => url.includes('/repos/synthetic/one/')), false);
+  const denied = await task(0, { ...body, fields: { ...taskFields, dependencies: [remote.body.task.id] } });
+  assert.equal(denied.status, 400);
+  const local = await task(0, body);
+  assert.equal(local.status, 201);
+  const telemetry = record => ({ task_id: record.id, change: { base: null, generated_at: new Date().toISOString(),
+    records: [record], events: [] } });
+  const reject = await scoped(0, 'sync_task_telemetry', telemetry(remote.body.task));
+  assert.equal(JSON.parse(reject.body.result.content[0].text).status, 400);
+  const write = await scoped(0, 'sync_task_telemetry', telemetry(local.body.task));
+  assert.match(JSON.parse(write.body.result.content[0].text).digest, /^[a-f0-9]{64}$/);
+  const other = await scoped(1, 'sync_task_telemetry', { task_id: local.body.task.id });
+  const baseline = JSON.parse(other.body.result.content[0].text).baseline;
+  assert.equal(baseline, null);
+});
+
+test('concurrent claim retries keep one Attempt and archive only affects the owning Project', async t => {
+  const { call, task, rpc } = setup(t);
+  const id = crypto.randomUUID();
+  const fields = { name: 'Synthetic same identity', objective: 'Verify archive and claim scope' };
+  for (const app of [0, 1]) assert.equal((await call(app, '/api/projects', { op: 'create', id, fields })).status, 201);
+  const linked = await call(0, '/api/projects', { op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = linked.body.task.id;
+  assert.equal((await task(0, { op: 'command', task_id, operation_id: crypto.randomUUID(), expected_version: 1,
+    action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const claim = async operation_id => (await rpc(0, 'task_engine_v1', { application_id: 'aetherwake', worker_key: 'a'.repeat(64),
+    request: { op: 'claim', operation_id, task_ids: [task_id] } })).body.result.structuredContent;
+  const operations = [crypto.randomUUID(), crypto.randomUUID()];
+  const results = await Promise.all(operations.map(claim));
+  assert.equal(results.filter(result => result.claim).length, 1);
+  const winner = results.findIndex(result => result.claim);
+  assert.equal((await claim(operations[winner])).claim.attempt.id, results[winner].claim.attempt.id);
+  assert.equal((await task(0, { op: 'get', task_id })).body.attempts.length, 1);
+  assert.equal((await call(0, '/api/projects', { op: 'update', id, status: 'archived', expected_version: 1 })).status, 200);
+  assert.equal((await call(1, '/api/projects/' + id)).body.project.status, 'planned');
 });

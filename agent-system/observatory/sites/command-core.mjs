@@ -8,7 +8,7 @@ const identityHeader = 'oai-authenticated-user-id';
 const environmentKeys = [
   'DB', 'OBSERVATORY_TASK_ENGINE_OWNER_ID', 'OBSERVATORY_TASK_WORKER_KEY', 'OBSERVATORY_CI_OWNER_ID',
   'OBSERVATORY_INTEGRATION_MERGE_OWNER_ID', 'OBSERVATORY_INTEGRATION_PUBLISH_OWNER_ID',
-  'OBSERVATORY_INTEGRATION_SOURCE_REPAIR_OWNER_ID', 'GITHUB_READ_TOKEN', 'GITHUB_PROPOSAL_TOKEN',
+  'OBSERVATORY_INTEGRATION_SOURCE_REPAIR_OWNER_ID', 'OBSERVATORY_INTEGRATION_TRANSFER_ENABLED', 'GITHUB_READ_TOKEN', 'GITHUB_PROPOSAL_TOKEN',
   'GITHUB_ACTIONS_TOKEN', 'GITHUB_INTEGRATION_MERGE_TOKEN', 'GITHUB_INTEGRATION_PUBLISH_TOKEN',
 ];
 const secrets = environmentKeys.filter(key => key.endsWith('_KEY') || key.endsWith('_TOKEN'));
@@ -17,7 +17,15 @@ const toolSchema = {
   properties: { application_id: { type: 'string', pattern: applicationId.source }, verification: { type: 'string' },
     request: { type: 'object', required: ['op'], properties: {
       op: { enum: ['list', 'get', 'create', 'update', 'milestone', 'register_task', 'link_task', 'milestone_link', 'milestone_gate'] },
-      id: { type: 'string', description: 'Project UUID' },
+      id: { type: 'string', format: 'uuid', description: 'Project UUID' },
+      expected_version: { type: 'integer', minimum: 1, description: 'Current row version for optimistic updates' },
+      status: { enum: ['planned', 'active', 'paused', 'archived', 'verified', 'integrated', 'accepted'] },
+      milestone_id: { type: 'string', format: 'uuid' },
+      task_id: { type: 'string', description: 'Canonical Task ID' },
+      operation_id: { type: 'string', format: 'uuid', description: 'Stable request UUID for Task registration' },
+      name: { type: 'string', description: 'Milestone title' },
+      acceptance: { type: 'string', description: 'Milestone acceptance requirements' },
+      fields: { type: 'object', description: 'Project metadata or the canonical Task registration fields' },
     } } },
 };
 const response = (body, status = 200) => Response.json(body, {
@@ -30,7 +38,8 @@ function scopedEnvironment(env, binding) {
 }
 
 export function createCommandCore({ applications, portfolio = { id: 'engineering', name: 'Engineering' },
-  legacyApplication, trustedIdentity = request => request.headers.get(identityHeader), ...workerOptions }) {
+  legacyApplication, trustedIdentity, ...workerOptions }) {
+  if (typeof trustedIdentity !== 'function') throw Error('Verified request identity adapter required');
   if (!Array.isArray(applications) || !applications.length || !applicationId.test(portfolio.id)) throw Error('Invalid portfolio');
   const byId = new Map();
   const byOrigin = new Map();
@@ -41,7 +50,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
     if (typeof id !== 'string' || !applicationId.test(id) || typeof name !== 'string' || !name ||
       typeof repository !== 'string' || !repositoryName.test(repository) || repository.endsWith('/.') || repository.endsWith('/..') ||
       typeof binding !== 'string' || !/^[A-Z][A-Z0-9_]{0,47}$/.test(binding) ||
-      typeof origin !== 'string' || !/^https:\/\//.test(origin) || new URL(origin).origin !== origin ||
+      typeof origin !== 'string' || !/^(?:https:\/\/|http:\/\/127\.0\.0\.1:)/.test(origin) || new URL(origin).origin !== origin ||
       byId.has(id) || byOrigin.has(origin) || bindings.has(binding) || repositories.has(repository.toLowerCase())) {
       throw Error('Invalid or duplicate application configuration');
     }
@@ -55,7 +64,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
   }
   if (legacyApplication !== undefined && !byId.has(legacyApplication)) throw Error('Unknown legacy application');
 
-  function resolve(request, env, owner, runtime) {
+  function resolve(env, owner, runtime) {
     if (!runtime) return null;
     const scoped = scopedEnvironment(env, runtime.binding);
     if (scoped.OBSERVATORY_TASK_ENGINE_OWNER_ID !== owner) return null;
@@ -71,7 +80,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
         return false;
       }
     }
-    const binding = await scoped.DB.prepare('SELECT application_id, repository, portfolio_id FROM application_partition WHERE singleton = 1')
+    const binding = await scoped.DB.prepare('SELECT application_id, repository, portfolio_id FROM application_partition WHERE singleton = 1 AND NOT EXISTS (SELECT 1 FROM migration_receipt)')
       .bind().first();
     return binding?.application_id === runtime.application.id && binding?.repository === runtime.application.repository &&
       binding?.portfolio_id === portfolio.id;
@@ -95,6 +104,9 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
       const owner = await trustedIdentity(request, env);
       if (!owner) return error('Authenticated caller required', 401);
       if (!originRuntime) return error('Application origin unavailable', 404);
+      const headers = new Headers(request.headers);
+      headers.set(identityHeader, owner);
+      request = new Request(request, { headers });
       try {
         if (url.pathname === '/mcp') {
           if (request.method !== 'POST') return error('Method not allowed', 405);
@@ -108,7 +120,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           if (message?.jsonrpc !== '2.0' || !['string', 'number'].includes(typeof message.id)) return error('Invalid RPC envelope', 400);
           const rpc = result => response({ jsonrpc: '2.0', id: message.id, result });
           const reject = (code, messageText) => response({ jsonrpc: '2.0', id: message.id, error: { code, message: messageText } });
-          const allowed = [...byId.values()].filter(app => resolve(request, env, owner, app));
+          const allowed = [...byId.values()].filter(app => resolve(env, owner, app));
           if (!allowed.length) return error('Application access denied', 403);
           const named = message.params?.name;
           const args = message.params?.arguments ?? {};
@@ -117,7 +129,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           }), scoped);
           if (message.method === 'tools/list') {
             const app = allowed[0];
-            const original = await (await forward(app, resolve(request, env, owner, app), message)).json();
+            const original = await (await forward(app, resolve(env, owner, app), message)).json();
             const existing = original.result.tools.map(tool => ({ ...tool, inputSchema: { ...tool.inputSchema,
               properties: { ...tool.inputSchema.properties, application_id: toolSchema.properties.application_id },
             } }));
@@ -125,7 +137,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
               { name: 'list_applications', description: 'List engineering applications assigned to the authenticated caller',
                 inputSchema: { type: 'object', additionalProperties: false, properties: {} } }] });
           }
-          if (message.method !== 'tools/call') return forward(allowed[0], resolve(request, env, owner, allowed[0]), message);
+          if (message.method !== 'tools/call') return forward(allowed[0], resolve(env, owner, allowed[0]), message);
           if (typeof args !== 'object' || !args || Array.isArray(args)) return reject(-32602, 'Invalid tool arguments');
           if (named === 'list_applications') {
             if (Object.keys(args).length) return reject(-32602, 'Unexpected arguments');
@@ -138,7 +150,7 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
             return reject(-32602, 'Explicit application identity required');
           }
           const runtime = byId.get(selected ?? legacyApplication);
-          const scoped = resolve(request, env, owner, runtime);
+          const scoped = resolve(env, owner, runtime);
           if (!scoped) return error('Application access denied', 403);
           if (!await checkPartition(env, runtime, scoped)) return error('Application partition unavailable', 503);
           if (named === 'projects_v1') {
@@ -149,10 +161,10 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           }
           return forward(runtime, scoped, { ...message, params: { name: named, arguments: params } });
         }
-        const scoped = resolve(request, env, owner, originRuntime);
+        const scoped = resolve(env, owner, originRuntime);
         if (!scoped) return error('Application access denied', 403);
         if (url.pathname === '/api/applications' && request.method === 'GET') {
-          return response({ portfolio, applications: [...byId.values()].filter(app => resolve(request, env, owner, app)).map(app => app.application) });
+          return response({ portfolio, applications: [...byId.values()].filter(app => resolve(env, owner, app)).map(app => app.application) });
         }
         if (!await checkPartition(env, originRuntime, scoped)) return error('Application partition unavailable', 503);
         if (url.pathname === '/api/projects' || url.pathname.startsWith('/api/projects/')) {

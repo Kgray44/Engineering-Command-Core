@@ -237,6 +237,7 @@ export function createWorker({ assets, validate, sourceRevision, validateEvent, 
     } catch (cause) {
       return cause instanceof RangeError ? error('Payload too large', 413) : error('Invalid JSON', 400);
     }
+    if (application && body?.repository !== undefined && body.repository !== repository) return error('Repository differs from the configured application', 400);
     const publicProposal = verification === null && request.headers.get('x-observatory-publish') === 'github';
     const requestId = request.headers.get('x-observatory-request-id');
     if (requestId !== null && !UUID.test(requestId)) return error('Invalid proposal request ID', 400);

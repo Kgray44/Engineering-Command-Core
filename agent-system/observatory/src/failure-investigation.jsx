@@ -205,4 +205,3 @@ export function TaskFailureInvestigation({ task, records, events, github, ui }) 
     </div>
   </Panel></Rise>;
 }
-

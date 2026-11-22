@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 const runFile = promisify(execFile);
 const sha = /^[a-f0-9]{40}$/;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const remote = 'https://github.com/Kgray44/Aetherwake.git';
+import { aetherwakeRepository, repositoryName } from '../../agent-system/observatory/sites/application-config.mjs';
 const approvedBranch = task => 'codex/aads-task-' + task.id.slice(5);
 export const availableTransferCredential = token =>
   typeof token === 'string' && /^(github_pat_|ghs_)[A-Za-z0-9_]{20,}$/.test(token);
@@ -32,8 +32,10 @@ async function optionalFile(path, max, filesystem) {
   }
 }
 
-export async function transferReviewedCandidate({ job, workspace, scratchRoot, token, gitBin, authorize, signal,
+export async function transferReviewedCandidate({ job, workspace, scratchRoot, token, gitBin, authorize, signal, repository = aetherwakeRepository,
   run = runFile, filesystem = { lstat, mkdtemp, readFile, realpath, rm, writeFile } }) {
+  if (typeof repository !== 'string' || !repositoryName.test(repository) || /\/(?:\.|\.\.)$/.test(repository)) return { status: 'failed' };
+  const remote = 'https://github.com/' + repository + '.git';
   const { task, integration_id: id } = job;
   if (!uuid.test(id) || !task?.id?.startsWith('task_') || !uuid.test(task.id.slice(5)) ||
       !sha.test(task.head_sha) || !sha.test(task.parent_sha) || task.branch !== approvedBranch(task) ||
@@ -62,7 +64,7 @@ export async function transferReviewedCandidate({ job, workspace, scratchRoot, t
     ]);
     const [top, actualGit, currentHead] = identity.split(/\r?\n/);
     if (dirty || currentHead !== task.head_sha ||
-        !/^https:\/\/github\.com\/Kgray44\/Aetherwake(?:\.git)?$/i.test(configured) ||
+        ![remote.toLowerCase(), remote.slice(0, -4).toLowerCase()].includes(configured.toLowerCase()) ||
         await filesystem.realpath(top) !== root || await filesystem.realpath(actualGit) !== gitDir ||
         await git(root, ['symbolic-ref', '--short', 'HEAD']) !== task.branch) return { status: 'failed' };
 

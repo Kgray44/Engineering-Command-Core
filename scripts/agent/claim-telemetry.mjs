@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, unlink } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { appendEvent, traceEvent } from './journal.mjs';
+import { aetherwakeRepository } from '../../agent-system/observatory/sites/application-config.mjs';
 import { startObservatorySync } from './observatory-sync.mjs';
 import { sanitizeExport } from './telemetry-export.mjs';
 import { validateRecord, validateTraceEvent } from './validate-record.mjs';
@@ -75,7 +76,7 @@ export async function retainActiveClaim(directory, { task, attempt, recoveryKey 
   };
 }
 
-export async function reconcileAbandonedClaim({directory,taskId,readTask,recoverCandidate}) {
+export async function reconcileAbandonedClaim({directory,taskId,readTask,recoverCandidate,repository=aetherwakeRepository}) {
   try { if (!(await lstat(directory)).isDirectory() || await realpath(directory)!==directory) return; }
   catch(error) { if(error.code==='ENOENT')return; throw error; }
   const entries=await readdir(directory,{withFileTypes:true}).catch(error=>{
@@ -90,7 +91,7 @@ export async function reconcileAbandonedClaim({directory,taskId,readTask,recover
     if (marker.settled!==true && !processHasExited(marker.pid)) continue;
     const detail=await readTask(taskId);
     const attempt=detail.attempts?.find(item=>item.id===marker.attemptId);
-    if (detail.task?.id!==taskId || detail.task.repository!=='Kgray44/Aetherwake' || attempt?.revision!==marker.revision ||
+    if (detail.task?.id!==taskId || detail.task.repository !== repository || attempt?.revision!==marker.revision ||
         !attempt.finished_at || ['running','pausing','cancelling'].includes(attempt.state)) continue;
     if(attempt.state==='orphaned'){
       const spanId='codex-'+attempt.id+'-worker_exit_recovery';
