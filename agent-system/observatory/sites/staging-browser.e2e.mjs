@@ -121,13 +121,15 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.deepEqual(await titles.allTextContents(), firstNames);
   const handle = page.getByRole('button', { name: 'Reorder Second synthetic project' });
   const cards = page.locator('.project-card');
+  await page.setViewportSize({ width: 1240, height: 1160 });
+  await handle.scrollIntoViewIfNeeded();
   await page.waitForFunction(() => getComputedStyle(document.querySelector('.view')).transform === 'none');
   const initial = await cards.first().boundingBox();
   const target = await cards.last().boundingBox();
   const direction = target.y > initial.y + 20 ? 'ArrowDown' : 'ArrowRight';
   async function moveWithKeyboard() {
     await handle.press('Space');
-    await page.waitForFunction(() => document.querySelector('[data-dragging]'));
+    await page.locator('[data-dragging][data-drag-over]').waitFor();
     await page.keyboard.press(direction);
     await page.locator('[data-insertion]').waitFor();
   }
@@ -163,6 +165,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.reload();
   await titles.first().waitFor();
   assert.deepEqual(await titles.allTextContents(), firstNames);
+  await page.locator('.project-card-grid').scrollIntoViewIfNeeded();
   await capture(page, 'aetherwake-project-library.png');
   assert.equal(part.sqlite.prepare("SELECT count(*) AS count FROM proposals WHERE project_id IS NOT NULL").get().count, 1);
 });
@@ -229,6 +232,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const inspection = page.waitForResponse(response => response.url().endsWith('/api/integrations/v1') && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Inspect source' }).click();
   const receipt = await inspection;
+  assert.equal(receipt.status(), 201);
+  assert.equal((await receipt.json()).run.head_sha, head);
   assert.equal(receipt.request().postDataJSON().head_sha, head);
   assert.equal(receipt.request().postDataJSON().pr_number, 7);
 });

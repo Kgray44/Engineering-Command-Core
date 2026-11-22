@@ -50,7 +50,7 @@ function Card({ item, Status, sortable }) {
     useSortable({ id: item.id, disabled: !sortable });
   const progress = item.progress;
   return <li ref={setNodeRef} data-accent={item.accent ?? 'default'} className="project-card"
-    data-dragging={isDragging || undefined} data-insertion={isOver && !isDragging || undefined}
+    data-dragging={isDragging || undefined} data-drag-over={isOver || undefined} data-insertion={isOver && !isDragging || undefined}
     style={{ transform: CSS.Transform.toString(transform), transition: reduced ? undefined : transition }}>
     <motion.a className="project-card-link" href={'#projects/' + item.id} whileHover={reduced ? undefined : { y: -2 }}>
       <span className="project-card-icon"><ProjectIcon id={item.icon}/></span>
