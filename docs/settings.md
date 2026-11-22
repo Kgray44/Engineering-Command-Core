@@ -17,6 +17,11 @@ All editable values below are enum strings. The server validates the allowed val
 | Default Project sort | Manual order | Manual order, newest, oldest, priority, title |
 | Default Project priority | Normal | Low, Normal, High, Urgent |
 | Default pull request filter | Open | Open, Merged, Closed, All states |
+| Default Task priority | Normal | Low, Normal, High, Urgent |
+| Default repair limit | 3 attempts | 1 to 5 attempts |
+| Default Activity view | All activity | All activity, Needs attention, Recent work |
+
+Restore defaults previews the category and requires a confirmation. Task priority and repair limit prefill new forms and can be overridden for each new item. Saved preferences leave existing Tasks and integration runs intact.
 
 Project card order persists independently from these preferences. The settings audit under **Security** lists the last 15 revisions and timestamps; the scoped read API also returns those revision values. If another tab has saved changes, refresh before applying your changes again.
 
@@ -27,5 +32,7 @@ Project card order persists independently from these preferences. The settings a
 | Worker eligibility, scheduling, lease, and capacity policy | Existing Task Engine and native worker |
 | Protected integration authorization and repair grants | Deployment bindings and exact-candidate integration records |
 | Backup, import, and production custody | Deployment and operational runbooks |
+
+Under **Data & Backup**, run the scoped data checks to inspect expected schema objects, current Project and milestone audit receipts, and linked Task integrity. The check reports counts for the current owner and namespace. A served partition has passed the import-checkpoint fence. Backup and restore evidence comes from the deployment-side recovery runbook.
 
 Under **Connections**, compare observed times, API request budget, worker heartbeats, backend and database readback, and GitHub status. A configured credential may remain unverified. Use the Action, Task, or Project link from **Activity** to inspect the source when a record needs attention.

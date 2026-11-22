@@ -16,6 +16,12 @@ export const preferenceFields = {
     choices: { manual: 'Manual order', newest: 'Newest first', oldest: 'Oldest first', priority: 'Highest priority', title: 'Title' } },
   project_priority: { category: 'projects', label: 'Default Project priority', initial: 'normal',
     choices: { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' } },
+  task_priority: { category: 'scheduling', label: 'Default Task priority', initial: 'normal',
+    choices: { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' } },
+  merge_repair_limit: { category: 'integration', label: 'Default repair limit for new integrations', initial: '3',
+    choices: { '1': '1 attempt', '2': '2 attempts', '3': '3 attempts', '4': '4 attempts', '5': '5 attempts' } },
+  attention_view: { category: 'notifications', label: 'Default Activity view', initial: 'all',
+    choices: { all: 'All activity', attention: 'Needs attention', recent: 'Recent work' } },
   merge_state: { category: 'integration', label: 'Default pull request filter', initial: 'open',
     choices: { open: 'Open', merged: 'Merged', closed: 'Closed', all: 'All states' } },
 };

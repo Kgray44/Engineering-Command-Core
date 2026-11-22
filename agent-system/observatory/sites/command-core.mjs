@@ -8,6 +8,7 @@ import { createWorker } from './worker.mjs';
 import { workspaceSettings } from './workspace-settings.mjs';
 import { integrationAccess } from './integration-runs.mjs';
 import { readProjectActivity } from './project-activity.mjs';
+import { readDataHealth } from './data-health.mjs';
 import { taskExecutionCapacity } from '../task-execution-capacity.mjs';
 
 const identityHeader = 'oai-authenticated-user-id';
@@ -248,6 +249,13 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
           const namespace = verification ? 'verification:' + verification : 'live';
           return response({ project_events: await readProjectActivity(scoped.DB, owner, namespace) });
         }
+        if (url.pathname === '/api/settings/data') {
+          if (request.method !== 'GET') return error('Method not allowed', 405);
+          const verification = request.headers.get('x-observatory-verification');
+          if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
+          const namespace = verification ? 'verification:' + verification : 'live';
+          return response(await readDataHealth(scoped.DB, owner, namespace));
+        }
         if (url.pathname === '/api/settings') {
           const verification = request.headers.get('x-observatory-verification');
           if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
@@ -268,7 +276,10 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
             revision: workerOptions.sourceRevision ?? null,
             database_verified_at: new Date().toISOString(),
             connections: {
-              github: { credential_configured: Boolean(scoped.GITHUB_READ_TOKEN || scoped.GITHUB_PROPOSAL_TOKEN) },
+              github: {
+                credential_configured: Boolean(scoped.GITHUB_READ_TOKEN || scoped.GITHUB_PROPOSAL_TOKEN),
+                integration_read_credential_configured: Boolean(scoped.GITHUB_READ_TOKEN),
+              },
               codex: { credential_configured: isTaskWorkerKey(scoped.OBSERVATORY_TASK_WORKER_KEY) },
             },
             capacity: taskExecutionCapacity,

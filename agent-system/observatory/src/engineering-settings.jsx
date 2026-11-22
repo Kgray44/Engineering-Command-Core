@@ -42,6 +42,7 @@ function Diagnostics({ category, settings, github, dispatch, worker, execution, 
     general: identities,
     projects: [['Project repository', settings.application.repository], ['Manual card order', 'Saved for the signed-in owner in this application']],
     github: [['Repository', settings.application.repository], ['Read credential', configured(settings.connections.github.credential_configured)],
+      ['Dedicated integration read credential', configured(settings.connections.github.integration_read_credential_configured)],
       ['Authentication', github?.api?.authentication ?? 'Unverified'], ['Main revision', github?.main?.revision], ['Main observation', githubState + ' · ' + date(observed)],
       ['Latest read issue', github?.main?.reason ?? 'None reported'], ['Requests remaining', github?.api?.remaining], ['Rate limit reset', date(github?.api?.reset_at)]],
     workers: [['Executor credential', configured(settings.connections.codex.credential_configured)], ['Dispatch', codex],
@@ -64,20 +65,74 @@ function Diagnostics({ category, settings, github, dispatch, worker, execution, 
   return <Facts rows={rows[category] ?? []}/>;
 }
 
+function DataChecks({ headers, revision }) {
+  const [request, setRequest] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => () => request?.abort(), [request]);
+
+  async function runChecks() {
+    if (request) return;
+    const controller = new AbortController();
+    setRequest(controller);
+    setError('');
+    try {
+      const response = await fetch('/api/settings/data', { headers, cache: 'no-store', signal: controller.signal });
+      if (!response.ok) throw Error('The scoped data checks could not run.');
+      const data = await response.json();
+      if (!controller.signal.aborted) setResult(data);
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setResult(null);
+        setError(cause.message);
+      }
+    } finally {
+      if (!controller.signal.aborted) setRequest(null);
+    }
+  }
+
+  return <section aria-label="Data checks">
+    <h3>Data checks</h3>
+    <p>Check schema objects and Project relationships in this application and the current owner namespace.</p>
+    <button type="button" className="quiet-button" onClick={runChecks} disabled={Boolean(request)}>
+      {request ? 'Checking data…' : 'Run scoped data checks'}
+    </button>
+    {error && <p role="alert">{error}</p>}
+    {result && <div role="status">
+      <Facts rows={[
+        ['Checked', date(result.checked_at)],
+        ['Schema objects', result.schema.status === 'current' ? result.schema.checked_objects + ' expected objects found' :
+          'Missing ' + result.schema.missing.join(', ')],
+        ['Observed schema migration marker', result.schema.observed_migration_marker],
+        ['Scoped integrity', { passed: 'Passed', issues_found: 'Issues found', unverified: 'Unverified' }[result.integrity.status]],
+        ['Projects missing current receipts', result.integrity.projects_without_receipts],
+        ['Milestones missing current receipts', result.integrity.milestones_without_receipts],
+        ['Tasks missing their Project', result.integrity.tasks_without_projects],
+        ['Invalid milestone links', result.integrity.invalid_milestone_links],
+        ['Import checkpoint', result.import.status === 'no_checkpoint_in_served_partition' ? 'No checkpoint in the active partition' : 'Unverified'],
+        ['Backup and restore', result.backup.status === 'unverified' ? 'Unverified by this Site' : 'Unavailable'],
+      ]}/>
+    </div>}
+    {revision && <a href={'https://github.com/Kgray44/Engineering-Command-Core/blob/' + revision + '/docs/operations.md#troubleshooting-and-recovery'}>Backup and recovery runbook</a>}
+  </section>;
+}
+
 export function EngineeringSettings({ category, headers, settings, onSettings, github, dispatch, worker, execution, engineState, demo }) {
   const reduced = useReducedMotion();
   const active = categories.find(([id]) => id === category);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [confirmReset, setConfirmReset] = useState(false);
   const fields = Object.entries(preferenceFields).filter(([, field]) => field.category === category);
   const saved = settings?.preferences;
   const dirty = fields.some(([key]) => draft[key] !== undefined && draft[key] !== saved?.values[key]);
-  useEffect(() => { setDraft({}); setMessage(''); }, [category]);
+  useEffect(() => { setDraft({}); setMessage(''); setConfirmReset(false); }, [category]);
   async function update(op) {
     if (!saved || busy) return;
     setBusy(true);
     setMessage('');
+    setConfirmReset(false);
     try {
       const values = Object.fromEntries(fields.filter(([key]) => draft[key] !== undefined && saved.values[key] !== draft[key])
         .map(([key]) => [key, draft[key]]));
@@ -116,6 +171,7 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
     <a className="back" href="#settings">All settings</a>
     <h2>{active[1]}</h2>
     {settings && <Diagnostics {...{ category, settings, github, dispatch, worker, execution, engineState }}/>}
+    {category === 'data' && settings && <DataChecks headers={headers} revision={settings.revision}/>}
     {settings && fields.length > 0 && <form className="form" onSubmit={event => { event.preventDefault(); if (dirty) update('save'); }}>
       {fields.map(([key, field]) => <label key={key}>{field.label}
         <select value={draft[key] ?? saved.values[key]} onChange={event => setDraft({ ...draft, [key]: event.target.value })}>
@@ -125,8 +181,13 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
       <div className="integration-actions">
         <button className="primary-button" disabled={busy || !dirty}>Save changes</button>
         <button type="button" className="quiet-button" disabled={busy || !dirty} onClick={() => setDraft({})}>Cancel changes</button>
-        <button type="button" className="quiet-button" disabled={busy} onClick={() => update('reset')}>Restore defaults</button>
+        <button type="button" className="quiet-button" disabled={busy} onClick={() => setConfirmReset(true)} aria-expanded={confirmReset}>Restore defaults</button>
       </div>
+      {confirmReset && <div className="notice" role="group" aria-label="Confirm category reset">
+        <span>Restore the defaults for {active[1]} in this application?</span>
+        <button type="button" className="primary-button" onClick={() => update('reset')}>Confirm restore</button>
+        <button type="button" className="quiet-button" onClick={() => setConfirmReset(false)}>Keep settings</button>
+      </div>}
     </form>}
     {category === 'security' && settings && <details><summary>Settings audit</summary>
       {settings.audit.length ? <ol>{settings.audit.map(entry => <li key={entry.version}>Revision {entry.version} · {date(entry.updated_at)}</li>)}</ol>

@@ -44,7 +44,8 @@ function useProjectActivity(headers, enabled) {
 export function EngineeringAttention({ tasks, attempts, github, dispatch, worker, runs, runError, summaries, settings, headers, Panel, Status, demo }) {
   const reduced = useReducedMotion();
   const activity = useProjectActivity(headers, !demo && Boolean(settings?.application));
-  const [filter, setFilter] = useState('all');
+  const [localFilter, setFilter] = useState(null);
+  const filter = localFilter ?? settings?.preferences.values.attention_view ?? 'all';
   if (demo) return <p className="notice">Open Live mode to view engineering activity.</p>;
 
   const taskIndex = new Map(tasks.map(task => [task.id, task]));

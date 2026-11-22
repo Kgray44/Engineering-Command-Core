@@ -96,12 +96,13 @@ function Revisions({ run }) {
   </dl>;
 }
 
-export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initialTask, initialPull, initialRun, defaultState, demo }) {
+export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initialTask, initialPull, initialRun, defaultState, defaultRepairLimit = '3', demo }) {
   const [pull, setPull] = useState(() => /^[1-9]\d*$/.test(initialPull ?? '') && Number.isSafeInteger(Number(initialPull)) ? Number(initialPull) : null);
   const { source, reload: reloadSource } = useMergeSource(demo ? null : pull, headers);
   const reviewedHead = source?.status === 'available' && source.detail?.number === pull && source.detail.state === 'open' &&
     !source.detail.draft && /^[a-f0-9]{40}$/.test(source.detail.head?.sha ?? '') ? source.detail.head.sha : null;
   const [mode, setMode] = useState(initialTask ? 'task' : 'pr');
+  const [repairLimit, setRepairLimit] = useState(null);
   const [selected, setSelected] = useState(() => /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/.test(initialRun ?? '') ? initialRun : null);
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -199,7 +200,7 @@ export function MergeWorkspace({ headers, acceptedTasks, pullGroup, main, initia
           <option value="">Select a Task</option>
           {acceptedTasks.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
         </select></label> : null}
-        <label>Integration repair limit<select name="repair_limit" defaultValue="3">
+        <label>Integration repair limit<select name="repair_limit" value={repairLimit ?? defaultRepairLimit} onChange={event => setRepairLimit(event.target.value)}>
           {[1, 2, 3, 4, 5].map(limit => <option key={limit} value={limit}>{limit}</option>)}
         </select></label>
         <button className="primary-button" disabled={busy || loading || (mode === 'pr' && !reviewedHead)}>Inspect source</button>

@@ -1,0 +1,51 @@
+const inspectedObjects = new Map([
+  ['application_partition', 'table'],
+  ['projects', 'table'],
+  ['project_events', 'table'],
+  ['milestones', 'table'],
+  ['project_milestone_events', 'table'],
+  ['project_task_milestones', 'table'],
+  ['project_task_gates', 'table'],
+  ['proposals', 'table'],
+  ['integration_runs', 'table'],
+  ['workspace_preferences', 'table'],
+  ['workspace_preference_events', 'table'],
+  ['project_task_moved_out', 'trigger'],
+]);
+
+export async function readDataHealth(db, owner, namespace) {
+  const names = [...inspectedObjects.keys()];
+  const { results } = await db.prepare(
+    'SELECT name, type FROM sqlite_schema WHERE name IN (' + names.map(() => '?').join(', ') + ')',
+  ).bind(...names).all();
+  const observed = new Map(results.map(row => [row.name, row.type]));
+  const missing = names.filter(name => observed.get(name) !== inspectedObjects.get(name));
+  const schema = { status: missing.length ? 'incomplete' : 'current', checked_objects: names.length, missing,
+    ...(observed.get('project_task_moved_out') === 'trigger' ? { observed_migration_marker: '0019_project_task_move_history' } : {}) };
+  const base = { schema, backup: { status: 'unverified' }, import: { status: 'no_checkpoint_in_served_partition' } };
+  if (missing.length) return { ...base, checked_at: new Date().toISOString(), integrity: { status: 'unverified' } };
+
+  const counts = await db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM projects p WHERE p.owner_id = ?1 AND p.namespace = ?2 AND NOT EXISTS (
+        SELECT 1 FROM project_events e WHERE e.owner_id = p.owner_id AND e.namespace = p.namespace
+          AND e.project_id = p.id AND e.version = p.version AND e.status = p.status
+      )) AS projects_without_receipts,
+      (SELECT COUNT(*) FROM milestones m WHERE m.owner_id = ?1 AND m.namespace = ?2 AND NOT EXISTS (
+        SELECT 1 FROM project_milestone_events e WHERE e.owner_id = m.owner_id AND e.namespace = m.namespace
+          AND e.milestone_id = m.id AND e.version = m.version AND e.status = m.status
+      )) AS milestones_without_receipts,
+      (SELECT COUNT(*) FROM proposals t WHERE t.owner_id = ?1 AND t.namespace = ?2 AND t.project_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM projects p WHERE p.owner_id = t.owner_id AND p.namespace = t.namespace AND p.id = t.project_id
+      )) AS tasks_without_projects,
+      (SELECT COUNT(*) FROM project_task_milestones link WHERE link.owner_id = ?1 AND link.namespace = ?2 AND NOT EXISTS (
+        SELECT 1 FROM proposals t JOIN milestones m ON m.owner_id = t.owner_id AND m.namespace = t.namespace AND m.project_id = t.project_id
+        WHERE t.owner_id = link.owner_id AND t.namespace = link.namespace AND t.task_id = link.task_id
+          AND t.project_id = link.project_id AND m.id = link.milestone_id
+      )) AS invalid_milestone_links
+  `).bind(owner, namespace).first();
+  return {
+    ...base, checked_at: new Date().toISOString(),
+    integrity: { status: Object.values(counts).some(count => count > 0) ? 'issues_found' : 'passed', ...counts },
+  };
+}

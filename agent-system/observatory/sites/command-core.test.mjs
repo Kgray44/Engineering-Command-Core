@@ -465,3 +465,29 @@ test('Activity reads recent Project events from the current owner and verificati
   assert.equal((await call(0, '/api/activity', undefined, undefined, { 'x-observatory-verification': 'invalid' })).status, 400);
   assert.equal((await call(0, '/api/activity', {})).status, 405);
 });
+
+test('Settings data checks validate the active scoped Project history', async t => {
+  const { call, one } = setup(t);
+  const path = '/api/settings/data';
+  const id = crypto.randomUUID();
+  const created = await call(0, '/api/projects', { op: 'create', id,
+    fields: { name: 'Data check fixture', objective: 'Verify the integrity of Project receipts' } });
+  assert.equal(created.status, 201);
+  const first = await call(0, path);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.schema.status, 'current');
+  assert.equal(first.body.schema.observed_migration_marker, '0019_project_task_move_history');
+  assert.equal(first.body.integrity.status, 'passed');
+  assert.equal(first.body.integrity.projects_without_receipts, 0);
+  assert.equal(first.body.backup.status, 'unverified');
+  assert.ok(Date.parse(first.body.checked_at) > 0);
+  assert.doesNotMatch(JSON.stringify(first.body), /one-fixture|a{64}|synthetic-owner/);
+  one.sqlite.prepare('DELETE FROM project_events WHERE project_id = ?').run(id);
+  const affected = await call(0, path);
+  assert.equal(affected.body.integrity.status, 'issues_found');
+  assert.equal(affected.body.integrity.projects_without_receipts, 1);
+  assert.equal((await call(1, path)).body.integrity.status, 'passed');
+  assert.equal((await call(0, path, undefined, undefined, { 'x-observatory-verification': crypto.randomUUID() })).body.integrity.status, 'passed');
+  assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
+  assert.equal((await call(0, path, {})).status, 405);
+});
