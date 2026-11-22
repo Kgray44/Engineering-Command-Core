@@ -45,18 +45,18 @@ export function ProjectDependencies({ tasks, prerequisites, gates, Status, busy,
         </ul> : <p className="low">No recorded prerequisites.</p>}
       </section>
       <ArrowDown size={18} aria-hidden="true"/>
-      <div className="project-dependency-current"><GitBranch size={17} aria-hidden="true"/>
-        <a href={taskHref(current.id)}>{current.title}</a><Status value={current.state}/>
-      </div>
-      {downstream.length > 0 && <>
-        <ArrowDown size={18} aria-hidden="true"/>
-        <section aria-label="Dependent Tasks"><h3>Dependent Tasks in this Project</h3>
-          <ul className="project-dependency-nodes">{downstream.map(item => <li key={item.task_id}>
+      <section aria-label="Selected Task"><h3>Selected Task</h3>
+        <div className="project-dependency-current"><GitBranch size={17} aria-hidden="true"/>
+          <a href={taskHref(current.id)}>{current.title}</a><Status value={current.state}/>
+        </div>
+      </section>
+      <ArrowDown size={18} aria-hidden="true"/>
+      <section aria-label="Dependent Tasks"><h3>Dependent Tasks in this Project</h3>
+          {downstream.length ? <ul className="project-dependency-nodes">{downstream.map(item => <li key={item.task_id}>
             <button type="button" className="text-button" onClick={() => setFocus(item.task_id)}>{taskById.get(item.task_id)?.title}</button>
             <Status value={item.status}/>
-          </li>)}</ul>
-        </section>
-      </>}
+          </li>)}</ul> : <p className="low">No recorded dependents in this Project.</p>}
+      </section>
     </motion.div>
   </div>;
 }

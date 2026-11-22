@@ -70,6 +70,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser draft');
   await page.getByLabel('Objective', { exact: true }).fill('Prove a Project owns its newly registered Tasks');
+  assert.equal(await page.locator('.project-definition-form').getByRole('textbox').count(), 2);
   await page.getByText('Project appearance', { exact: true }).click();
   await page.getByRole('searchbox', { name: 'Find a project icon' }).fill('rocket');
   await page.getByRole('button', { name: 'rocket', exact: true }).click();
@@ -78,6 +79,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('heading', { name: 'Synthetic browser draft', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Edit project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Synthetic browser project');
+  await page.getByText('Planning and template', { exact: true }).click();
   await page.getByLabel('Description', { exact: true }).fill('Description saved through the Project editor');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
@@ -90,11 +92,13 @@ test('Projects workspace performs live project and Task mutations through the sh
     await acceptanceSection.getByText(label, { exact: true }).waitFor();
   }
   await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.getByText('Schedule and status', { exact: true }).click();
   await page.locator('select[name="technical_state"]').selectOption('verified');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   const projectHistory = page.locator('#project-history');
   await projectHistory.getByText('Project verification recorded', { exact: true }).waitFor({ timeout: 5_000 });
   await page.getByRole('button', { name: 'Edit project', exact: true }).click();
+  await page.getByText('Schedule and status', { exact: true }).click();
   await page.locator('select[name="technical_state"]').selectOption('delivered');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
   await projectHistory.getByText('Project delivery recorded', { exact: true }).waitFor();
@@ -173,7 +177,8 @@ test('Projects workspace performs live project and Task mutations through the sh
   const taskPanel = page.getByRole('region', { name: 'Project Task execution' });
   await taskPanel.getByText('Task editor', { exact: true }).click({ timeout: 5_000 });
   const projectTaskEditor = taskPanel.getByRole('form', { name: 'Edit proposed task' });
-  await projectTaskEditor.locator('select[name="priority"]').selectOption('urgent');
+  await projectTaskEditor.getByText('Execution options', { exact: true }).click();
+  await projectTaskEditor.getByRole('combobox', { name: 'Priority', exact: true }).selectOption('urgent');
   await projectTaskEditor.locator('textarea[name="objective"]').fill('Update the canonical Task specification from its Project.');
   await projectTaskEditor.getByRole('button', { name: 'Save proposal', exact: true }).click();
   await projectTaskEditor.getByText('Task saved.', { exact: true }).waitFor();
@@ -202,6 +207,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('button', { name: 'New project', exact: true }).click();
   await page.getByLabel('Name', { exact: true }).fill('Second synthetic project');
   await page.getByLabel('Objective', { exact: true }).fill('Prove order persistence across reloads');
+  await page.getByText('Planning and template', { exact: true }).click();
   const template = page.getByLabel('Project template');
   const scope = page.getByRole('textbox', { name: 'Scope', exact: true });
   const acceptance = page.getByLabel('Acceptance requirements');
@@ -464,6 +470,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.reload();
   const currentWork = page.locator('#project-current-work');
   await currentWork.getByText('No recorded integrations', { exact: true }).waitFor();
+  await currentWork.getByRole('progressbar', { name: 'Task progress' }).waitFor();
+  await currentWork.getByRole('progressbar', { name: 'Milestone progress' }).waitFor();
   const upstream = page.getByRole('region', { name: 'Upstream prerequisites' });
   await upstream.getByText('Remove prerequisite', { exact: true }).click();
   await upstream.getByText(/Remove Release readiness as a requirement for Release review/).waitFor();
@@ -664,6 +672,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal(await views.getByRole('button', { name: /Awaiting review/ }).getAttribute('aria-current'), 'page');
   assert.equal(await page.getByRole('combobox', { name: 'Sort', exact: true }).inputValue(), 'recent');
   await page.getByRole('button', { name: 'New project', exact: true }).click();
+  await page.getByText('Planning and template', { exact: true }).click();
   await page.getByLabel('Project template').selectOption({ label: 'Qualification template' });
   assert.equal(await page.getByRole('textbox', { name: 'Scope', exact: true }).inputValue(), 'Check staging isolation');
   assert.equal(await page.getByLabel('Suggested milestones').inputValue(), 'Prepare fixture\nVerify receipt');
@@ -772,6 +781,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByText('Settings saved.', { exact: true }).waitFor();
   await workspaceMenu.click();
   await navigation.getByRole('button', { name: 'New task', exact: true }).click();
+  assert.equal(await page.locator('.task-intake').getByRole('textbox').count(), 3);
+  await page.getByText('Execution options', { exact: true }).click();
   assert.equal(await page.getByRole('combobox', { name: 'Priority', exact: true }).inputValue(), 'urgent');
   await page.goto(stage.origin + '/#settings/integration');
   await page.getByLabel('Default repair limit for new integrations').selectOption('2');
@@ -866,6 +877,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.ok(historyBounds.height <= 200 && historyBounds.height < sourceBounds.height / 2,
     'Empty integration history should remain compact beside a long candidate inspection');
   assert.ok(sourceBounds.width > historyBounds.width, 'Inspecting the source gets the wider desktop column');
+  await desktop.setViewportSize({ width: 1600, height: 1000 });
+  const picker = await desktop.getByRole('region', { name: 'Find pull requests' }).boundingBox();
+  const inspector = await desktop.getByRole('region', { name: 'Selected pull request' }).boundingBox();
+  assert.ok(inspector.x >= picker.x + picker.width, 'The selected source should sit beside the results at wide widths');
+  assert.ok(Math.abs(inspector.y - picker.y) < 2);
+  assert.ok(await desktop.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await capture(desktop, 'voyagewright-merge-source.png');
   await desktop.close();
   const inspection = page.waitForResponse(response => response.url().endsWith('/api/integrations/v1') && response.request().method() === 'POST');
@@ -1151,4 +1168,35 @@ test('Aetherwake workspace controls fit at phone width and project actions stay 
   assert.ok(style.chevron.startsWith('url('));
   assert.ok(style.padding >= 30);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+});
+
+
+test('Overview and Activity put actionable information ahead of supporting detail', { timeout: 60_000 }, async t => {
+  const { stage, page } = await browserStage(t, {
+    browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
+  });
+  await page.goto(stage.origin);
+  const chart = page.getByRole('group', { name: 'Engineering tasks created over the last fourteen days' });
+  const days = chart.getByRole('button');
+  await days.last().waitFor();
+  assert.equal(await days.count(), 14);
+  await days.first().focus();
+  await days.first().press('Enter');
+  assert.equal(await days.first().getAttribute('aria-pressed'), 'true');
+  assert.equal(await days.last().getAttribute('aria-pressed'), 'false');
+  const detail = page.locator('details').filter({ has: page.getByText('Execution and evidence details', { exact: true }) });
+  assert.equal(await detail.evaluate(node => node.open), false);
+  await detail.getByText('Execution and evidence details', { exact: true }).click();
+  await detail.getByText('Execution attempts', { exact: true }).waitFor();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+
+  const menu = page.getByRole('button', { name: 'Workspace navigation' });
+  await menu.click();
+  await page.getByRole('navigation', { name: 'Engineering workspaces' }).getByRole('button', { name: 'Activity' }).click();
+  const empty = page.locator('details.attention-empty');
+  await empty.waitFor();
+  assert.equal(await empty.evaluate(node => node.open), false);
+  assert.equal(await page.getByRole('heading', { name: 'Failed attempts', exact: true }).count(), 0);
+  await empty.locator('summary').click();
+  await empty.getByText('Failed attempts', { exact: true }).waitFor();
 });

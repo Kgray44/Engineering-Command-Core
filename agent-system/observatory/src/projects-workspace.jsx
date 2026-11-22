@@ -66,6 +66,11 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
     onSave({ ...fields, participants: participants.split(',').map(value => value.trim()).filter(Boolean),
       milestone_suggestions: milestone_suggestions.split('\n').map(value => value.trim()).filter(Boolean) });
   }}>
+    <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
+    <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
+    <details className="form-options">
+      <summary>Planning and template</summary>
+      <div className="form-options-body">
     {!project.id && <label>Project template
       <select defaultValue="" onChange={event => applyTemplate(event.target.value)}>
         <option value="">Blank project</option>
@@ -75,8 +80,6 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
         </optgroup>}
       </select>
     </label>}
-    <label>Name <input name="name" defaultValue={project.name} required maxLength={150}/></label>
-    <label>Objective <textarea name="objective" defaultValue={project.objective} required maxLength={16000}/></label>
     <div className="form-grid"><label>Description <textarea name="description" defaultValue={project.description} maxLength={4000}/></label>
     <label>Scope <textarea name="scope" value={draft.scope} onChange={editField} maxLength={16000}/></label></div>
     <div className="form-grid"><label>Acceptance requirements <textarea name="acceptance" value={draft.acceptance} onChange={editField} maxLength={16000}/></label>
@@ -84,7 +87,11 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
       <textarea name="milestone_suggestions" value={draft.milestone_suggestions} onChange={editField}
         placeholder="One milestone per line" rows={3} maxLength={1812}/>
     </label></div>
-    <ProjectAppearance project={project}/>
+      </div>
+    </details>
+    <details className="form-options">
+      <summary>Schedule and status</summary>
+      <div className="form-options-body">
     <div className="form-grid">
       <label>Start date <input type="date" name="start_date" defaultValue={project.start_date}/></label>
       <label>Target date <input type="date" name="target_date" defaultValue={project.target_date}/></label>
@@ -92,6 +99,9 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority, customTempla
       <label>Participants <input name="participants" defaultValue={project.participants?.join(', ')} placeholder="Comma-separated names"/></label>
       <label>Technical completion <select name="technical_state" defaultValue={project.technical_state ?? ''}><Options values={['', 'in_progress', 'verified', 'integrated', 'delivered']}/></select></label>
     </div>
+      </div>
+    </details>
+    <ProjectAppearance project={project}/>
     <button className="primary-button" disabled={busy}>{project.id ? 'Save project' : 'Create project'}</button>
   </form>;
 }
@@ -563,8 +573,17 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
               onSave={fields => submit({ op: 'update', expected_version: project.version, fields }, () => setEdit(false))}/>}
           </Panel>
           <Panel id="project-current-work" title="Current work">
-            <DetailLine name="Task progress" value={progress.tasks.completed + ' of ' + progress.tasks.total + ' complete'}/>
-            <DetailLine name="Milestone progress" value={progress.milestones.accepted + ' of ' + progress.milestones.total + ' accepted'}/>
+            <div className="project-momentum">
+              {[
+                ['Task progress', progress.tasks.completed, progress.tasks.total, 'complete'],
+                ['Milestone progress', progress.milestones.accepted, progress.milestones.total, 'accepted'],
+              ].map(([label, value, total, outcome])=><div className="project-progress-card" key={label}>
+                <h3>{label}</h3>
+                <div><strong>{value}</strong> of {total} {outcome}</div>
+                {total>0 && <progress aria-label={label} value={value} max={total}/>}
+              </div>)}
+            </div>
+            <div className="project-work-signals">
             <DetailLine name="Workers with active Project leases" value={number(active_workers)}/>
             <DetailLine name="Next runnable Task" value={nextTask ? <a href={taskHref(nextTask.id)}>{nextTask.title}</a> : 'No Task ready to claim'}/>
             <DetailLine name="Latest recorded integration" value={latestIntegration ? <>
@@ -585,7 +604,8 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
             <DetailLine name="Recent change" value={lastChange ? <button type="button" className="text-button" onClick={() => onJump('project-history')}>
               {historyLabel(lastChange)} · {shortDate(lastChange.occurred_at)}
             </button> : 'No recorded changes'}/>
-            {blockedTasks.length > 0 && <div>
+            </div>
+            {blockedTasks.length > 0 && <div className="project-blocker-summary">
               <h3>Blocked Tasks</h3>
               <ul className="project-list">{blockedTasks.slice(0, 5).map(task => <li key={task.id}>
                 <a href={taskHref(task.id)}>{task.title}</a><small>{task.blockers.length} {task.blockers.length === 1 ? 'blocker' : 'blockers'}</small>

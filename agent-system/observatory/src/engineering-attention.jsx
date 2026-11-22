@@ -92,17 +92,18 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
   });
   const showBlocked = showsAlert('attention_task_status');
   const showFailures = showsAlert('attention_failures');
-  const taskIssues = entries.filter(({ state }) => (showBlocked && state === 'blocked') || (showFailures && state === 'failed'))
+  const waiting = entries.filter(task => !['archived', 'cancelled', 'completed'].includes(task.state) &&
+    (task.blockers.length > 0 || (task.projectGate && ['admitted', 'blocked', 'queued', 'ready', 'scheduled'].includes(task.state))))
+    .map(task => ({ ...task, detail: issue(task) }));
+  const waitingIds = new Set(waiting.map(task => task.id));
+  const taskIssues = entries.filter(({ id, state }) => (showBlocked && state === 'blocked' && !waitingIds.has(id)) || (showFailures && state === 'failed'))
     .map(task => ({ ...task, detail: issue(task) }));
   const sections = [
     ['attention', 'Owner review', entries.filter(task => task.state === 'verifying'), 'attention_reviews'],
     ['attention', 'Projects awaiting owner review', activity.pendingReviews.map(project => ({
       id: project.id, label: project.name, href: '#projects/' + project.id + '?section=acceptance',
     })), 'attention_reviews'],
-    ['attention', 'Waiting on prerequisites', entries.filter(task => !['archived', 'cancelled', 'completed'].includes(task.state) &&
-      (task.blockers.length > 0 || (task.projectGate && ['admitted', 'blocked', 'queued', 'ready', 'scheduled'].includes(task.state)))).map(task => ({
-      ...task, detail: issue(task),
-    })), 'attention_task_status'],
+    ['attention', 'Waiting on prerequisites', waiting, 'attention_task_status'],
     ...(showBlocked || showFailures ? [['attention',
       showBlocked && showFailures ? 'Blocked and failed Tasks' : showBlocked ? 'Blocked Tasks' : 'Failed Tasks', taskIssues]] : []),
     ['attention', 'Failed attempts', recent(attempts.filter(attempt => attempt.state === 'failed' && taskIndex.has(attempt.task_id))
@@ -130,18 +131,16 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
     ['recent', 'Open pull requests', recent(openPulls.map(pullRow))],
   ];
 
-  return <>
-    <div className="project-actions" role="group" aria-label="Activity view">
-      {[[ 'all', 'All activity' ], [ 'attention', 'Needs attention' ], [ 'recent', 'Recent work' ]].map(([id, title]) =>
-        <button key={id} type="button" className="quiet-button" aria-pressed={filter === id} onClick={() => setFilter(id)}>{title}</button>)}
-      {settings?.application && <button type="button" className="text-button" onClick={activity.refresh}>Refresh Project activity</button>}
-      {settings?.application && filter === 'attention' && <a href="#settings/notifications" className="text-button">Edit attention preferences</a>}
-    </div>
-    <div className="attention-grid">{sections.filter(([group, , , key]) => (filter === 'all' || group === filter) && showsAlert(key))
-      .map(([, title, items]) => <Panel title={title} key={title}>
+  const shown = sections.filter(([group, , , key]) => (filter === 'all' || group === filter) && showsAlert(key));
+  const projectFeed = title => title === 'Project changes' || title === 'Projects awaiting owner review';
+  const hasDetails = ([, title, items]) => items.length > 0 || (projectFeed(title) && (activity.stale || activity.loading) && settings?.application);
+  const populated = shown.filter(hasDetails);
+  const empty = shown.filter(section => !hasDetails(section));
+  const renderSection = ([, title, items]) => <Panel title={title} key={title}>
       {['Project changes', 'Projects awaiting owner review'].includes(title) && activity.stale &&
         <p role="status">Project activity could not refresh.{items.length ? ' Showing the last read.' : ''}</p>}
-      {items.length ? <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>
+      {projectFeed(title) && activity.loading && !items.length && <p role="status">Loading Project changes…</p>}
+      {items.length > 0 && <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>
         <div><a href={item.href}>{item.label}</a>
           {item.detail && <small>{item.detail}</small>}
           {time(item.at) && <time dateTime={item.at}>{time(item.at)}</time>}
@@ -149,8 +148,29 @@ export function EngineeringAttention({ tasks, attempts, github, dispatch, worker
           {item.task && <small><a href={taskHref(item.task)}>Open Task</a></small>}
         </div>
         {item.state && <Status value={item.state}/>}
-      </motion.li>)}</ul> : <p className="low">{['Project changes', 'Projects awaiting owner review'].includes(title) && activity.loading && settings?.application
-        ? 'Loading Project changes…' : 'No matching records in the current feed.'}</p>}
-    </Panel>)}</div>
+      </motion.li>)}</ul>}
+    </Panel>;
+
+  return <>
+    <div className="project-actions" role="group" aria-label="Activity view">
+      {[[ 'all', 'All activity' ], [ 'attention', 'Needs attention' ], [ 'recent', 'Recent work' ]].map(([id, title]) =>
+        <button key={id} type="button" className="quiet-button" aria-pressed={filter === id} onClick={() => setFilter(id)}>{title}</button>)}
+      {settings?.application && <button type="button" className="text-button" onClick={activity.refresh}>Refresh Project activity</button>}
+      {settings?.application && filter === 'attention' && <a href="#settings/notifications" className="text-button">Edit attention preferences</a>}
+    </div>
+    {['attention','recent'].map(group=>{
+      const entries=populated.filter(([kind])=>kind===group);
+      if(!entries.length)return null;
+      const title=group==='attention'?'Needs attention':'Recent work';
+      return <section className="attention-lane" key={group} aria-label={title}>
+        <h2>{title}</h2>
+        <div className="attention-grid">{entries.map(renderSection)}</div>
+      </section>;
+    })}
+    {!populated.length && <p className="notice" role="status">No matching records in the current feed.</p>}
+    {empty.length > 0 && <details className="panel workspace-disclosure attention-empty">
+      <summary>Categories with no records ({empty.length})</summary>
+      <ul>{empty.map(([,title])=><li key={title}>{title}</li>)}</ul>
+    </details>}
   </>;
 }
