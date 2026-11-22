@@ -122,6 +122,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.waitForURL(/#tasks\/task_/, { timeout: 7000 });
   await page.goto(stage.origin + '/' + projectHash);
   await page.getByRole('link', { name: 'Synthetic browser task', exact: true }).first().waitFor();
+  await page.locator('#project-history').getByRole('link', { name: 'Open Task', exact: true }).first().waitFor();
   await page.getByRole('button', { name: 'Execution controls for Synthetic browser task' }).click();
   await page.getByRole('navigation', { name: 'Task actions' }).waitFor();
   await page.getByRole('button', { name: 'Close execution controls' }).click();

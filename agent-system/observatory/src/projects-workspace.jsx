@@ -157,6 +157,8 @@ const projectViews = [
 ];
 const projectHref = id => '#projects/' + id;
 const shortDate = value => value ? new Date(value).toLocaleDateString() : 'Unavailable';
+const historyLabel = item => item.name ?? (item.source === 'integration' && item.kind === 'start'
+  ? 'Integration started' : item.kind.replaceAll('_', ' '));
 
 function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaultSort, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
   const interaction = useCardMotion(true);
@@ -360,7 +362,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
             <DetailLine name="Workers with active Project leases" value={number(active_workers)}/>
             <DetailLine name="Next runnable Task" value={nextTask ? <a href={taskHref(nextTask.id)}>{nextTask.title}</a> : 'No Task ready to claim'}/>
             <DetailLine name="Recent change" value={lastChange ? <button type="button" className="text-button" onClick={() => onJump('project-history')}>
-              {lastChange.kind.replaceAll('_', ' ')} · {shortDate(lastChange.occurred_at)}
+              {historyLabel(lastChange)} · {shortDate(lastChange.occurred_at)}
             </button> : 'No recorded changes'}/>
             {blockedTasks.length > 0 && <div>
               <h3>Blocked Tasks</h3>
@@ -523,8 +525,19 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </dl>
       </Panel>
       <Panel id="project-history" title="History">
-        <ol className="project-list">{history.map(item => <li key={[item.kind, item.milestone_id, item.event_id ?? item.version].join(':')}>
-          {item.status && <Status value={item.status}/>} <span>{item.name ?? item.kind.replaceAll('_', ' ')}</span> <time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time>
+        {data.execution_history_truncated && <p className="low">Showing the latest 120 Task and integration events. Open the source records for earlier activity.</p>}
+        <ol className="project-list">{history.toReversed().map(item => <li key={[
+          item.source, item.integration_id, item.task_id, item.milestone_id, item.kind, item.event_id ?? item.version,
+        ].join(':')}>
+          <span>{historyLabel(item)}</span>
+          {item.status && <Status value={item.status}/>}
+          {item.integration_id && <a className="text-button" href={'#merge?run=' + item.integration_id + (item.pr_number ? '&pr=' + item.pr_number : '')}>
+            {item.pr_number ? 'Open integration for PR #' + item.pr_number : 'Open integration'}
+          </a>}
+          {item.task_id && <a className="text-button" href={taskHref(item.task_id)}>
+            {item.task_title ? 'Open Task: ' + item.task_title : 'Open Task'}
+          </a>}
+          <time dateTime={item.occurred_at}>{new Date(item.occurred_at).toLocaleString()}</time>
         </li>)}</ol>
       </Panel>
     </>}

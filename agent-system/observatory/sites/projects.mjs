@@ -12,6 +12,38 @@ const milestones = ['planned', 'verified', 'integrated', 'accepted'];
 const reviewHistoryLabels = {
   pending: 'Owner review requested', accepted: 'Owner accepted Project', declined: 'Owner declined Project', '': 'Owner review cleared',
 };
+const executionHistoryLimit = 120;
+const executionHistoryQuery = `
+  WITH boundaries AS (
+    SELECT task_id, kind, occurred_at,
+      lead(occurred_at) OVER (PARTITION BY task_id ORDER BY event_id) AS ends_at
+    FROM project_relationship_events
+    WHERE owner_id = ?1 AND namespace = ?2 AND project_id = ?3
+      AND kind IN ('task_registered', 'task_linked', 'task_moved_out')
+  ), membership AS (
+    SELECT task_id, occurred_at, ends_at FROM boundaries WHERE kind IN ('task_registered', 'task_linked')
+  ), receipts AS (
+    SELECT 'task' AS source, e.task_id, e.version, e.event,
+      NULL AS integration_id
+    FROM task_engine_events e
+    WHERE e.owner_id = ?1 AND e.namespace = ?2 AND e.task_id IN (SELECT task_id FROM membership)
+    UNION ALL
+    SELECT 'integration', r.task_id, e.version, e.event, e.integration_id
+    FROM integration_runs r JOIN integration_events e ON e.owner_id = r.owner_id
+      AND e.namespace = r.namespace AND e.integration_id = r.id
+    WHERE r.owner_id = ?1 AND r.namespace = ?2 AND r.task_id IN (SELECT task_id FROM membership)
+  )
+  SELECT r.source, r.task_id, r.version, r.integration_id, json_extract(r.event, '$.at') AS occurred_at,
+    json_extract(r.event, '$.kind') AS kind, json_extract(r.event, '$.state') AS status,
+    json_extract(r.event, '$.pr_number') AS pr_number, json_extract(t.record, '$.title') AS task_title
+  FROM receipts r JOIN proposals t ON t.owner_id = ?1 AND t.namespace = ?2 AND t.task_id = r.task_id
+  WHERE EXISTS (SELECT 1 FROM membership m WHERE m.task_id = r.task_id
+    AND json_extract(r.event, '$.at') >= m.occurred_at
+    AND (m.ends_at IS NULL OR json_extract(r.event, '$.at') < m.ends_at))
+    AND json_extract(r.event, '$.kind') IS NOT NULL
+  ORDER BY occurred_at DESC, r.source, r.task_id, r.integration_id, r.version DESC
+  LIMIT ?4
+`;
 const metadataFields = {
   name: 150, description: 4000, objective: 16000, scope: 16000, acceptance: 16000,
   start_date: 10, target_date: 10, technical_state: 50, owner_review: 50,
@@ -189,11 +221,20 @@ export async function projectOperation({ db, owner, namespace, application, body
   const current = await getProject(body.id);
   if (!current) return fail(404, 'Project not found');
   if (body.op === 'get') {
-    const [view, history, milestoneHistory, relationshipHistory, associations, incremental, checkpoint] = await Promise.all([
+    const [view, history, milestoneHistory, relationshipHistory, executionHistory, associations, incremental, checkpoint] = await Promise.all([
       readProgress(),
-      scope("SELECT 'project_changed' AS kind, version, status, occurred_at, json_extract(metadata, '$.owner_review') AS owner_review FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY version", body.id).all(),
+      scope(`WITH snapshots AS (
+          SELECT version, status, occurred_at, json_extract(metadata, '$.owner_review') AS owner_review,
+            json_remove(metadata, '$.owner_review') AS configuration
+          FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ?
+        )
+        SELECT CASE WHEN version = 1 THEN 'project_created'
+          WHEN configuration <> lag(configuration) OVER (ORDER BY version) THEN 'project_configuration_changed'
+          ELSE 'project_changed' END AS kind, version, status, occurred_at, owner_review
+        FROM snapshots ORDER BY version`, body.id).all(),
       scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
       scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
+      scope(executionHistoryQuery, body.id, executionHistoryLimit + 1).all(),
       scope('SELECT task_id, milestone_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
       scope('SELECT t.* FROM task_telemetry t JOIN proposals p USING (owner_id, namespace, task_id) WHERE t.owner_id = ? AND t.namespace = ? AND p.project_id = ?', body.id).all(),
       scope('SELECT payload FROM private_projection WHERE owner_id = ? AND namespace = ?').first(),
@@ -237,7 +278,10 @@ export async function projectOperation({ db, owner, namespace, application, body
         name: Object.hasOwn(reviewHistoryLabels, review) ? reviewHistoryLabels[review] : 'Owner review updated' }] : [event];
     });
     return success({ project, ...summary, artifacts, github, task_prerequisites: linked.flatMap(view.prerequisitesFor),
-      history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)), task_milestones: associations.results, telemetry });
+      history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results,
+        ...executionHistory.results.slice(0, executionHistoryLimit)].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)),
+      execution_history_truncated: executionHistory.results.length > executionHistoryLimit,
+      task_milestones: associations.results, telemetry });
   }
   if (body.op === 'register_task') {
     if (current.status === 'archived') return fail(409, 'Project is archived');

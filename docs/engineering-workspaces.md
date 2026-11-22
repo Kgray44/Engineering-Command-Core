@@ -21,3 +21,5 @@ A milestone is an explicit acceptance gate. Link Tasks to a milestone to show re
 Project progress and telemetry draw from observed Tasks, attempts, and integration records. Missing token, cost, and CI values show as unavailable.
 
 Open **Acceptance** to compare completed Task candidates, the Project's verification marker, recorded exact-revision PR checks, landed integrations, deployment records, and the owner decision. Expand the candidate or check lists to open the canonical Task or integration record. The counts describe evidence linked to the Project. Record the owner's decision separately with **Save owner review**. Changes appear in Project History.
+
+**History** shows Project, milestone, association, and owner decision changes alongside the latest 120 eligible Task and integration receipts. Receipt dates are kept from their source records. Moving a Task preserves earlier events in the previous Project and records later events under the new Project. The Task and integration links open their full source histories.

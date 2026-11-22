@@ -225,7 +225,8 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   for (const [id, pr, observed_head] of [[integrationId, 42, head], [crypto.randomUUID(), 43, 'b'.repeat(40)]]) {
     insertRun.run('synthetic-owner', id, task_id, crypto.randomUUID(), head, pr,
       new Date().toISOString(), JSON.stringify({ evidence: { observed_head, policy_observed: true, checks } }),
-      JSON.stringify({ operation_id: crypto.randomUUID() }));
+      JSON.stringify({ operation_id: crypto.randomUUID(), at: new Date(Date.now() + 250).toISOString(),
+        kind: 'start', state: 'merged', pr_number: pr }));
   }
   const read = async () => (await call(0, '/api/projects/' + id)).body;
   const detail = await read();
@@ -237,6 +238,8 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   assert.equal(detail.integrations[0].repository, fixture[0].repository);
   assert.deepEqual(detail.integrations.find(run => run.id === integrationId).required_checks, checks);
   assert.deepEqual(detail.integrations.find(run => run.id !== integrationId).required_checks, []);
+  assert.ok(detail.history.some(event => event.source === 'integration' && event.integration_id === integrationId &&
+    event.kind === 'start' && event.pr_number === 42 && event.status === 'merged'));
   assert.ok(detail.history.some(event => event.kind === 'project_owner_review_changed' && event.name === 'Owner review requested'));
   assert.deepEqual(detail.tasks[0].blockers, [{ type: 'milestone', id: milestone_id, state: 'planned' }]);
   const portfolio = (await call(0, '/api/projects')).body;
@@ -378,7 +381,7 @@ test('workspace settings persist, audit concurrent changes, and never reveal cre
 });
 
 test('Project milestone ordering and eligible Task moves preserve canonical records', async t => {
-  const { call } = setup(t);
+  const { call, task, one } = setup(t);
   const projects = '/api/projects';
   const from = crypto.randomUUID();
   const to = crypto.randomUUID();
@@ -404,16 +407,37 @@ test('Project milestone ordering and eligible Task moves preserve canonical reco
   const child = await call(0, projects, { op: 'register_task', id: from, operation_id: crypto.randomUUID(),
     fields: { ...taskFields, dependencies: [parent.body.task.id] } });
   const task_id = child.body.task.id;
+  const attach = (version, number) => task(0, { op: 'command', task_id, expected_version: version,
+    operation_id: crypto.randomUUID(), action: { type: 'associate',
+      reference: { kind: 'pull_request', uri: 'https://github.com/' + fixture[0].repository + '/pull/' + number, revision: 'a'.repeat(40) } } });
+  const sourceEdit = await attach(child.body.version, 81);
+  assert.equal(sourceEdit.status, 200);
+  const sourceVersion = sourceEdit.body.version;
   const source = await readFrom();
   assert.ok(source.body.task_prerequisites.some(item => item.task_id === task_id && item.id === parent.body.task.id &&
     item.status === 'unsatisfied'));
-  const move = { op: 'move_task', id: to, source_project_id: from, task_id, expected_version: child.body.version };
+  const move = { op: 'move_task', id: to, source_project_id: from, task_id, expected_version: sourceVersion };
   const result = await call(0, projects, move);
   assert.equal(result.status, 200);
   assert.equal((await call(0, projects, move)).status, 404);
   const after = await call(0, projects + '/' + to);
   assert.equal(after.body.tasks[0].id, task_id);
-  assert.equal(after.body.tasks[0].version, child.body.version);
+  assert.equal(after.body.tasks[0].version, sourceVersion);
+  const destinationEdit = await attach(sourceVersion, 82);
+  assert.equal(destinationEdit.status, 200);
+  // Separate the two receipts from their association boundaries regardless of test clock precision.
+  const stamps = ['2026-11-21T00:00:01.000Z', '2026-11-21T00:00:03.000Z', '2026-11-21T00:00:05.000Z'];
+  const retime = one.sqlite.prepare("UPDATE project_relationship_events SET occurred_at = ? WHERE task_id = ? AND kind = ?");
+  retime.run(stamps[0], task_id, 'task_registered');
+  retime.run(stamps[1], task_id, 'task_moved_out');
+  retime.run(stamps[1], task_id, 'task_linked');
+  const retimeReceipt = one.sqlite.prepare("UPDATE task_engine_events SET event = json_set(event, '$.at', ?) WHERE task_id = ? AND version = ?");
+  retimeReceipt.run(stamps[0], task_id, child.body.version);
+  retimeReceipt.run('2026-11-21T00:00:02.000Z', task_id, sourceVersion);
+  retimeReceipt.run(stamps[2], task_id, destinationEdit.body.version);
+  const versions = history => history.filter(event => event.source === 'task' && event.task_id === task_id).map(event => event.version);
+  assert.deepEqual(versions((await readFrom()).body.history).filter(version => version >= sourceVersion), [sourceVersion]);
+  assert.deepEqual(versions((await call(0, projects + '/' + to)).body.history), [destinationEdit.body.version]);
   assert.ok((await readFrom()).body.history.some(event => event.kind === 'task_moved_out' && event.task_id === task_id));
   await call(0, projects, { op: 'milestone_link', id: to, milestone_id: peer, task_id });
   assert.equal((await call(0, projects, { ...move, source_project_id: to, id: from })).status, 409);
