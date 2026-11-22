@@ -282,6 +282,7 @@ const projectViews = [
   ['archived', 'Archived', project => project.status === 'archived'],
 ];
 const projectHref = id => '#projects/' + id;
+const integrationHref = run => '#merge?' + (run.pr_number ? 'pr=' + run.pr_number + '&' : '') + 'run=' + run.id;
 const shortDate = value => value ? new Date(value).toLocaleDateString() : 'Unavailable';
 const historyLabel = item => item.name ?? (item.source === 'integration' && item.kind === 'start'
   ? 'Integration started' : item.kind.replaceAll('_', ' '));
@@ -487,6 +488,8 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
   const controlTask = tasks.find(item => item.id === controlTaskId);
   const nextTask = tasks.find(item => item.state === 'ready');
   const blockedTasks = tasks.filter(item => item.blockers.length > 0);
+  const latestIntegration = integrations[0];
+  const blockedIntegrations = integrations.filter(item => item.state === 'blocked').length;
   const lastChange = history.findLast(item => !workerHeartbeat(item));
   const heartbeatCount = history.filter(workerHeartbeat).length;
   const shownHistory = showHeartbeats ? history : history.filter(item => !workerHeartbeat(item));
@@ -543,6 +546,21 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
             <DetailLine name="Milestone progress" value={progress.milestones.accepted + ' of ' + progress.milestones.total + ' accepted'}/>
             <DetailLine name="Workers with active Project leases" value={number(active_workers)}/>
             <DetailLine name="Next runnable Task" value={nextTask ? <a href={taskHref(nextTask.id)}>{nextTask.title}</a> : 'No Task ready to claim'}/>
+            <DetailLine name="Latest recorded integration" value={latestIntegration ? <>
+              <a className="text-button" href={integrationHref(latestIntegration)}
+                aria-label={(latestIntegration.pr_number ? 'Inspect latest integration for PR #' + latestIntegration.pr_number
+                  : 'Inspect latest integration') + ', ' + latestIntegration.state.replaceAll('_', ' ')}>
+                {latestIntegration.pr_number ? 'PR #' + latestIntegration.pr_number : latestIntegration.head_sha.slice(0, 12)}
+                {' · '}<Status value={latestIntegration.state}/>
+              </a>
+            </> : 'No recorded integrations'}/>
+            {blockedIntegrations > 0 && <DetailLine name="Integration blockers" value={
+              <button type="button" className="text-button" onClick={() => onJump('project-verification')}>
+                Review {blockedIntegrations} blocked {blockedIntegrations === 1 ? 'integration' : 'integrations'}
+              </button>}/>}
+            <DetailLine name="Owner review" value={project.owner_review === 'pending'
+              ? <button type="button" className="text-button" onClick={() => onJump('project-acceptance')}>{projectReviewLabels.pending}</button>
+              : projectReviewLabels[project.owner_review ?? ''] ?? project.owner_review}/>
             <DetailLine name="Recent change" value={lastChange ? <button type="button" className="text-button" onClick={() => onJump('project-history')}>
               {historyLabel(lastChange)} · {shortDate(lastChange.occurred_at)}
             </button> : 'No recorded changes'}/>
@@ -563,7 +581,6 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
             <DetailLine name="Target date" value={project.target_date || 'Unspecified'}/>
             <DetailLine name="Participants" value={project.participants?.join(', ') || 'Unspecified'}/>
             <DetailLine name="Technical completion" value={project.technical_state?.replaceAll('_', ' ') || 'Unspecified'}/>
-            <DetailLine name="Owner review" value={project.owner_review || 'Unspecified'}/>
             <DetailLine name="Linked Tasks" value={tasks.length}/>
             <DetailLine name="Milestones" value={milestones.length}/>
           </Panel>
@@ -691,7 +708,7 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
           {item.pr_number ? <a className="text-button" href={'https://github.com/' + item.repository + '/pull/' + item.pr_number} target="_blank" rel="noreferrer">PR #{item.pr_number}</a>
             : <small>{item.head_sha.slice(0, 12)}</small>}
           <Status value={item.state}/>
-          <a className="text-button" href={'#merge?' + (item.pr_number ? 'pr=' + item.pr_number + '&' : '') + 'run=' + item.id}>Inspect integration</a>
+          <a className="text-button" href={integrationHref(item)}>Inspect integration</a>
           {item.required_checks?.length > 0 ? <details>
             <summary>Recorded required checks</summary>
             <p>Head <code title={item.head_sha}>{item.head_sha.slice(0, 12)}</code> · Base {item.check_base_sha

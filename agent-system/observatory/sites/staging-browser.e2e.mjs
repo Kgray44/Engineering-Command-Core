@@ -109,6 +109,9 @@ test('Projects workspace performs live project and Task mutations through the sh
   assert.equal(await page.getByText('Project accepted', { exact: true }).count(), 0);
   await page.reload();
   await pendingReview.waitFor();
+  const overviewReview = page.locator('#project-current-work').getByRole('button', { name: 'Awaiting owner review', exact: true });
+  await overviewReview.click();
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#project-acceptance h2'));
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   await page.getByText('Description saved through the Project editor', { exact: true }).waitFor();
   await page.locator('#project-history').getByText('Owner review requested', { exact: true }).waitFor();
@@ -396,6 +399,8 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       { kind: 'pull_request', uri: 'https://github.com/synthetic/peer/pull/7' },
     ]), taskId);
   await page.goto(stage.origin + '/#projects/' + projectId);
+  const currentWork = page.locator('#project-current-work');
+  await currentWork.getByText('No recorded integrations', { exact: true }).waitFor();
   await page.getByRole('navigation', { name: 'Jump to Project section' }).getByRole('button', { name: 'Evidence', exact: true }).click();
   const artifacts = page.locator('#project-evidence');
   assert.equal(await artifacts.getByRole('link', { name: 'Open pull request on GitHub' }).getAttribute('href'), pull.html_url);
@@ -421,14 +426,21 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const recordedRun = crypto.randomUUID();
   const staleRun = crypto.randomUUID();
   const insertProjectRun = part.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, ?, 'blocked', 1, ?, ?, ?)");
-  for (const [id, pr, observedHead] of [[recordedRun, 7, head], [staleRun, 10, 'c'.repeat(40)]]) {
-    const at = new Date().toISOString();
+  for (const [id, pr, observedHead, at] of [
+    [recordedRun, 7, head, '2026-11-20T01:02:00Z'], [staleRun, 10, 'c'.repeat(40), '2026-11-20T01:01:00Z'],
+  ]) {
     insertProjectRun.run('synthetic-staging-owner', id, taskId, crypto.randomUUID(), head, pr, at,
-      JSON.stringify({ evidence: { observed_head: observedHead, base_sha: base, policy_observed: true,
+      JSON.stringify({ id, pr_number: pr, head_sha: head, state: 'blocked', version: 1, created_at: at, policy: { repair_limit: 2 },
+        evidence: { observed_head: observedHead, base_sha: base, policy_observed: true,
         checks: [{ context: 'Project qualification', app: 9, source: 'ruleset', state: 'failed' }] } }),
       JSON.stringify({ operation_id: crypto.randomUUID(), at, kind: 'start', state: 'blocked', pr_number: pr }));
   }
   await page.reload();
+  const latestIntegration = currentWork.getByRole('link', { name: 'Inspect latest integration for PR #7, blocked', exact: true });
+  assert.equal(await latestIntegration.getAttribute('href'), '#merge?pr=7&run=' + recordedRun);
+  await latestIntegration.getByText('blocked', { exact: true }).waitFor();
+  await currentWork.getByRole('button', { name: 'Review 2 blocked integrations', exact: true }).click();
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#project-verification h2'));
   const projectRun = verification.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'PR #7', exact: true }) });
   await projectRun.getByText('Recorded required checks', { exact: true }).click({ timeout: 5_000 });
   await projectRun.getByText('Project qualification · failed', { exact: true }).waitFor();
@@ -438,7 +450,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   const staleProjectRun = verification.getByRole('listitem').filter({ has: page.getByRole('link', { name: 'PR #10', exact: true }) });
   await staleProjectRun.getByText('No exact-head required checks recorded.').waitFor();
   assert.equal(await staleProjectRun.getByText('Project qualification', { exact: false }).count(), 0);
+  await latestIntegration.click();
+  const history = page.getByRole('region', { name: 'Integration history' });
+  await history.getByRole('button', { name: /PR #7/, pressed: true }).waitFor();
+  await page.locator('#integration-detail-title').getByText('Blocked', { exact: true }).waitFor();
   part.sqlite.prepare("DELETE FROM integration_runs WHERE id IN (?, ?)").run(recordedRun, staleRun);
+  await page.goto(stage.origin + '/#projects/' + projectId);
   await verification.getByRole('link', { name: 'Inspect PR #7 in Merge Control Center' }).click();
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
   await page.goto(stage.origin + '/#projects/' + projectId);

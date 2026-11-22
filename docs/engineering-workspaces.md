@@ -6,7 +6,7 @@ In **Current Projects**, use **Manual order** with search, State, and Group clea
 
 Each card shows a recent recorded change from the Project or its linked work. It also shows whether the owner review is pending, accepted, or declined when a decision is recorded. Choose **Recently active** to sort by those timestamps. Use **Save as default view** to save the current view, State, Sort, and Group for this owner and application. Search stays temporary. **Reset filters** restores the saved defaults. The same values are editable in **Settings → Projects**. Switch to **Current Projects** and **Manual order** when you want to change card positions.
 
-Open a card to inspect the Project. Jump links lead to task, milestone, dependency, GitHub, artifact, telemetry, and history sections. Edit metadata or change the Project state from the overview. Archiving preserves identity and history.
+Open a card to inspect the Project. In **Current work**, follow the latest recorded integration to its exact Merge Control Center run. The blocker count opens **GitHub and verification**, and a pending review opens **Acceptance**. Jump links also lead to Task, milestone, dependency, artifact, telemetry, and history sections. Edit metadata or change the Project state from the overview. Archiving preserves identity and history.
 
 ## Activity and attention
 
