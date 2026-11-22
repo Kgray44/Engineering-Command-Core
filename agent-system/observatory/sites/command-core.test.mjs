@@ -139,6 +139,38 @@ test('a Project milestone gate blocks claims until the dependency is accepted', 
   assert.equal((await project({ ...milestone, status: 'accepted', expected_version: 1 })).status, 200);
   assert.equal((await claim()).task.id, task_id);
 });
+test('a rejected milestone dependency reports the scoped cycle in Project order', async t => {
+  const { call } = setup(t);
+  const project = body => call(0, '/api/projects', body);
+  const nodes = ['Plan', 'Build', 'Verify'].map(name => ({ id: crypto.randomUUID(), name, milestone_id: crypto.randomUUID() }));
+  for (const node of nodes) {
+    const { id, name, milestone_id } = node;
+    assert.equal((await project({ op: 'create', id, fields: { name, objective: 'Prove a rejected dependency path' } })).status, 201);
+    assert.equal((await project({ op: 'milestone', id, milestone_id, name: 'Fixture milestone',
+      acceptance: 'Reviewed', status: 'planned' })).status, 201);
+    const result = await project({ op: 'register_task', id, operation_id: crypto.randomUUID(), fields: taskFields });
+    assert.equal(result.status, 201);
+    node.task_id = result.body.task.id;
+  }
+  const link = ({ id, task_id }, { milestone_id }) => ({ op: 'milestone_gate', id, task_id, milestone_id });
+  assert.equal((await project(link(nodes[0], nodes[1]))).status, 200);
+  assert.equal((await project(link(nodes[1], nodes[2]))).status, 200);
+  const closing = link(nodes[2], nodes[0]);
+  const conflict = await project(closing);
+  assert.equal(conflict.status, 409);
+  assert.deepEqual(conflict.body.dependency_cycle, [nodes[2], ...nodes].map(({ id, name }) => ({ id, name })));
+  const reread = (await call(0, '/api/projects/' + nodes[2].id)).body;
+  assert.deepEqual(reread.dependencies, []);
+  assert.equal(reread.history.some(event => event.kind === 'milestone_gate_set'), false);
+  assert.equal((await project(link(nodes[0], nodes[1]))).status, 200);
+  assert.equal((await call(1, '/api/projects', closing)).status, 404);
+  assert.equal((await project({ op: 'update', id: nodes[0].id, expected_version: 1, status: 'archived' })).status, 200);
+  const archived = await project(link(nodes[0], nodes[2]));
+  assert.equal(archived.status, 409);
+  assert.equal(archived.body.dependency_cycle, undefined);
+  assert.equal(archived.body.error, 'Project is archived');
+});
+
 test('application authorization and storage identity fail closed', async t => {
   const { call, env, rpc } = setup(t);
   env.TWO.OBSERVATORY_TASK_ENGINE_OWNER_ID = 'different-owner';

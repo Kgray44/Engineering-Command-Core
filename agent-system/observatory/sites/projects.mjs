@@ -19,6 +19,42 @@ const technicalHistoryLabels = {
 };
 const executionHistoryLimit = 120;
 const heartbeatHistoryLimit = 40;
+const milestoneGateGraph = `
+  WITH RECURSIVE edges(source, target) AS (
+    SELECT DISTINCT p.project_id, m.project_id FROM project_task_gates g
+    JOIN proposals p USING (owner_id, namespace, task_id)
+    JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id
+    WHERE g.owner_id = ?1 AND g.namespace = ?2
+  ), reachable(id) AS (
+    SELECT ?3 UNION SELECT edges.target FROM edges JOIN reachable ON reachable.id = edges.source
+  )`;
+
+function projectCycle(edges, requestedMilestoneProject, dependentProject) {
+  const neighbors = new Map();
+  const names = new Map();
+  for (const { source, target, source_name, target_name } of edges) {
+    if (!neighbors.has(source)) neighbors.set(source, []);
+    neighbors.get(source).push(target);
+    names.set(source, source_name);
+    names.set(target, target_name);
+  }
+  const parents = new Map([[requestedMilestoneProject, null]]);
+  const queue = [requestedMilestoneProject];
+  for (const id of queue) {
+    if (id === dependentProject) {
+      const path = [];
+      for (let step = id; step !== null; step = parents.get(step)) path.push({ id: step, name: names.get(step) });
+      return [{ id, name: names.get(id) }, ...path.reverse()];
+    }
+    for (const next of neighbors.get(id) ?? []) {
+      if (parents.has(next)) continue;
+      parents.set(next, id);
+      queue.push(next);
+    }
+  }
+  return null;
+}
+
 const projectTaskActivity = {
   register: 'Task registered', admit: 'Task admitted', claim: 'Task claimed', finished: 'Candidate reported',
   failed: 'Task attempt failed', accept: 'Task accepted', reject: 'Task returned for changes',
@@ -519,24 +555,27 @@ export async function projectOperation({ db, owner, namespace, application, body
     if (JSON.parse(task.engine ?? '{}').executor) return fail(409, 'Set milestone gates before Task admission');
     const alreadyLinked = await scope('SELECT task_id FROM project_task_gates WHERE owner_id = ? AND namespace = ? AND task_id = ? AND milestone_id = ?', body.task_id, body.milestone_id).first();
     if (alreadyLinked) return success({ linked: true });
-    const linked = await db.prepare(`
-      WITH RECURSIVE edges(source, target) AS (
-        SELECT p.project_id, m.project_id FROM project_task_gates g
-        JOIN proposals p USING (owner_id, namespace, task_id)
-        JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id
-        WHERE g.owner_id = ? AND g.namespace = ?
-      ), reachable(id) AS (
-        SELECT ? UNION SELECT edges.target FROM edges JOIN reachable ON reachable.id = edges.source
-      )
+    const linked = await scope(milestoneGateGraph + `
       INSERT INTO project_task_gates
-      SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM reachable WHERE id = ?)
-        AND EXISTS (SELECT 1 FROM proposals WHERE owner_id = ? AND namespace = ? AND task_id = ?
-          AND project_id = ? AND json_extract(engine, '$.executor') IS NULL)
-        AND EXISTS (SELECT 1 FROM projects WHERE owner_id = ? AND namespace = ? AND id = ? AND status <> 'archived')
+      SELECT ?1, ?2, ?5, ?6 WHERE NOT EXISTS (SELECT 1 FROM reachable WHERE id = ?4)
+        AND EXISTS (SELECT 1 FROM proposals WHERE owner_id = ?1 AND namespace = ?2 AND task_id = ?5
+          AND project_id = ?4 AND json_extract(engine, '$.executor') IS NULL)
+        AND EXISTS (SELECT 1 FROM projects WHERE owner_id = ?1 AND namespace = ?2 AND id = ?4 AND status <> 'archived')
       ON CONFLICT DO NOTHING RETURNING task_id
-    `).bind(owner, namespace, milestone.project_id, owner, namespace, body.task_id, body.milestone_id,
-      body.id, owner, namespace, body.task_id, body.id, owner, namespace, body.id).first();
-    if (!linked) return fail(409, 'Milestone gate would create a cycle or Task state changed');
+    `, milestone.project_id, body.id, body.task_id, body.milestone_id).first();
+    if (!linked) {
+      const { results } = await scope(milestoneGateGraph + `
+        SELECT edges.source, edges.target, json_extract(s.metadata, '$.name') AS source_name,
+          json_extract(d.metadata, '$.name') AS target_name
+        FROM edges JOIN reachable ON reachable.id = edges.source
+        JOIN projects s ON s.owner_id = ?1 AND s.namespace = ?2 AND s.id = edges.source
+        JOIN projects d ON d.owner_id = ?1 AND d.namespace = ?2 AND d.id = edges.target
+        WHERE EXISTS (SELECT 1 FROM reachable WHERE id = ?4)
+        ORDER BY edges.source, edges.target`, milestone.project_id, body.id).all();
+      const cycle = projectCycle(results, milestone.project_id, body.id);
+      return cycle ? success({ error: 'This milestone prerequisite would create a Project dependency cycle.', dependency_cycle: cycle }, 409) :
+        fail(409, 'The Task, Project, or prerequisite changed. Refresh before trying again.');
+    }
   }
   return success({ linked: true });
 }

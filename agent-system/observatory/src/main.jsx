@@ -180,7 +180,7 @@ const [hasLiveFeed,setHasLiveFeed]=useState(false);
 const [routeHash,setRouteHash]=useState(()=>window.location.hash);
 const githubView=parseActivityHref(routeHash);
 const taskRoute=parseTaskHref(routeHash);
-const projectRoute=/^#projects(?:\/([a-f0-9-]+)(?:\?section=(acceptance))?)?$/.exec(routeHash);
+const projectRoute=/^#projects(?:\/([a-f0-9-]+)(?:\?section=(acceptance|dependencies))?)?$/.exec(routeHash);
 const [newTaskProject,setNewTaskProject]=useState(null);
 const mergeRoute=/^#merge(?:\?(.*))?$/.exec(routeHash);
 const settingsRoute=/^#settings(?:\/([a-z]+))?$/.exec(routeHash);

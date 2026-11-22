@@ -591,6 +591,9 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 
 .project-dependency-graph { display: grid; gap: .75rem; }
 .project-dependency-graph > label { display: grid; gap: .35rem; max-width: 28rem; }
+.project-gate-error { min-width: 0; overflow-wrap: anywhere; }
+.project-gate-error p { margin: 0; }
+.project-gate-error ol { margin: .35rem 0 0; padding-inline-start: 1.25rem; }
 .project-dependency-flow { display: grid; gap: .6rem; justify-items: start; }
 .project-dependency-flow h3 { margin: .5rem 0; }
 .project-dependency-flow > svg { color: var(--accent); margin-left: .7rem; }

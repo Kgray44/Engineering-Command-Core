@@ -380,6 +380,25 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     name: 'Release readiness', acceptance: 'Record the release decision', status: 'planned' })).status, 201);
   assert.equal((await stage.run('/api/projects', { op: 'milestone_gate', id: projectId, task_id: taskId,
     milestone_id: releaseGate })).status, 200);
+  const closingMilestone = crypto.randomUUID();
+  assert.equal((await stage.run('/api/projects', { op: 'milestone', id: projectId, milestone_id: closingMilestone,
+    name: 'Release closure', acceptance: 'Review the release', status: 'planned' })).status, 201);
+  assert.equal((await stage.run('/api/projects', { op: 'register_task', id: gateProject, operation_id: crypto.randomUUID(),
+    fields: { title: 'Readiness review', objective: 'Verify cycle reporting', primary: 'backend',
+      profile_id: 'backend', criteria: ['Check the dependency path'] } })).status, 201);
+  await page.goto(stage.origin + '/#projects/' + gateProject + '?section=dependencies');
+  const gatePanel = page.locator('#project-dependencies');
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#project-dependencies h2'));
+  await gatePanel.getByText('Link a milestone', { exact: true }).click();
+  await gatePanel.getByRole('combobox', { name: 'Project', exact: true }).selectOption(projectId);
+  await gatePanel.getByRole('option', { name: 'Release closure', exact: true }).waitFor({ state: 'attached' });
+  await gatePanel.getByRole('combobox', { name: 'Milestone', exact: true }).selectOption(closingMilestone);
+  await gatePanel.getByRole('button', { name: 'Require acceptance before dispatch' }).click();
+  const cycle = gatePanel.getByRole('alert').getByRole('list', { name: 'Dependency path' });
+  await cycle.waitFor();
+  assert.deepEqual(await cycle.getByRole('link').allTextContents(), ['Readiness project', 'Release project', 'Readiness project']);
+  await cycle.getByRole('link', { name: 'Release project', exact: true }).click();
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#project-dependencies h2'));
   let referenceReceipt = await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
     expected_version: linkedTask.body.version, operation_id: crypto.randomUUID(),
     action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } });
@@ -399,12 +418,17 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
       { kind: 'pull_request', uri: 'https://github.com/synthetic/peer/pull/7' },
     ]), taskId);
   await page.goto(stage.origin + '/#projects/' + projectId);
+  await page.reload();
   const currentWork = page.locator('#project-current-work');
   await currentWork.getByText('No recorded integrations', { exact: true }).waitFor();
   const upstream = page.getByRole('region', { name: 'Upstream prerequisites' });
   await upstream.getByText('Remove prerequisite', { exact: true }).click();
   await upstream.getByText(/Remove Release readiness as a requirement for Release review/).waitFor();
+  const removal = page.waitForResponse(response => response.url().endsWith('/api/projects') &&
+    response.request().method() === 'POST' && response.request().postDataJSON().op === 'remove_milestone_gate');
   await upstream.getByRole('button', { name: 'Confirm removal' }).click();
+  const removed = await removal;
+  assert.equal(removed.status(), 200, await removed.text());
   await upstream.getByText('No recorded prerequisites.').waitFor();
   await page.locator('#project-history').getByText('milestone gate removed', { exact: true }).waitFor();
   assert.equal((await stage.run('/api/projects', { op: 'milestone_gate', id: projectId, task_id: taskId,

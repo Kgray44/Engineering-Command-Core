@@ -27,7 +27,9 @@ export async function projectRequest(body, headers = {}, { id, signal } = {}) {
     ...(body ? { body: JSON.stringify(body) } : {}), signal,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(Error(data.error || 'Projects service unavailable'), { status: response.status });
+  if (!response.ok) throw Object.assign(Error(data.error || 'Projects service unavailable'), {
+    status: response.status, dependencyCycle: data.dependency_cycle,
+  });
   return data;
 }
 
@@ -386,6 +388,7 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
   const [moveTaskId, setMoveTaskId] = useState('');
   const [controlTaskId, setControlTaskId] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
+  const [gateError, setGateError] = useState(null);
   const [other, setOther] = useState(null);
   const [taskList, setTaskList] = useState([]);
   const createId = useRef(crypto.randomUUID());
@@ -438,6 +441,8 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
     ++readVersion.current;
     setBusy(true);
     setError('');
+    const linkingMilestone = ['milestone_gate', 'milestone_link'].includes(request.op);
+    if (linkingMilestone) setGateError(null);
     try {
       const result = await projectRequest({ id: projectId, ...request }, headers);
       onSuccess?.(result);
@@ -445,7 +450,8 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
     } catch (error) {
       if (request.op === 'reorder' && error.status === 409 ||
           ['link_task', 'remove_milestone_gate'].includes(request.op) && [404, 409].includes(error.status)) await load().catch(() => {});
-      setError(error.message);
+      if (linkingMilestone) setGateError(error);
+      else setError(error.message);
     } finally {
       pending.current = false;
       setBusy(false);
@@ -683,7 +689,7 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
           onRemoveGate={project.status === 'archived' ? undefined : fields => submit({ op: 'remove_milestone_gate', ...fields })}/>
         {!tasks.length && <p>Project Tasks will appear here with their prerequisites.</p>}
         {project.status !== 'archived' && tasks.length > 0 && <details><summary>Link a milestone</summary>
-          <form className="form" onSubmit={event => {
+          <form className="form" onChange={() => setGateError(null)} onSubmit={event => {
             event.preventDefault();
             submit({ op: selectedProject ? 'milestone_gate' : 'milestone_link', ...object(event.currentTarget) });
           }}>
@@ -695,6 +701,16 @@ export function ProjectsWorkspace({ projectId, initialSection, headers, Panel, S
               {(selectedProject ? other?.milestones ?? [] : milestones).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select></label>
             <button className="quiet-button" disabled={busy}>{selectedProject ? 'Require acceptance before dispatch' : 'Link milestone'}</button>
+            {gateError && <div className="notice error" role="alert">
+              <div className="project-gate-error">
+                <p>{gateError.message}</p>
+                {Array.isArray(gateError.dependencyCycle) && <ol aria-label="Dependency path">
+                  {gateError.dependencyCycle.map((node, index) => <li key={node.id + ':' + index}>
+                    <a href={projectHref(node.id) + '?section=dependencies'}>{node.name}</a>
+                  </li>)}
+                </ol>}
+              </div>
+            </div>}
           </form>
         </details>}
       </Panel>
