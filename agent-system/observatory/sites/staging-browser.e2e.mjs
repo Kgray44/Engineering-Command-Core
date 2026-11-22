@@ -540,7 +540,24 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await mergeFilters.getByRole('combobox', { name: /^Sort/ }).selectOption('updated');
   await page.goto(stage.origin + '/#settings/integration');
   assert.equal(await page.getByLabel('Default pull request sort').inputValue(), 'oldest');
+  for (const [title, startAt] of [['Ready scheduler fixture', null], ['Future scheduler fixture', '2050-01-02T10:00:00.000Z']]) {
+    const scheduled = await stage.run('/api/task-engine/v1', { op: 'register', operation_id: crypto.randomUUID(),
+      fields: { title, objective: 'Verify the queue readback', primary: 'backend', profile_id: 'backend', criteria: ['Read the expected queue state'] } });
+    assert.equal(scheduled.status, 201);
+    assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: scheduled.body.task.id,
+      expected_version: scheduled.body.version, operation_id: crypto.randomUUID(),
+      action: { type: 'admit', executor: 'codex', ...(startAt ? { start_at: startAt } : {}) } })).status, 200);
+  }
   await page.goto(stage.origin + '/#settings/scheduling');
+  await page.reload();
+  const scheduler = page.getByRole('region', { name: 'Scheduler observations' });
+  await scheduler.getByText('Last successful Task registry read', { exact: true }).waitFor();
+  for (const label of ['Ready for worker claim', 'Scheduled for later', 'Blocked admitted Tasks']) {
+    const datum = scheduler.locator('.settings-facts div').filter({ hasText: label }).locator('dd');
+    await datum.getByText('1', { exact: true }).waitFor();
+  }
+  assert.equal(await scheduler.getByRole('link', { name: 'Open waiting Tasks' }).getAttribute('href'), '#tasks?work=waiting');
+  assert.equal(await scheduler.getByRole('link', { name: 'Open at-risk Tasks' }).getAttribute('href'), '#tasks?work=issues');
   await page.getByLabel('Default Task priority').selectOption('urgent');
   await page.getByRole('button', { name: 'Save changes' }).click();
   await page.getByText('Settings saved.', { exact: true }).waitFor();

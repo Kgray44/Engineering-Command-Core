@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Activity, Bell, Boxes, CalendarClock, Database, GitMerge, Github, Link2, Settings, ShieldCheck } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
 import { customTemplateLimits, validCustomProjectTemplates } from './project-templates.mjs';
+import { taskHref } from './task-workspace.mjs';
 import { preferenceFields } from './workspace-preferences.mjs';
 
 const categories = [
@@ -192,6 +193,33 @@ function DataChecks({ headers, revision }) {
   </section>;
 }
 
+function SchedulerObservations({ engine }) {
+  const counts = { ready: 0, scheduled: 0, blocked: 0 };
+  let nextStart = Infinity;
+  for (const row of engine.status === 'available' ? engine.tasks : []) {
+    const lifecycle = row.lifecycle;
+    if (!['admitted', 'queued', 'scheduled'].includes(lifecycle.stored_state)) continue;
+    const state = row.project_blocked ? 'blocked' : lifecycle.state;
+    if (Object.hasOwn(counts, state)) counts[state]++;
+    if (state === 'scheduled' && Number.isFinite(lifecycle.start_at)) nextStart = Math.min(nextStart, lifecycle.start_at);
+  }
+  return <section aria-label="Scheduler observations">
+    <h3>Scheduler observations</h3>
+    <Facts rows={[
+      ['Last successful Task registry read', date(engine.observedAt)],
+      ['Ready for worker claim', engine.status === 'available' ? counts.ready : 'Unverified'],
+      ['Scheduled for later', engine.status === 'available' ? counts.scheduled : 'Unverified'],
+      ['Blocked admitted Tasks', engine.status === 'available' ? counts.blocked : 'Unverified'],
+      ['Next scheduled start', engine.status !== 'available' ? 'Unverified'
+        : Number.isFinite(nextStart) ? date(nextStart) : 'None recorded'],
+    ]}/>
+    <div className="integration-actions">
+      <a href={taskHref(undefined, 'waiting')}>Open waiting Tasks</a>
+      <a href={taskHref(undefined, 'issues')}>Open at-risk Tasks</a>
+    </div>
+  </section>;
+}
+
 function CustomProjectTemplates({ templates, busy, onSave }) {
   const [selected, setSelected] = useState('');
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -253,7 +281,7 @@ function CustomProjectTemplates({ templates, busy, onSave }) {
   </section>;
 }
 
-export function EngineeringSettings({ category, headers, settings, onSettings, github, dispatch, worker, execution, engineState, demo }) {
+export function EngineeringSettings({ category, headers, settings, onSettings, github, dispatch, worker, execution, engine, demo }) {
   const reduced = useReducedMotion();
   const active = categories.find(([id]) => id === category);
   const [draft, setDraft] = useState({});
@@ -307,8 +335,9 @@ export function EngineeringSettings({ category, headers, settings, onSettings, g
     initial={reduced ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
     <a className="back" href="#settings">All settings</a>
     <h2>{active[1]}</h2>
-    {settings && <Diagnostics {...{ category, settings, github, dispatch, worker, execution, engineState }}/>}
+    {settings && <Diagnostics {...{ category, settings, github, dispatch, worker, execution }} engineState={engine.status}/>}
     {category === 'connections' && settings && <ConnectionChecks headers={headers} settings={settings}/>}
+    {category === 'scheduling' && settings && <SchedulerObservations engine={engine}/>}
     {category === 'data' && settings && <DataChecks headers={headers} revision={settings.revision}/>}
     {settings && fields.length > 0 && <form className="form" onSubmit={event => { event.preventDefault(); if (dirty) update('save'); }}>
       {fields.map(([key, field]) => <label key={key}>{field.label}

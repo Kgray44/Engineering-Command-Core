@@ -41,4 +41,6 @@ Under **Data & Backup**, run the scoped data checks to inspect expected schema o
 
 Under **Connections**, choose **Verify connections** to read the current service revision and confirm the database partition responds for the signed-in application. On the canonical connector Site, the authenticated Settings route checks the server's MCP tool registry. The other Site links to the canonical check. The panel shows the latest success and failure in the current session. Use the connected ChatGPT plugin to verify its external transport and authorization separately. GitHub, worker, and telemetry rows retain the scope of the available source observations.
 
+**Scheduling** shows the latest successful Task registry read, ready and scheduled admitted Tasks, blocked admitted Tasks, and the next start when available. The waiting and at-risk links open the Task Control Center.
+
 Under **Connections**, compare observed times, API request budget, worker heartbeats, backend and database readback, and GitHub status. A configured credential may remain unverified. Use the Action, Task, or Project link from **Activity** to inspect the source when a record needs attention.

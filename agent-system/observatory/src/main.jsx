@@ -193,7 +193,7 @@ const refreshEngine=useCallback(signal=>{
   const read={signal};
   read.request=taskEngineRequest({op:'list',include_archived:true},verificationHeaders,{signal}).then(data=>{
     if(signal?.aborted||engineRequest.current!==read)return;
-    if(Array.isArray(data?.tasks))setEngine({status:'available',tasks:data.tasks,workerAccess:data.executor_access?.codex,workerDispatch:data.worker_dispatch});
+    if(Array.isArray(data?.tasks))setEngine({status:'available',tasks:data.tasks,workerAccess:data.executor_access?.codex,workerDispatch:data.worker_dispatch,observedAt:new Date().toISOString()});
     else if(data===null)setEngine({status:'absent',tasks:[]});
     else setEngine(previous=>({...previous,status:'error',error:'Unexpected Task registry response.'}));
   }).catch(error=>{
@@ -480,7 +480,7 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
   main={github?.main} pullGroup={github?.pulls}
   acceptedTasks={tasks.filter(task=>task.owner_acceptance==='accepted')}/>}
 {page==='settings'&&<EngineeringSettings category={settingsRoute?.[1]} headers={verificationHeaders} settings={settings} onSettings={setSettings}
-  github={github} dispatch={dispatchStatus} worker={engine.workerDispatch} execution={execution} engineState={engine.status} demo={demo}/>}
+  github={github} dispatch={dispatchStatus} worker={engine.workerDispatch} execution={execution} engine={engine} demo={demo}/>}
 {page==='activity'&&<EngineeringAttention tasks={displayTasks} attempts={attempts} github={github} dispatch={dispatchStatus}
   runs={attentionIntegration.runs} runError={attentionIntegration.error} worker={engine.workerDispatch}
   summaries={summaries} headers={verificationHeaders} settings={settings} demo={demo} Panel={Panel} Status={Status}/>}
