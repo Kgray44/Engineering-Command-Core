@@ -137,6 +137,7 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByText('0 of 1 Tasks complete · 0 running · 0 blocked · 0 verifying', { exact: true }).waitFor();
   await page.getByRole('link', { name: 'All projects' }).click();
   await page.getByText('0/1 Tasks complete · 0 running · 0 blocked · 0/1 milestones accepted', { exact: true }).waitFor();
+  await page.locator('.project-card').getByText('Task registered', { exact: true }).waitFor();
   const explorer = page.getByRole('navigation', { name: 'Project activity views' });
   const search = page.getByRole('searchbox', { name: 'Search projects' });
   await explorer.getByRole('button', { name: /Archived/ }).click();
@@ -209,6 +210,16 @@ test('Projects workspace performs live project and Task mutations through the sh
   const titles = page.locator('.project-card-name');
   const firstNames = ['Second synthetic project', 'Synthetic browser project'];
   await titles.first().waitFor();
+  assert.deepEqual(await titles.allTextContents(), firstNames);
+  const firstProjectId = projectHash.split('/').at(-1);
+  const firstProjectState = await stage.run('/api/projects/' + firstProjectId);
+  assert.equal((await stage.run('/api/projects', { op: 'update', id: firstProjectId,
+    expected_version: firstProjectState.body.project.version, fields: { description: 'Latest Project update' } })).status, 200);
+  await page.reload();
+  const sorter = page.getByRole('combobox', { name: 'Sort', exact: true });
+  await sorter.selectOption('recent');
+  assert.deepEqual(await titles.allTextContents(), [...firstNames].reverse());
+  await sorter.selectOption('manual');
   assert.deepEqual(await titles.allTextContents(), firstNames);
   const handle = page.getByRole('button', { name: 'Reorder Second synthetic project' });
   await page.setViewportSize({ width: 1240, height: 1160 });
@@ -395,6 +406,16 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByRole('button', { name: 'Confirm restore' }).click();
   await page.getByText('Category defaults restored.', { exact: true }).waitFor();
   assert.equal(await shell.getAttribute('data-density'), 'comfortable');
+  await page.goto(stage.origin + '/#settings/projects');
+  await page.getByLabel('Default Project view').selectOption('review');
+  await page.getByLabel('Default Project sort').selectOption('recent');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByText('Settings saved.', { exact: true }).waitFor();
+  await page.goto(stage.origin + '/#projects');
+  const views = page.getByRole('navigation', { name: 'Project activity views' });
+  await views.getByRole('button', { name: /Awaiting review/ }).waitFor();
+  assert.equal(await views.getByRole('button', { name: /Awaiting review/ }).getAttribute('aria-current'), 'page');
+  assert.equal(await page.getByRole('combobox', { name: 'Sort', exact: true }).inputValue(), 'recent');
   await page.goto(stage.origin + '/#settings/connections');
   const probes = page.getByRole('region', { name: 'Connection checks' });
   await probes.getByRole('button', { name: 'Verify connections' }).click();

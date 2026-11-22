@@ -2,7 +2,9 @@
 
 Open **Projects** and choose **New project**. Give it a name and objective. Open **Project appearance** to search icons, preview the combination, and choose an accent. A template supplies editable scope, acceptance requirements, and suggested milestones. Switching templates updates fields you have yet to edit. Choose **Blank project** to clear untouched suggestions while retaining your edits. Open a suggestion in the milestone form and provide the acceptance evidence required to add it. Creating a Project, accepting a suggestion, and admitting a Task are separate explicit actions.
 
-In **Current Projects**, use **Manual order** with search, State, and Group cleared. Drag the handle with a pointer or use Space, the arrow keys, and Space again. Escape cancels. Touch users can press and hold the handle before moving the card. Sorting and filtering are temporary views. Once the server records an order, newly created Projects appear after saved cards until rearranged. On a conflict the Library reloads current state so you can make the change again.
+In **Current Projects**, use **Manual order** with search, State, and Group cleared. Drag the handle with a pointer or use Space, the arrow keys, and Space again. Escape cancels. Touch users can press and hold the handle before moving the card. Sorting and filtering leave the manual order intact. Before the first save, manual order starts with the newest Projects by creation date. Once the server records an order, newly created Projects appear after saved cards until rearranged. On a conflict the Library reloads current state so you can make the change again.
+
+Each card shows a recent recorded change from the Project or its linked work. Choose **Recently active** to sort by those timestamps. Choose the starting view and sort in **Settings → Projects**. Switch to **Current Projects** and **Manual order** when you want to change card positions.
 
 Open a card to inspect the Project. Jump links lead to task, milestone, dependency, GitHub, artifact, telemetry, and history sections. Edit metadata or change the Project state from the overview. Archiving preserves identity and history.
 

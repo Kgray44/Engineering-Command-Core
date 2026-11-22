@@ -14,6 +14,30 @@ const reviewHistoryLabels = {
   pending: 'Owner review requested', accepted: 'Owner accepted Project', declined: 'Owner declined Project', '': 'Owner review cleared',
 };
 const executionHistoryLimit = 120;
+const projectTaskActivity = {
+  register: 'Task registered', admit: 'Task admitted', claim: 'Task claimed', finished: 'Candidate reported',
+  failed: 'Task attempt failed', accept: 'Task accepted', reject: 'Task returned for changes',
+  pause: 'Task paused', resume: 'Task resumed', cancel: 'Task canceled', retry: 'Task retried',
+  lease_expired: 'Worker lease expired', attempt_time_limit_reached: 'Task attempt timed out',
+};
+
+function latestProjectActivity(project, { tasks, milestones, integrations }) {
+  let latest = { label: project.version === 1 ? 'Project created' : 'Project updated', at: project.updated_at };
+  const consider = (label, at) => {
+    if (label && at && at > latest.at) latest = { label, at };
+  };
+  for (const milestone of milestones) consider(milestone.status === 'accepted' ? 'Milestone accepted' : 'Milestone updated', milestone.updated_at);
+  for (const task of tasks) {
+    const kind = task.last_activity?.kind;
+    if (Object.hasOwn(projectTaskActivity, kind)) consider(projectTaskActivity[kind], task.last_activity.at);
+    consider('Task claimed', task.attempt_started_at);
+  }
+  for (const run of integrations) {
+    const label = { merged: 'Integration landed', deployed: 'Deployment recorded', blocked: 'Integration blocked' }[run.state];
+    consider(label, run.updated_at);
+  }
+  return latest;
+}
 const artifactReferenceKinds = new Set(['artifact', 'document', 'url', 'test', 'pull_request', 'ci_run']);
 
 function collectProjectArtifact(artifacts, repository, task_id, reference, evidence) {
@@ -128,7 +152,7 @@ export async function projectOperation({ db, owner, namespace, application, body
       readTaskRows({ db, owner, namespace, now, reconcileExpired: false }),
       scope('SELECT id, project_id, version, name, acceptance, status, updated_at FROM milestones WHERE owner_id = ? AND namespace = ? ORDER BY updated_at, id').all(),
       scope('SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status FROM project_task_gates g JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id WHERE g.owner_id = ? AND g.namespace = ?').all(),
-      scope(`SELECT r.id, r.task_id, r.pr_number, r.head_sha, r.state, t.project_id,
+      scope(`SELECT r.id, r.task_id, r.pr_number, r.head_sha, r.state, r.updated_at, t.project_id,
         CASE WHEN t.project_id = ?3 AND json_extract(r.record, '$.evidence.observed_head') = r.head_sha
           AND json_extract(r.record, '$.evidence.policy_observed') = 1
           AND json_type(r.record, '$.evidence.checks') = 'array'
@@ -177,6 +201,7 @@ export async function projectOperation({ db, owner, namespace, application, body
           return { id: row.task_id, title: task.title, version: row.version, created_at: row.created_at,
             priority: row.priority, branch: attempt?.branch ?? null,
             state: blockers.length ? 'blocked' : dispatch.state, blockers,
+            attempt_started_at: attempt?.started_at ?? null,
             ...(engine?.event?.kind && engine.event.at ? { last_activity: { kind: engine.event.kind, at: engine.event.at } } : {}),
             candidate_revision: ['verifying', 'succeeded'].includes(attempt?.state) ? attempt.candidate_revision ?? null : null,
             owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
@@ -222,7 +247,10 @@ export async function projectOperation({ db, owner, namespace, application, body
       getOrder(),
     ]);
     const projects = results.map(serialize);
-    return success({ application, projects: projects.map(project => ({ ...project, progress: view.forProject(project).progress })),
+    return success({ application, projects: projects.map(project => {
+      const projection = view.forProject(project);
+      return { ...project, progress: projection.progress, latest_activity: latestProjectActivity(project, projection) };
+    }),
       manual_order: orderPayload(order),
       unassigned_tasks: view.taskRows.filter(row => !row.project_id).length });
   }

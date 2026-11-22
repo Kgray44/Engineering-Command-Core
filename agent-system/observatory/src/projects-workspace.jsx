@@ -241,7 +241,7 @@ const shortDate = value => value ? new Date(value).toLocaleDateString() : 'Unava
 const historyLabel = item => item.name ?? (item.source === 'integration' && item.kind === 'start'
   ? 'Integration started' : item.kind.replaceAll('_', ' '));
 
-function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaultSort, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
+function ProjectExplorer({ application, projects, manualOrder, unassigned, filters, setFilters, layout, defaultSort, defaultView, Panel, Status, Metric, editing, onEdit, onReorder, busy, children }) {
   const interaction = useCardMotion(true);
   const views = projectViews.map(([id, label, matches]) => [id, label, projects.filter(matches)]);
   const viewItems = views.find(([id]) => id === filters.view)[2];
@@ -250,18 +250,21 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
     (!filters.state || project.status === filters.state) &&
     [project.name, project.description, project.objective, project.id].some(value => value?.toLowerCase().includes(query)));
   const sorters = {
-    newest: (left, right) => right.created_at.localeCompare(left.created_at),
+    newest: (left, right) => right.created_at.localeCompare(left.created_at) || left.id.localeCompare(right.id),
+    recent: (left, right) => (right.latest_activity?.at ?? right.updated_at).localeCompare(left.latest_activity?.at ?? left.updated_at) ||
+      left.name.localeCompare(right.name),
     oldest: (left, right) => left.created_at.localeCompare(right.created_at),
     priority: (left, right) => priorities.indexOf(right.priority) - priorities.indexOf(left.priority),
     title: (left, right) => left.name.localeCompare(right.name),
   };
-  const ordered = filters.sort === 'manual' ? orderBySavedIds(items, manualOrder.project_ids) : items.sort(sorters[filters.sort]);
+  const ordered = filters.sort === 'manual' ? orderBySavedIds(items.toSorted(sorters.newest), manualOrder.project_ids) : items.sort(sorters[filters.sort]);
   const manualView = filters.sort === 'manual' && filters.view === 'all' && filters.group === 'none' && !query && !filters.state;
   const reorder = (visibleIds, from, to) => {
     const moved = arrayMove(visibleIds, visibleIds.indexOf(from), visibleIds.indexOf(to));
     const visible = new Set(visibleIds);
     let index = 0;
-    const project_ids = orderBySavedIds(projects, manualOrder.project_ids).map(({ id }) => visible.has(id) ? moved[index++] : id);
+    const project_ids = orderBySavedIds(projects.toSorted(sorters.newest), manualOrder.project_ids)
+      .map(({ id }) => visible.has(id) ? moved[index++] : id);
     onReorder({ op: 'reorder', project_ids, expected_version: manualOrder.version });
   };
   const groups = filters.group === 'none' ? [['Projects', ordered]]
@@ -292,8 +295,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
           <option value="">{filters.view === 'all' ? 'Current Projects' : 'Any state in view'}</option><Options values={stages}/>
         </select></label>
         <label>Sort <select name="sort" value={filters.sort} onChange={field}>
-          <option value="manual">Manual order</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option>
-          <option value="priority">Highest priority</option><option value="title">Title</option>
+          {Object.entries(preferenceFields.project_sort.choices).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select></label>
         <label>Group <select name="group" value={filters.group} onChange={field}>
           <option value="none">None</option><option value="state">State</option>
@@ -301,7 +303,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
       </div>
       <div className="task-result-bar">
         <span role="status"><Filter size={14} aria-hidden="true"/> {items.length} of {projects.length} Projects</span>
-        {filters !== defaultFilters && <button type="button" className="text-button" onClick={() => setFilters({ ...defaultFilters, sort: defaultSort })}>Reset filters</button>}
+        {filters !== defaultFilters && <button type="button" className="text-button" onClick={() => setFilters({ ...defaultFilters, sort: defaultSort, view: defaultView })}>Reset filters</button>}
       </div>
       {!items.length && <p>{projects.length ? 'No Projects match these filters.' : 'No Projects in the current feed.'}</p>}
       {filters.sort === 'manual' && !manualView && <small>To reorder cards, open Current Projects and clear search, state, and grouping.</small>}
@@ -316,7 +318,7 @@ function ProjectExplorer({ application, projects, manualOrder, unassigned, filte
 export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, DetailLine, onNewTask, onJump, refreshVersion, liveTaskState, preferences, preferencesReady, workerAccess, workerDispatch, demo }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort }));
+  const [filters, setFilters] = useState(() => ({ ...defaultFilters, sort: preferences.project_sort, view: preferences.project_view }));
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const [addingMilestone, setAddingMilestone] = useState(null);
@@ -408,7 +410,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     {error && <p className="notice error" role="alert">{error}</p>}
     {!data && !error && <p role="status">Loading Projects…</p>}
     {application && !projectId && <ProjectExplorer application={application} projects={projects} unassigned={data.unassigned_tasks}
-      filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaultSort={preferences.project_sort} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
+      filters={filters} setFilters={setFilters} layout={preferences.project_layout} defaultSort={preferences.project_sort} defaultView={preferences.project_view} Panel={Panel} Status={Status} Metric={Metric} editing={edit} onEdit={() => setEdit(!edit)}
       manualOrder={data.manual_order ?? { version: 0, project_ids: [] }} onReorder={submit} busy={busy}>
       {edit && <div className="project-create"><ProjectForm busy={busy} defaultPriority={preferences.project_priority} onSave={fields => submit({ op: 'create', id: createId.current, fields }, result => {
         window.location.hash = projectHref(result.project.id);

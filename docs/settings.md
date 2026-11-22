@@ -14,7 +14,8 @@ All editable values below are enum strings. The server validates the allowed val
 | Default Task sort | Newest first | Newest, oldest, priority, title |
 | Project entry section | Overview | Overview, Tasks, Milestones, Dependencies, GitHub, Telemetry, Artifacts, History |
 | Project layout | Card grid | Card grid, List |
-| Default Project sort | Manual order | Manual order, newest, oldest, priority, title |
+| Default Project view | Current Projects | Current, active, planned or paused, awaiting review, accepted, archived |
+| Default Project sort | Manual order | Manual order, recently active, newest, oldest, priority, title |
 | Default Project priority | Normal | Low, Normal, High, Urgent |
 | Default pull request filter | Open | Open, Merged, Closed, All states |
 | Default Task priority | Normal | Low, Normal, High, Urgent |

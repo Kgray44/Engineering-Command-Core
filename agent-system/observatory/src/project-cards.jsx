@@ -62,6 +62,9 @@ function Card({ item, Status, sortable, keyboard }) {
       <span className="project-card-status"><Status value={item.status}/><small>{item.priority} priority</small></span>
       {progress && <small className="project-card-progress">{progress.tasks.completed}/{progress.tasks.total} Tasks complete · {progress.tasks.active} running · {progress.tasks.blocked} blocked · {progress.milestones.accepted}/{progress.milestones.total} milestones accepted</small>}
       {item.owner_review === 'pending' && <small>Owner review pending</small>}
+      {item.latest_activity && <small className="project-card-activity">
+        <span>{item.latest_activity.label}</span> · <time dateTime={item.latest_activity.at}>{new Date(item.latest_activity.at).toLocaleDateString()}</time>
+      </small>}
       <span className="project-card-action">Open project <ChevronRight size={15} aria-hidden="true"/></span>
     </motion.a>
     {sortable && <button type="button" className="icon-button project-card-handle" ref={setActivatorNodeRef}
