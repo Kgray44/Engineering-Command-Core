@@ -211,6 +211,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     number: 7, title: 'Synthetic proposal for staging', body: 'Review the exact source revision.',
     user: { login: 'synthetic-author' }, state: 'open', changed_files: 1, additions: 5, deletions: 2,
     head: branch('codex/synthetic', head), base: branch('main', base),
+    requested_reviewers: [{ login: 'synthetic-reviewer' }], requested_teams: [],
     html_url: 'https://github.com/' + repository + '/pull/7', created_at: '2026-11-20T00:00:00Z',
   };
   const { stage, page } = await browserStage(t, {
@@ -238,6 +239,12 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
     expected_version: linkedTask.body.version, operation_id: crypto.randomUUID(),
     action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } })).status, 200);
+  const waiting = await stage.run('/api/projects', { op: 'register_task', id: projectId, operation_id: crypto.randomUUID(),
+    fields: { title: 'Release follow-up', objective: 'Wait for source review', primary: 'backend', profile_id: 'backend',
+      dependencies: [taskId], criteria: ['Wait for prerequisite acceptance'] } });
+  assert.equal(waiting.status, 201);
+  assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: waiting.body.task.id,
+    expected_version: waiting.body.version, operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
   await page.goto(stage.origin + '/#settings');
   const shell = page.locator('.app-shell[data-application="voyagewright"]');
   await shell.waitFor();
@@ -263,6 +270,14 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
   await page.getByText(/Revision 2/).waitFor();
   await page.goto(stage.origin + '/#activity');
   await page.getByRole('heading', { name: 'Activity and attention' }).waitFor();
+  const panel = name => page.locator('section.panel').filter({ has: page.getByRole('heading', { name, exact: true }) });
+  await panel('Project changes').getByRole('link', { name: 'Release project' }).first().waitFor();
+  await panel('Waiting on prerequisites').getByRole('link', { name: 'Release follow-up' }).waitFor();
+  await panel('Waiting on prerequisites').getByText('Release review', { exact: true }).waitFor();
+  await panel('Pull requests awaiting review').getByRole('link', { name: 'Synthetic proposal for staging' }).waitFor();
+  await page.getByRole('button', { name: 'Recent work', exact: true }).click();
+  await page.getByRole('heading', { name: 'Project changes', exact: true }).waitFor();
+  assert.equal(await page.getByRole('heading', { name: 'Waiting on prerequisites', exact: true }).count(), 0);
   await page.goto(stage.origin + '/#merge?pr=7');
   await page.getByRole('heading', { name: '#7 Synthetic proposal for staging' }).waitFor();
   const linkedWork = page.getByRole('region', { name: 'Linked engineering work' });

@@ -7,6 +7,7 @@ import { sha256 } from './task-telemetry.mjs';
 import { createWorker } from './worker.mjs';
 import { workspaceSettings } from './workspace-settings.mjs';
 import { integrationAccess } from './integration-runs.mjs';
+import { readProjectActivity } from './project-activity.mjs';
 import { taskExecutionCapacity } from '../task-execution-capacity.mjs';
 
 const identityHeader = 'oai-authenticated-user-id';
@@ -239,6 +240,13 @@ export function createCommandCore({ applications, portfolio = { id: 'engineering
         if (!await checkPartition(env, originRuntime, scoped)) return error('Application partition unavailable', 503);
         if (url.pathname === '/api/status' && request.method === 'GET') {
           return response({ status: 'ready', application: originRuntime.application, revision: workerOptions.sourceRevision ?? null });
+        }
+        if (url.pathname === '/api/activity') {
+          if (request.method !== 'GET') return error('Method not allowed', 405);
+          const verification = request.headers.get('x-observatory-verification');
+          if (verification !== null && !uuid.test(verification)) return error('Invalid verification namespace', 400);
+          const namespace = verification ? 'verification:' + verification : 'live';
+          return response({ project_events: await readProjectActivity(scoped.DB, owner, namespace) });
         }
         if (url.pathname === '/api/settings') {
           const verification = request.headers.get('x-observatory-verification');

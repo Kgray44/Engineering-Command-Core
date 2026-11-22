@@ -6,6 +6,10 @@ In **Current Projects**, use **Manual order** with search, State, and Group clea
 
 Open a card to inspect the Project. Jump links lead to task, milestone, dependency, GitHub, artifact, telemetry, and history sections. Edit metadata or change the Project state from the overview. Archiving preserves identity and history.
 
+## Activity and attention
+
+Open **Activity** to scan all activity, focus on items that need attention, or browse recent work. The Center uses recorded Project changes, Task lifecycle states, failed attempts, explicit GitHub review requests, CI results, and worker observations. Prerequisite rows show the Task or capability holding up execution when available. Project and Task links take you to their source workspaces. GitHub cache and credential warnings link to the connection settings.
+
 ## Work and acceptance
 
 Use **New project task** for Task intake with the Project association. Filter the Project Task list by name or state. Expand **Execution controls** for scheduling, pause, resume, retry, and other actions available in the current Task state. Open the full Task Workspace for its specification editor, logs, attempt history, and reports. **Move a Task to another Project** preserves canonical Task and attempt IDs for eligible unadmitted or finished Tasks without milestone links. Both Projects retain a relationship event.

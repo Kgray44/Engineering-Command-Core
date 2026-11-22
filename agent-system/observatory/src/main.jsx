@@ -455,7 +455,8 @@ return <div className="app-shell" data-application={voyage?'voyagewright':'aethe
 {page==='settings'&&<EngineeringSettings category={settingsRoute?.[1]} headers={verificationHeaders} settings={settings} onSettings={setSettings}
   github={github} dispatch={dispatchStatus} worker={engine.workerDispatch} execution={execution} engineState={engine.status} demo={demo}/>}
 {page==='activity'&&<EngineeringAttention tasks={displayTasks} attempts={attempts} github={github} dispatch={dispatchStatus}
-  runs={attentionIntegration.runs} demo={demo} Panel={Panel} Status={Status}/>}
+  runs={attentionIntegration.runs} runError={attentionIntegration.error} worker={engine.workerDispatch}
+  summaries={summaries} headers={verificationHeaders} settings={settings} demo={demo} Panel={Panel} Status={Status}/>}
 {page==='analytics'&&<Suspense fallback={<p role="status">Loading engineering analytics…</p>}><EngineeringAnalyticsPage
   records={records} events={execution?.events} github={demo?null:github} execution={demo?null:execution}
   ready={!demo&&hasLiveFeed} ui={githubUi} headers={verificationHeaders}/></Suspense>}

@@ -1,32 +1,129 @@
+import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { activityHref, activityId } from './github-activity.mjs';
 import { taskHref } from './task-workspace.mjs';
 
-export function EngineeringAttention({ tasks, attempts, github, dispatch, runs, Panel, Status, demo }) {
+const recent = rows => [...rows].sort((left, right) => (Date.parse(right.at) || 0) - (Date.parse(left.at) || 0)).slice(0, 12);
+const time = value => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString() : null;
+const label = value => String(value).replaceAll('_', ' ');
+const dispositions = new Set(['failure', 'timed_out', 'startup_failure', 'action_required']);
+
+function useProjectActivity(headers, enabled) {
+  const [view, setView] = useState({ events: [], loading: true });
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let request;
+    async function load() {
+      if (document.hidden || request) return;
+      const controller = new AbortController();
+      request = controller;
+      try {
+        const response = await fetch('/api/activity', { headers, signal: controller.signal, cache: 'no-store' });
+        if (!response.ok) throw Error('Project activity is unavailable.');
+        const data = await response.json();
+        if (!controller.signal.aborted) setView({ events: data.project_events, loading: false });
+      } catch {
+        if (!controller.signal.aborted) setView(previous => ({ ...previous, loading: false, stale: true }));
+      } finally {
+        request = null;
+      }
+    }
+    void load();
+    const timer = window.setInterval(load, 30_000);
+    document.addEventListener('visibilitychange', load);
+    return () => {
+      request?.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', load);
+    };
+  }, [enabled, generation, headers]);
+  return { ...view, refresh: () => setGeneration(value => value + 1) };
+}
+
+export function EngineeringAttention({ tasks, attempts, github, dispatch, worker, runs, runError, summaries, settings, headers, Panel, Status, demo }) {
   const reduced = useReducedMotion();
+  const activity = useProjectActivity(headers, !demo && Boolean(settings?.application));
+  const [filter, setFilter] = useState('all');
   if (demo) return <p className="notice">Open Live mode to view engineering activity.</p>;
-  const taskLink = (task, state) => ({ id: task.id, label: task.title, state, href: taskHref(task.id) });
+
   const taskIndex = new Map(tasks.map(task => [task.id, task]));
+  for (const summary of summaries.values()) taskIndex.set(summary.task.id, summary.task);
+  const entries = [...taskIndex.values()].map(task => {
+    const summary = summaries.get(task.id);
+    const blockers = summary?.lifecycle.blockers ?? [];
+    return {
+      id: task.id, label: task.title, href: taskHref(task.id),
+      project: summary?.project_id, blockers, projectGate: summary?.project_blocked,
+      state: summary?.lifecycle.state ?? task.state,
+      accepted: (summary?.task.owner_acceptance ?? task.owner_acceptance) === 'accepted',
+      at: summary?.lifecycle.accepted_at ?? task.updated_at ?? null,
+    };
+  });
+  const issue = entry => [entry.projectGate ? 'Project or milestone gate' : null,
+    ...entry.blockers.map(blocker => taskIndex.get(blocker.id)?.title ?? label(blocker.id))]
+    .filter(Boolean).slice(0, 3).join(' · ');
+
+  const pullRow = item => ({ id: activityId('pulls', item), label: item.title ?? 'Pull request #' + activityId('pulls', item),
+    href: '#merge?pr=' + activityId('pulls', item), at: item.updated_at, state: item.draft ? 'draft' : 'open',
+    detail: github?.pulls?.status === 'stale' ? 'Cached GitHub observation' : null });
+  const openPulls = (github?.pulls?.items ?? []).filter(item => item.state === 'open' && activityId('pulls', item));
+  const connections = [
+    { id: 'worker', label: dispatch.label, href: '#settings/workers', at: dispatch.at },
+    ...(worker?.last_error ? [{ id: 'worker-receipt', label: 'Last worker issue · ' + label(worker.last_error.state),
+      at: worker.last_error.at, href: '#settings/workers' }] : []),
+    ...(github?.main?.status !== 'available' ? [{ id: 'github', label: github?.main?.reason ?? 'GitHub main is unverified',
+      href: '#settings/github' }] : []),
+    ...(settings?.connections?.github?.credential_configured === false ? [{ id: 'github-read', label: 'GitHub read credential is missing',
+      href: '#settings/github' }] : []),
+    ...(runError ? [{ id: 'integration-error', label: 'Integration history is unavailable', href: '#merge' }] : []),
+  ];
   const sections = [
-    ['Owner review', tasks.filter(task => task.owner_acceptance === 'pending' || task.state === 'verifying')
-      .map(task => taskLink(task, task.state))],
-    ['Blocked and failed Tasks', tasks.filter(task => ['blocked', 'failed'].includes(task.state)).map(task => taskLink(task, task.state))],
-    ['Running work', tasks.filter(task => ['running', 'pausing', 'cancelling'].includes(task.state)).map(task => taskLink(task, task.state))],
-    ['Recent execution receipts', attempts.slice(0, 12).filter(attempt => taskIndex.has(attempt.task_id))
-      .map(attempt => ({ ...taskLink(taskIndex.get(attempt.task_id), attempt.state), id: attempt.id }))],
-    ['Open pull requests', (github?.pulls?.items ?? []).filter(item => item.state === 'open').slice(0, 12)
-      .map(item => ({ id: activityId('pulls', item), label: item.title, state: item.state, href: '#merge?pr=' + activityId('pulls', item) })).filter(item => item.id)],
-    ['Failed CI runs', (github?.ci?.items ?? []).filter(item => item.conclusion === 'failure').slice(0, 12)
-      .map(item => ({ id: activityId('runs', item), label: item.title ?? item.workflow, state: item.conclusion, href: activityHref('runs', activityId('runs', item)) })).filter(item => item.id)],
-    ['Integration attention', runs.filter(run => ['blocked', 'checking', 'repairing', 'merge_ready'].includes(run.state))
+    ['attention', 'Owner review', entries.filter(task => task.state === 'verifying')],
+    ['attention', 'Waiting on prerequisites', entries.filter(task => !['archived', 'cancelled', 'completed'].includes(task.state) &&
+      (task.blockers.length > 0 || (task.projectGate && ['admitted', 'blocked', 'queued', 'ready', 'scheduled'].includes(task.state)))).map(task => ({
+      ...task, detail: issue(task),
+    }))],
+    ['attention', 'Blocked and failed Tasks', entries.filter(task => ['blocked', 'failed'].includes(task.state)).map(task => ({ ...task, detail: issue(task) }))],
+    ['attention', 'Failed attempts', recent(attempts.filter(attempt => attempt.state === 'failed' && taskIndex.has(attempt.task_id))
+      .map(attempt => ({ id: attempt.id, label: taskIndex.get(attempt.task_id).title, href: taskHref(attempt.task_id), state: attempt.state,
+        detail: 'Attempt ' + attempt.attempt_number, at: attempt.finished_at ?? attempt.started_at })))],
+    ['attention', 'Pull requests awaiting review', recent(openPulls.filter(item => !item.draft && item.requested_review_count > 0)
+      .map(item => ({ ...pullRow(item), state: 'review requested' })))],
+    ['attention', 'Failed or interrupted CI', recent((github?.ci?.items ?? []).filter(item => dispositions.has(item.conclusion) && activityId('runs', item))
+      .map(item => ({ id: activityId('runs', item), label: item.title ?? item.workflow, state: item.conclusion,
+        href: activityHref('runs', activityId('runs', item)), at: item.updated_at })))],
+    ['attention', 'Integration attention', runs.filter(run => ['blocked', 'checking', 'repairing', 'merge_ready'].includes(run.state))
       .map(run => ({ id: run.id, label: run.pr_number ? 'Pull request #' + run.pr_number : 'Task candidate ' + run.head_sha.slice(0, 10),
         state: run.state, href: '#merge?run=' + run.id + (run.pr_number ? '&pr=' + run.pr_number : '') }))],
-    ['Connections', [{ id: 'worker', label: dispatch.label, href: '#settings/workers' },
-      ...(github?.main?.status !== 'available' ? [{ id: 'github', label: github?.main?.reason ?? 'GitHub main is unverified', href: '#settings/github' }] : [])]],
+    ['attention', 'Connections', connections],
+    ['recent', 'Running work', entries.filter(task => ['running', 'pausing', 'cancelling'].includes(task.state))],
+    ['recent', 'Recently completed', recent(entries.filter(task => task.accepted && ['completed', 'accepted', 'archived'].includes(task.state)))],
+    ['recent', 'Project changes', activity.events.map(event => ({
+      id: event.id, label: event.project.name, href: '#projects/' + event.project.id, state: event.status,
+      detail: label(event.kind) + (event.milestone?.name ? ' · ' + event.milestone.name : ''), at: event.occurred_at, task: event.task_id,
+    }))],
+    ['recent', 'Open pull requests', recent(openPulls.map(pullRow))],
   ];
-  return <div className="attention-grid">{sections.map(([title, items]) => <Panel title={title} key={title}>
-    {items.length ? <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>
-      <a href={item.href}>{item.label}</a>{item.state && <Status value={item.state}/>}
-    </motion.li>)}</ul> : <p className="low">No matching records in the current feed.</p>}
-  </Panel>)}</div>;
+
+  return <>
+    <div className="project-actions" role="group" aria-label="Activity view">
+      {[[ 'all', 'All activity' ], [ 'attention', 'Needs attention' ], [ 'recent', 'Recent work' ]].map(([id, title]) =>
+        <button key={id} type="button" className="quiet-button" aria-pressed={filter === id} onClick={() => setFilter(id)}>{title}</button>)}
+      {settings?.application && <button type="button" className="text-button" onClick={activity.refresh}>Refresh Project activity</button>}
+    </div>
+    <div className="attention-grid">{sections.filter(([group]) => filter === 'all' || group === filter).map(([, title, items]) => <Panel title={title} key={title}>
+      {title === 'Project changes' && activity.stale && <p role="status">Project activity could not refresh.{activity.events.length ? ' Showing the last read.' : ''}</p>}
+      {items.length ? <ul className="attention-items">{items.map(item => <motion.li layout={reduced ? false : 'position'} key={item.id}>
+        <div><a href={item.href}>{item.label}</a>
+          {item.detail && <small>{item.detail}</small>}
+          {time(item.at) && <time dateTime={item.at}>{time(item.at)}</time>}
+          {item.project && <small><a href={'#projects/' + item.project}>Open Project</a></small>}
+          {item.task && <small><a href={taskHref(item.task)}>Open Task</a></small>}
+        </div>
+        {item.state && <Status value={item.state}/>}
+      </motion.li>)}</ul> : <p className="low">{title === 'Project changes' && activity.loading && settings?.application
+        ? 'Loading Project changes…' : 'No matching records in the current feed.'}</p>}
+    </Panel>)}</div>
+  </>;
 }

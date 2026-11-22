@@ -575,6 +575,8 @@ a.github-activity-row:focus-visible{outline:2px solid var(--accent);outline-offs
 .attention-items { list-style: none; margin: 0; padding: 0; }
 .attention-items li { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; padding-block: .6rem; border-top: 1px solid rgb(255 255 255 / 8%); }
 .attention-items a { overflow-wrap: anywhere; }
+.attention-items :is(small,time) { display: block; margin-top: .28rem; color: var(--muted); font-size: .76rem; }
+[aria-label="Activity view"] [aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 .project-dependency-graph { display: grid; gap: .75rem; }
 .project-dependency-graph > label { display: grid; gap: .35rem; max-width: 28rem; }

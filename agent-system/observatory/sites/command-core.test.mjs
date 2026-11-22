@@ -439,3 +439,29 @@ test('Merge source discovery reads scoped Task and Project associations before a
   assert.equal((await call(0, path, undefined, 'unassigned')).status, 403);
   assert.equal((await call(0, '/api/integrations/v1?pr_number=81junk')).status, 400);
 });
+
+test('Activity reads recent Project events from the current owner and verification namespace', async t => {
+  const { call } = setup(t);
+  const verification = { 'x-observatory-verification': crypto.randomUUID() };
+  const id = crypto.randomUUID();
+  const operations = [
+    { op: 'create', id, fields: { name: 'Activity project', objective: 'Verify scoped events' } },
+    { op: 'update', id, expected_version: 1, fields: { name: 'Updated activity project' } },
+    { op: 'milestone', id, milestone_id: crypto.randomUUID(), name: 'Delivery check', status: 'planned', acceptance: 'Check evidence' },
+  ];
+  for (const operation of operations) {
+    assert.ok((await call(0, '/api/projects', operation, undefined, verification)).status < 300);
+  }
+  const live = await call(0, '/api/activity');
+  assert.equal(live.status, 200);
+  assert.deepEqual(live.body.project_events, []);
+  assert.deepEqual((await call(1, '/api/activity', undefined, undefined, verification)).body.project_events, []);
+  const scoped = await call(0, '/api/activity', undefined, undefined, verification);
+  assert.equal(scoped.status, 200);
+  assert.deepEqual(scoped.body.project_events.map(item => item.kind).sort(), ['milestone_changed', 'project_changed', 'project_created']);
+  assert.ok(scoped.body.project_events.every(item => item.project.id === id && item.project.name === 'Updated activity project'));
+  assert.ok(scoped.body.project_events.some(item => item.milestone?.name === 'Delivery check'));
+  assert.equal((await call(0, '/api/activity', undefined, 'unassigned', verification)).status, 403);
+  assert.equal((await call(0, '/api/activity', undefined, undefined, { 'x-observatory-verification': 'invalid' })).status, 400);
+  assert.equal((await call(0, '/api/activity', {})).status, 405);
+});
