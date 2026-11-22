@@ -219,17 +219,25 @@ test('Project progress reports actual scoped execution, milestone gates and owne
   assert.equal((await task(0, { op: 'command', task_id, expected_version: registration.body.version,
     operation_id: crypto.randomUUID(), action: { type: 'admit', executor: 'codex' } })).status, 200);
   const integrationId = crypto.randomUUID();
-  one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, 42, 'merged', 1, ?, '{}', ?)")
-    .run('synthetic-owner', integrationId, task_id, crypto.randomUUID(), 'a'.repeat(40),
-      new Date().toISOString(), JSON.stringify({ operation_id: crypto.randomUUID() }));
+  const head = 'a'.repeat(40);
+  const checks = [{ context: 'test', app: 9, source: 'ruleset', state: 'passed' }];
+  const insertRun = one.sqlite.prepare("INSERT INTO integration_runs VALUES (?, 'live', ?, ?, ?, ?, ?, 'merged', 1, ?, ?, ?)");
+  for (const [id, pr, observed_head] of [[integrationId, 42, head], [crypto.randomUUID(), 43, 'b'.repeat(40)]]) {
+    insertRun.run('synthetic-owner', id, task_id, crypto.randomUUID(), head, pr,
+      new Date().toISOString(), JSON.stringify({ evidence: { observed_head, policy_observed: true, checks } }),
+      JSON.stringify({ operation_id: crypto.randomUUID() }));
+  }
   const read = async () => (await call(0, '/api/projects/' + id)).body;
   const detail = await read();
   assert.equal(detail.progress.tasks.blocked, 1);
   assert.equal(detail.active_workers, 0);
   assert.equal(detail.progress.tasks.completed, 0);
   assert.equal(detail.progress.owner_review, 'pending');
-  assert.deepEqual(detail.progress.integrations, { tracked: 1, merged: 1, deployed: 0 });
+  assert.deepEqual(detail.progress.integrations, { tracked: 2, merged: 2, deployed: 0 });
   assert.equal(detail.integrations[0].repository, fixture[0].repository);
+  assert.deepEqual(detail.integrations.find(run => run.id === integrationId).required_checks, checks);
+  assert.deepEqual(detail.integrations.find(run => run.id !== integrationId).required_checks, []);
+  assert.ok(detail.history.some(event => event.kind === 'project_owner_review_changed' && event.name === 'Owner review requested'));
   assert.deepEqual(detail.tasks[0].blockers, [{ type: 'milestone', id: milestone_id, state: 'planned' }]);
   const portfolio = (await call(0, '/api/projects')).body;
   assert.deepEqual(portfolio.projects.find(item => item.id === id).progress, detail.progress);

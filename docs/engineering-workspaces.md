@@ -18,4 +18,6 @@ Use **Move earlier** or **Move later** to change milestone order. In **Dependenc
 
 A milestone is an explicit acceptance gate. Link Tasks to a milestone to show related work, or set another Project's milestone as a prerequisite where the scoped engine permits it. The engine checks dependency, milestone, and Project conditions before dispatch. The completion counts summarize work. Review and accept milestones separately after checking the stated evidence.
 
-Project progress and telemetry draw from observed Tasks, attempts, and integration records. Missing token, cost, and CI values show as unavailable. The Project record shows owner review and technical progress separately. Open a linked Task or integration attempt to inspect its specific evidence and report.
+Project progress and telemetry draw from observed Tasks, attempts, and integration records. Missing token, cost, and CI values show as unavailable.
+
+Open **Acceptance** to compare completed Task candidates, the Project's verification marker, recorded exact-revision PR checks, landed integrations, deployment records, and the owner decision. Expand the candidate or check lists to open the canonical Task or integration record. The counts describe evidence linked to the Project. Record the owner's decision separately with **Save owner review**. Changes appear in Project History.

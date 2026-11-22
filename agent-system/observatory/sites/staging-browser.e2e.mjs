@@ -78,6 +78,20 @@ test('Projects workspace performs live project and Task mutations through the sh
   await page.getByRole('heading', { name: 'Synthetic browser project', exact: true }).waitFor();
   const projectHash = new URL(page.url()).hash;
   const sectionNav = page.getByRole('navigation', { name: 'Jump to Project section' });
+  await sectionNav.getByRole('button', { name: 'Acceptance', exact: true }).click();
+  const acceptanceSection = page.locator('#project-acceptance');
+  await acceptanceSection.getByRole('heading', { name: 'Acceptance', exact: true }).waitFor();
+  for (const label of ['Implementation completed', 'Technical verification', 'PR checks', 'PR merged', 'Functionality delivered', 'Owner review']) {
+    await acceptanceSection.getByText(label, { exact: true }).waitFor();
+  }
+  await acceptanceSection.getByRole('combobox', { name: 'Review decision' }).selectOption('pending');
+  await acceptanceSection.getByRole('button', { name: 'Save owner review' }).click();
+  const pendingReview = acceptanceSection.locator('strong').getByText('Awaiting owner review', { exact: true });
+  await pendingReview.waitFor();
+  assert.equal(await page.getByText('Project accepted', { exact: true }).count(), 0);
+  await page.reload();
+  await pendingReview.waitFor();
+  await page.locator('#project-history').getByText('Owner review requested', { exact: true }).waitFor();
   const historyHeading = page.locator('#project-history h2');
   assert.equal(await historyHeading.count(), 1, 'Below-fold content mounts before scrolling');
   const projectRequests = [];

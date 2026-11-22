@@ -14,6 +14,7 @@ import { taskHref } from './task-workspace.mjs';
 const stages = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
 const milestoneStages = ['planned', 'verified', 'integrated', 'accepted'];
+const reviewDecisions = { '': 'No decision recorded', pending: 'Awaiting owner review', accepted: 'Accepted by owner', declined: 'Declined by owner' };
 const number = value => value === null || value === undefined ? 'Unavailable' : value.toLocaleString();
 const object = form => Object.fromEntries(new FormData(form));
 
@@ -83,7 +84,6 @@ function ProjectForm({ project = {}, onSave, busy, defaultPriority }) {
       <label>Priority <select name="priority" defaultValue={project.priority ?? defaultPriority ?? 'normal'}><Options values={priorities}/></select></label>
       <label>Participants <input name="participants" defaultValue={project.participants?.join(', ')} placeholder="Comma-separated names"/></label>
       <label>Technical completion <select name="technical_state" defaultValue={project.technical_state ?? ''}><Options values={['', 'in_progress', 'verified', 'integrated', 'delivered']}/></select></label>
-      <label>Owner review <select name="owner_review" defaultValue={project.owner_review ?? ''}><Options values={['', 'pending', 'accepted', 'declined']}/></select></label>
     </div>
     <button className="primary-button" disabled={busy}>{project.id ? 'Save project' : 'Create project'}</button>
   </form>;
@@ -101,6 +101,49 @@ function MilestoneForm({ milestone, suggestedName, onSave, busy }) {
     <label>Milestone state <select name="status" defaultValue={milestone?.status ?? 'planned'}><Options values={milestoneStages}/></select></label>
     <button className="quiet-button" disabled={busy}>{milestone ? 'Save milestone' : 'Add milestone'}</button>
   </form>;
+}
+
+function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSave, Panel, DetailLine }) {
+  const completed = tasks.filter(task => task.candidate_revision);
+  const decisions = Object.entries(reviewDecisions);
+  const currentReview = project.owner_review ?? '';
+  if (!Object.hasOwn(reviewDecisions, currentReview)) decisions.push([currentReview, currentReview]);
+  return <Panel id="project-acceptance" title="Acceptance">
+    <h3>Acceptance requirements</h3>
+    <p className="objective">{project.acceptance || 'No requirements recorded.'}</p>
+    <DetailLine name="Implementation completed" value={completed.length + ' of ' + tasks.length + ' Tasks with a completed candidate'}/>
+    <DetailLine name="Technical verification" value={project.technical_state === 'verified' ? 'Project verification recorded' : 'No current Project verification recorded'}/>
+    <DetailLine name="PR checks" value={integrations.some(run => run.required_checks?.length) ? 'Recorded checks by candidate below' : 'No exact-revision check evidence recorded'}/>
+    <DetailLine name="PR merged" value={progress.integrations.merged + ' of ' + progress.integrations.tracked + ' recorded integrations'}/>
+    <DetailLine name="Functionality delivered" value={progress.integrations.deployed + ' recorded deployments'}/>
+    <DetailLine name="Owner review" value={Object.hasOwn(reviewDecisions, currentReview) ? reviewDecisions[currentReview] : currentReview}/>
+    {completed.length > 0 && <details>
+      <summary>Completed Task candidates</summary>
+      <ul className="project-list">{completed.map(task => <li key={task.id}>
+        <a href={taskHref(task.id)}>{task.title}</a><code title={task.candidate_revision}>{task.candidate_revision.slice(0, 12)}</code>
+      </li>)}</ul>
+    </details>}
+    {integrations.some(run => run.required_checks?.length) && <details>
+      <summary>Recorded required checks by candidate</summary>
+      <ul className="project-list">{integrations.filter(run => run.required_checks?.length).map(run => <li key={run.id}>
+        <a href={'#merge?pr=' + run.pr_number + '&run=' + run.id}>PR #{run.pr_number}</a>
+        <code title={run.head_sha}>{run.head_sha.slice(0, 12)}</code>
+        {run.required_checks.map(check => <small key={JSON.stringify([check.context, check.app, check.source])}>
+          {check.context} · {check.state}
+        </small>)}
+      </li>)}</ul>
+    </details>}
+    <form className="form" key={project.version} onSubmit={event => {
+      event.preventDefault();
+      const { owner_review } = object(event.currentTarget);
+      if (owner_review !== currentReview) onSave(owner_review);
+    }}>
+      <label>Review decision <select name="owner_review" defaultValue={currentReview}>
+        {decisions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>
+      <div className="form-actions"><button className="quiet-button" disabled={busy}>Save owner review</button></div>
+    </form>
+  </Panel>;
 }
 
 const defaultFilters = { view: 'all', query: '', state: '', sort: 'manual', group: 'none' };
@@ -287,7 +330,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
       <nav className="task-section-nav" aria-label="Jump to Project section">
         {[
           ['overview', 'Project overview'], ['tasks', 'Tasks'], ['milestones', 'Milestones'], ['dependencies', 'Dependencies'],
-          ['telemetry', 'Telemetry'], ['verification', 'Verification'], ['evidence', 'Evidence'], ['history', 'History'],
+          ['telemetry', 'Telemetry'], ['verification', 'Verification'], ['acceptance', 'Acceptance'], ['evidence', 'Evidence'], ['history', 'History'],
         ].map(([id, label]) => <button type="button" className="quiet-button" key={id} onClick={() => onJump('project-' + id)}>{label}</button>)}
       </nav>
       {project.owner_review === 'accepted' && <div className="task-completion" role="status">
@@ -326,13 +369,6 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
               </li>)}</ul>
               <button type="button" className="text-button" onClick={() => onJump('project-dependencies')}>Inspect dependency evidence</button>
             </div>}
-          </Panel>
-          <Panel title="Acceptance requirements" kicker="REQUIRED OUTCOMES">
-            <div className="objective">{project.acceptance || 'Unspecified'}</div>
-            <DetailLine name="Recorded technical state" value={project.technical_state?.replaceAll('_', ' ') || 'Unspecified'}/>
-            <DetailLine name="Landed integrations" value={progress.integrations.merged + ' of ' + progress.integrations.tracked + ' tracked'}/>
-            <DetailLine name="Delivery records" value={progress.integrations.deployed}/>
-            <DetailLine name="Owner review" value={project.owner_review || 'Unspecified'}/>
           </Panel>
         </div>
         <StickySectionAside className="detail-right">
@@ -464,6 +500,10 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         </li>)}</ul>
         <p>Open a linked Task to inspect its evidence or export its report.</p>
       </Panel>
+      <ProjectAcceptance project={project} tasks={tasks} integrations={integrations} progress={progress} busy={busy}
+        Panel={Panel} DetailLine={DetailLine} onSave={owner_review => submit({
+          op: 'update', expected_version: project.version, fields: { owner_review },
+        })}/>
       <Panel id="project-telemetry" title="Execution and telemetry">
         <p>{progress.tasks.completed} of {progress.tasks.total} Tasks complete · {progress.tasks.active} running · {progress.tasks.blocked} blocked · {progress.tasks.verifying} verifying</p>
         <dl className="project-metrics">

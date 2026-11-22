@@ -9,7 +9,7 @@ export const preferenceFields = {
     choices: { newest: 'Newest first', oldest: 'Oldest first', priority: 'Highest priority', title: 'Title' } },
   project_section: { category: 'projects', label: 'Open Project at', initial: 'overview',
     choices: { overview: 'Overview', tasks: 'Tasks', milestones: 'Milestones', dependencies: 'Dependencies',
-      verification: 'GitHub and verification', telemetry: 'Telemetry', evidence: 'Artifacts', history: 'History' } },
+      verification: 'GitHub and verification', telemetry: 'Telemetry', acceptance: 'Acceptance', evidence: 'Artifacts', history: 'History' } },
   project_layout: { category: 'projects', label: 'Project layout', initial: 'grid',
     choices: { grid: 'Card grid', list: 'List' } },
   project_sort: { category: 'projects', label: 'Default Project sort', initial: 'manual',

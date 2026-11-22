@@ -9,6 +9,9 @@ const projectIcons = new Set(Object.values(projectIconGroups).flat());
 const statuses = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
 const milestones = ['planned', 'verified', 'integrated', 'accepted'];
+const reviewHistoryLabels = {
+  pending: 'Owner review requested', accepted: 'Owner accepted Project', declined: 'Owner declined Project', '': 'Owner review cleared',
+};
 const metadataFields = {
   name: 150, description: 4000, objective: 16000, scope: 16000, acceptance: 16000,
   start_date: 10, target_date: 10, technical_state: 50, owner_review: 50,
@@ -77,7 +80,14 @@ export async function projectOperation({ db, owner, namespace, application, body
       readTaskRows({ db, owner, namespace, now, reconcileExpired: false }),
       scope('SELECT id, project_id, version, name, acceptance, status, updated_at FROM milestones WHERE owner_id = ? AND namespace = ? ORDER BY updated_at, id').all(),
       scope('SELECT g.task_id, m.id AS milestone_id, m.project_id, m.name, m.status FROM project_task_gates g JOIN milestones m ON m.owner_id = g.owner_id AND m.namespace = g.namespace AND m.id = g.milestone_id WHERE g.owner_id = ? AND g.namespace = ?').all(),
-      scope('SELECT r.id, r.task_id, r.pr_number, r.head_sha, r.state, t.project_id FROM integration_runs r JOIN proposals t ON t.owner_id = r.owner_id AND t.namespace = r.namespace AND t.task_id = r.task_id WHERE r.owner_id = ? AND r.namespace = ? AND t.project_id IS NOT NULL').all(),
+      scope(`SELECT r.id, r.task_id, r.pr_number, r.head_sha, r.state, t.project_id,
+        CASE WHEN t.project_id = ?3 AND json_extract(r.record, '$.evidence.observed_head') = r.head_sha
+          AND json_extract(r.record, '$.evidence.policy_observed') = 1
+          AND json_type(r.record, '$.evidence.checks') = 'array'
+          THEN json_extract(r.record, '$.evidence.checks') END AS checks
+        FROM integration_runs r JOIN proposals t ON t.owner_id = r.owner_id AND t.namespace = r.namespace AND t.task_id = r.task_id
+        WHERE r.owner_id = ?1 AND r.namespace = ?2 AND t.project_id IS NOT NULL ORDER BY r.updated_at DESC, r.id`,
+      body.op === 'get' ? body.id : null).all(),
     ]);
     const rows = new Map(taskRows.map(row => [row.task_id, row]));
     return {
@@ -109,12 +119,17 @@ export async function projectOperation({ db, owner, namespace, application, body
           }
           return { id: row.task_id, title: task.title, version: row.version, priority: row.priority, branch: engine?.attempts.at(-1)?.branch ?? null,
             state: blockers.length ? 'blocked' : dispatch.state, blockers,
+            candidate_revision: ['verifying', 'succeeded'].includes(attempt?.state) ? attempt.candidate_revision ?? null : null,
             owner_acceptance: task.owner_acceptance, attempts: engine?.attempts.length ?? 0 };
         });
         const projectMilestones = orderBySavedIds(milestones.results.filter(item => item.project_id === project.id),
           project.milestone_order ?? []);
         const projectIntegrations = integrations.results.filter(item => item.project_id === project.id);
-        return { linked, tasks, active_workers: activeWorkers.size, milestones: projectMilestones, dependencies, integrations: projectIntegrations.map(({ project_id, ...integration }) => ({ ...integration, repository: application.repository })),
+        return { linked, tasks, active_workers: activeWorkers.size, milestones: projectMilestones, dependencies,
+          integrations: projectIntegrations.map(({ project_id, checks, ...integration }) => ({
+            ...integration, repository: application.repository,
+            required_checks: checks ? JSON.parse(checks) : [],
+          })),
           progress: projectProgress(project, tasks, projectMilestones, projectIntegrations) };
       },
     };
@@ -176,7 +191,7 @@ export async function projectOperation({ db, owner, namespace, application, body
   if (body.op === 'get') {
     const [view, history, milestoneHistory, relationshipHistory, associations, incremental, checkpoint] = await Promise.all([
       readProgress(),
-      scope("SELECT 'project_changed' AS kind, version, status, occurred_at FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY version", body.id).all(),
+      scope("SELECT 'project_changed' AS kind, version, status, occurred_at, json_extract(metadata, '$.owner_review') AS owner_review FROM project_events WHERE owner_id = ? AND namespace = ? AND project_id = ? ORDER BY version", body.id).all(),
       scope("SELECT 'milestone_changed' AS kind, e.version, e.status, e.occurred_at, e.milestone_id, m.name FROM project_milestone_events e JOIN milestones m ON m.owner_id = e.owner_id AND m.namespace = e.namespace AND m.id = e.milestone_id WHERE e.owner_id = ? AND e.namespace = ? AND m.project_id = ?", body.id).all(),
       scope('SELECT event_id, task_id, milestone_id, kind, occurred_at FROM project_relationship_events WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
       scope('SELECT task_id, milestone_id FROM project_task_milestones WHERE owner_id = ? AND namespace = ? AND project_id = ?', body.id).all(),
@@ -213,8 +228,16 @@ export async function projectOperation({ db, owner, namespace, application, body
     Object.assign(telemetry, { measured_attempts: measured.byAttempt.filter(attempt => attempt.observed.totalTokens !== null).length,
       input_tokens: measured.observed.inputTokens, cached_input_tokens: measured.observed.cachedInputTokens,
       output_tokens: measured.observed.outputTokens });
+    let previousReview = '';
+    const projectHistory = history.results.flatMap(({ owner_review, ...event }) => {
+      const review = owner_review ?? '';
+      const changed = review !== previousReview;
+      previousReview = review;
+      return changed ? [event, { kind: 'project_owner_review_changed', version: event.version, occurred_at: event.occurred_at,
+        name: Object.hasOwn(reviewHistoryLabels, review) ? reviewHistoryLabels[review] : 'Owner review updated' }] : [event];
+    });
     return success({ project, ...summary, artifacts, github, task_prerequisites: linked.flatMap(view.prerequisitesFor),
-      history: [...history.results, ...milestoneHistory.results, ...relationshipHistory.results].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)), task_milestones: associations.results, telemetry });
+      history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)), task_milestones: associations.results, telemetry });
   }
   if (body.op === 'register_task') {
     if (current.status === 'archived') return fail(409, 'Project is archived');
