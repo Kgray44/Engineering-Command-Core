@@ -2,6 +2,7 @@ import { taskTokenRows } from './task-engine-client.mjs';
 import { traceTimeline } from './trace-timeline.mjs';
 
 const idPattern = /^[A-Za-z0-9_.:-]{1,160}$/;
+const evidenceSuffix = '?section=evidence';
 const priorities = ['urgent', 'high', 'normal', 'low'];
 export const workLabels={
   active:'Executing',waiting:'Queued or paused',review:'Awaiting review',issues:'At risk',accepted:'Accepted',
@@ -36,12 +37,17 @@ export function taskHref(id,work) {
   return work&&Object.hasOwn(workLabels,work)?'#tasks?work='+work:'#tasks';
 }
 
+export function taskEvidenceHref(id) {
+  return taskHref(id)+evidenceSuffix;
+}
+
 export function parseTaskHref(hash) {
   if (hash === '#tasks') return { id: null };
   const work=/^#tasks\?work=([a-zA-Z]+)$/.exec(hash)?.[1];
   if(work&&Object.hasOwn(workLabels,work))return {id:null,work};
-  const id = hash.startsWith('#tasks/') && hash.slice(7);
-  return id && idPattern.test(id) ? { id } : null;
+  const evidence = hash.endsWith(evidenceSuffix);
+  const id = hash.startsWith('#tasks/') && hash.slice(7, evidence ? -evidenceSuffix.length : undefined);
+  return id && idPattern.test(id) ? { id, ...(evidence ? { section: 'evidence' } : {}) } : null;
 }
 
 export function organizeTasks(tasks, filters, controls = {}, workByTask) {

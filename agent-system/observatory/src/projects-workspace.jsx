@@ -9,7 +9,7 @@ import { motion } from 'motion/react';
 import { Activity, ArrowLeft, Boxes, Filter, GitBranch, Plus, Search, ShieldCheck } from 'lucide-react';
 import { useCardMotion } from './card-motion.jsx';
 import { StickySectionAside } from './sticky-section-aside.jsx';
-import { taskHref } from './task-workspace.mjs';
+import { taskEvidenceHref, taskHref } from './task-workspace.mjs';
 
 const stages = ['planned', 'active', 'paused', 'archived'];
 const priorities = ['low', 'normal', 'high', 'urgent'];
@@ -144,6 +144,30 @@ function ProjectAcceptance({ project, tasks, integrations, progress, busy, onSav
       <div className="form-actions"><button className="quiet-button" disabled={busy}>Save owner review</button></div>
     </form>
   </Panel>;
+}
+
+const artifactLinkLabels = {
+  pull_request: 'Open pull request on GitHub', ci_run: 'Open CI run on GitHub',
+  artifact: 'Open artifact', verification: 'Open verification evidence',
+};
+
+function ProjectArtifacts({ tasks, artifacts }) {
+  const byTask = Map.groupBy(artifacts, item => item.task_id);
+  if (!tasks.length) return <p>No linked Tasks or reports.</p>;
+  return <ul className="project-list">{tasks.map(task => <li key={task.id}>
+    <strong>{task.title}</strong>
+    <a className="text-button" href={taskHref(task.id)} aria-label={'Open Task report for ' + task.title}>Task report</a>
+    <a className="text-button" href={taskEvidenceHref(task.id)} aria-label={'Open evidence ledger for ' + task.title}>Evidence ledger</a>
+    {(byTask.get(task.id) ?? []).map(item => <div className="project-actions" key={JSON.stringify(item)}>
+      {item.href ? <a href={item.href} className="text-button" target="_blank" rel="noreferrer">{artifactLinkLabels[item.kind]}</a> :
+        <small>Reference has no direct web link</small>}
+      {item.revision && <code title={item.revision}>{item.revision.slice(0, 12)}</code>}
+      {item.evidence?.source === 'owner_review' && <small>Owner review evidence</small>}
+      {item.evidence?.source === 'reported' && <small>
+        {item.evidence.synthetic ? 'Synthetic · ' : ''}{item.evidence.kind} · reported {item.evidence.result.replaceAll('_', ' ')}
+      </small>}
+    </div>)}
+  </li>)}</ul>;
 }
 
 const defaultFilters = { view: 'all', query: '', state: '', sort: 'manual', group: 'none' };
@@ -303,7 +327,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
     }
   };
   if (demo) return <p className="notice">Use Live mode to open your Projects.</p>;
-  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifacts = [], github = [], progress, active_workers, integrations = [] } = data ?? {};
+  const { application, projects = [], project, tasks = [], milestones = [], telemetry, history = [], dependencies = [], task_prerequisites = [], task_milestones = [], artifact_sources = [], github = [], progress, active_workers, integrations = [] } = data ?? {};
   const moveTask = tasks.find(item => item.id === moveTaskId);
   const controlTask = tasks.find(item => item.id === controlTaskId);
   const nextTask = tasks.find(item => item.state === 'ready');
@@ -497,10 +521,7 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
         {!github.length && <p>No linked repository evidence.</p>}
       </Panel>
       <Panel id="project-evidence" title="Artifacts and reports">
-        <ul className="project-list">{artifacts.map((item, index) => <li key={item.task_id + index}>
-          <a className="text-button" href={taskHref(item.task_id)}>{item.name ?? item.kind ?? 'Task artifact'}</a>
-        </li>)}</ul>
-        <p>Open a linked Task to inspect its evidence or export its report.</p>
+        <ProjectArtifacts tasks={tasks} artifacts={artifact_sources}/>
       </Panel>
       <ProjectAcceptance project={project} tasks={tasks} integrations={integrations} progress={progress} busy={busy}
         Panel={Panel} DetailLine={DetailLine} onSave={owner_review => submit({

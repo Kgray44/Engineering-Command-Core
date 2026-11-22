@@ -251,7 +251,7 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     requested_reviewers: [{ login: 'synthetic-reviewer' }], requested_teams: [],
     html_url: 'https://github.com/' + repository + '/pull/7', created_at: '2026-11-20T00:00:00Z',
   };
-  const { stage, page } = await browserStage(t, {
+  const { stage, page, part } = await browserStage(t, {
     applicationId: 'voyagewright', applicationRepository: repository, githubToken: 'synthetic-read-token',
     browser: { viewport: { width: 390, height: 844 }, reducedMotion: 'reduce', isMobile: true, hasTouch: true },
     fetcher: async input => {
@@ -273,9 +273,42 @@ test('Voyagewright mobile Settings and Merge discovery use the shared scoped API
     fields: { title: 'Release review', objective: 'Review the exact source', primary: 'backend', profile_id: 'backend', criteria: ['Verify the diff'] } });
   assert.equal(linkedTask.status, 201);
   const taskId = linkedTask.body.task.id;
-  assert.equal((await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
+  let referenceReceipt = await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
     expected_version: linkedTask.body.version, operation_id: crypto.randomUUID(),
-    action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } })).status, 200);
+    action: { type: 'associate', reference: { kind: 'pull_request', uri: pull.html_url, revision: 'c'.repeat(40) } } });
+  assert.equal(referenceReceipt.status, 200);
+  const screenshotUrl = 'https://example.invalid/project/verification.png';
+  const runUrl = 'https://github.com/' + repository + '/actions/runs/87';
+  for (const [kind, uri] of [['artifact', screenshotUrl], ['ci_run', runUrl]]) {
+    referenceReceipt = await stage.run('/api/task-engine/v1', { op: 'command', task_id: taskId,
+      expected_version: referenceReceipt.body.version, operation_id: crypto.randomUUID(),
+      action: { type: 'associate', reference: { kind, uri, revision: head } } });
+    assert.equal(referenceReceipt.status, 200);
+  }
+  part.sqlite.prepare("UPDATE proposals SET record = json_set(record, '$.artifacts', json(?)) WHERE task_id = ?")
+    .run(JSON.stringify([
+      { kind: 'artifact', uri: 'private-artifact:verification' },
+      { kind: 'artifact', uri: 'https://example.invalid/signed?signature=fixture' },
+      { kind: 'pull_request', uri: 'https://github.com/synthetic/peer/pull/7' },
+    ]), taskId);
+  await page.goto(stage.origin + '/#projects/' + projectId);
+  await page.getByRole('navigation', { name: 'Jump to Project section' }).getByRole('button', { name: 'Evidence', exact: true }).click();
+  const artifacts = page.locator('#project-evidence');
+  assert.equal(await artifacts.getByRole('link', { name: 'Open pull request on GitHub' }).getAttribute('href'), pull.html_url);
+  assert.equal(await artifacts.getByRole('link', { name: 'Open CI run on GitHub' }).getAttribute('href'), runUrl);
+  assert.equal(await artifacts.getByRole('link', { name: 'Open artifact' }).getAttribute('href'), screenshotUrl);
+  assert.equal(await artifacts.getByRole('link', { name: 'Open Task report for Release review' }).getAttribute('href'), '#tasks/' + taskId);
+  assert.equal(await artifacts.getByRole('link', { name: 'Open evidence ledger for Release review' }).getAttribute('href'), '#tasks/' + taskId + '?section=evidence');
+  assert.doesNotMatch(await artifacts.innerText(), /private-artifact:verification/);
+  assert.equal(await artifacts.locator('a[href*="signature="], a[href*="synthetic/peer"]').count(), 0);
+  await artifacts.getByRole('link', { name: 'Open evidence ledger for Release review' }).click();
+  await page.waitForFunction(() => document.activeElement === document.querySelector('#task-evidence h2'));
+  await page.goto(stage.origin + '/#projects/' + projectId);
+  await artifacts.getByRole('link', { name: 'Open Task report for Release review' }).click();
+  const pdf = page.getByRole('button', { name: 'Download PDF', exact: true });
+  const [download] = await Promise.all([page.waitForEvent('download'), pdf.click()]);
+  assert.equal(download.suggestedFilename(), taskId + '-report.pdf');
+  assert.equal((await readFile(await download.path())).subarray(0, 5).toString(), '%PDF-');
   const waiting = await stage.run('/api/projects', { op: 'register_task', id: projectId, operation_id: crypto.randomUUID(),
     fields: { title: 'Release follow-up', objective: 'Wait for source review', primary: 'backend', profile_id: 'backend',
       dependencies: [taskId], criteria: ['Wait for prerequisite acceptance'] } });

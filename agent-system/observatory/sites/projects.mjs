@@ -3,6 +3,7 @@ import { readTaskRows, storedTaskDispatch, storedTaskPrerequisites, taskAttemptR
 import { combinedTelemetry } from './task-telemetry.mjs';
 import { uuid } from './application-config.mjs';
 import { orderBySavedIds, projectAccents, projectIconGroups } from '../src/project-presentation.mjs';
+import { safeActivityUrl } from '../src/task-activity.mjs';
 
 const projectIcons = new Set(Object.values(projectIconGroups).flat());
 
@@ -13,6 +14,21 @@ const reviewHistoryLabels = {
   pending: 'Owner review requested', accepted: 'Owner accepted Project', declined: 'Owner declined Project', '': 'Owner review cleared',
 };
 const executionHistoryLimit = 120;
+const artifactReferenceKinds = new Set(['artifact', 'document', 'url', 'test', 'pull_request', 'ci_run']);
+
+function collectProjectArtifact(artifacts, repository, task_id, reference, evidence) {
+  if (typeof reference?.uri !== 'string' || (!evidence && !artifactReferenceKinds.has(reference.kind))) return;
+  const href = safeActivityUrl(reference.uri);
+  const source = 'https://github.com/' + repository + '/';
+  const route = href?.startsWith(source) ? href.slice(source.length) : '';
+  let kind = evidence || reference.kind === 'test' ? 'verification' : 'artifact';
+  if (/^pull\/\d+(?:[\/#]|$)/.test(route)) kind = 'pull_request';
+  else if (/^actions\/runs\/\d+(?:[\/#]|$)/.test(route)) kind = 'ci_run';
+  else if (['pull_request', 'ci_run'].includes(reference.kind)) return;
+  const revision = /^[0-9a-f]{40}$/i.test(reference.revision ?? '') ? reference.revision : null;
+  artifacts.set(JSON.stringify([task_id, kind, href, revision, evidence ?? null]),
+    { task_id, kind, href, revision, ...(evidence ? { evidence } : {}) });
+}
 const executionHistoryQuery = `
   WITH boundaries AS (
     SELECT task_id, kind, occurred_at,
@@ -242,12 +258,19 @@ export async function projectOperation({ db, owner, namespace, application, body
     const project = serialize(current);
     const { linked, ...summary } = view.forProject(project);
     const projectTasks = [], projectAttempts = [], artifacts = [], github = [];
+    const artifactSources = new Map();
     const telemetry = { attempts: 0, retries: 0, failures: 0, execution_ms: null, costs: null, ci_usage: null };
     for (const row of linked) {
       const task = JSON.parse(row.record);
       const engine = row.engine ? JSON.parse(row.engine) : null;
       projectTasks.push(task);
       artifacts.push(...(task.artifacts ?? []).map(artifact => ({ task_id: row.task_id, ...artifact })));
+      for (const reference of [...(task.artifacts ?? []), ...(engine?.links ?? [])]) {
+        collectProjectArtifact(artifactSources, application.repository, row.task_id, reference);
+      }
+      for (const reference of engine?.evidence ?? []) {
+        collectProjectArtifact(artifactSources, application.repository, row.task_id, reference, { source: 'owner_review' });
+      }
       for (const item of [...(engine?.links ?? []), ...(engine?.evidence ?? [])]) {
         if (typeof item.uri === 'string' && item.uri.startsWith('https://github.com/' + application.repository + '/')) {
           github.push({ task_id: row.task_id, uri: item.uri, kind: item.kind });
@@ -265,6 +288,11 @@ export async function projectOperation({ db, owner, namespace, application, body
     const ids = new Set(projectTasks.map(task => task.id));
     const projected = combinedTelemetry(checkpoint && JSON.parse(checkpoint.payload), incremental.results);
     const events = (projected?.events ?? []).filter(event => ids.has(event.task_id) && event.repository === application.repository);
+    for (const item of projected?.records ?? []) {
+      if (item.record_type !== 'evidence' || !ids.has(item.task_id) || item.repository !== application.repository) continue;
+      collectProjectArtifact(artifactSources, application.repository, item.task_id,
+        { ...item.artifact, revision: item.revision }, { source: 'reported', kind: item.kind, result: item.result, synthetic: Boolean(item.synthetic) });
+    }
     const measured = accountEngineeringTokens({ tasks: projectTasks, attempts: projectAttempts, events, days: [], cutoff: Date.now(), sourceConflicts: 0 });
     Object.assign(telemetry, { measured_attempts: measured.byAttempt.filter(attempt => attempt.observed.totalTokens !== null).length,
       input_tokens: measured.observed.inputTokens, cached_input_tokens: measured.observed.cachedInputTokens,
@@ -277,7 +305,7 @@ export async function projectOperation({ db, owner, namespace, application, body
       return changed ? [event, { kind: 'project_owner_review_changed', version: event.version, occurred_at: event.occurred_at,
         name: Object.hasOwn(reviewHistoryLabels, review) ? reviewHistoryLabels[review] : 'Owner review updated' }] : [event];
     });
-    return success({ project, ...summary, artifacts, github, task_prerequisites: linked.flatMap(view.prerequisitesFor),
+    return success({ project, ...summary, artifacts, artifact_sources: [...artifactSources.values()], github, task_prerequisites: linked.flatMap(view.prerequisitesFor),
       history: [...projectHistory, ...milestoneHistory.results, ...relationshipHistory.results,
         ...executionHistory.results.slice(0, executionHistoryLimit)].sort((a,b) => a.occurred_at.localeCompare(b.occurred_at)),
       execution_history_truncated: executionHistory.results.length > executionHistoryLimit,

@@ -422,6 +422,11 @@ const jumpToSection=id=>{
   panel?.querySelector('h2,h3')?.focus({preventScroll:true});
   panel?.scrollIntoView({block:'start',behavior:reduce?'instant':'smooth'});
 };
+useEffect(()=>{
+  if(taskRoute?.section!=='evidence'||!current?.id)return;
+  const frame=requestAnimationFrame(()=>jumpToSection('task-evidence'));
+  return ()=>cancelAnimationFrame(frame);
+},[taskRoute?.section,current?.id,reduce]);
 const activityGroup=kind=>demo?null:kind==='pulls'?github?.pulls:github?.ci;
 const dispatchObservation=!demo&&watchingTasks&&engine.status==='available'&&
   <div className="notice"><Radio size={16}/><span>{dispatchStatus.label}{Number.isInteger(engine.workerDispatch?.total_slots)&&
