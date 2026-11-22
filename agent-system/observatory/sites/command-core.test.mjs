@@ -200,6 +200,50 @@ test('concurrent claim retries keep one Attempt and archive only affects the own
   assert.equal((await call(1, '/api/projects/' + id)).body.project.status, 'planned');
 });
 
+test('Project usage counts only App Server receipts for the recorded attempt and session', async t => {
+  const { call, task, rpc } = setup(t);
+  const id = crypto.randomUUID();
+  const project = body => call(0, '/api/projects', { id, ...body });
+  assert.equal((await project({ op: 'create', fields: { name: 'Token receipt fixture', objective: 'Read recorded usage' } })).status, 201);
+  const registered = await project({ op: 'register_task', operation_id: crypto.randomUUID(), fields: taskFields });
+  const task_id = registered.body.task.id;
+  assert.equal((await task(0, { op: 'command', task_id, operation_id: crypto.randomUUID(), expected_version: registered.body.version,
+    action: { type: 'admit', executor: 'codex' } })).status, 200);
+  const worker = async request => (await rpc(0, 'task_engine_v1', {
+    application_id: fixture[0].id, worker_key: 'a'.repeat(64), request,
+  })).body.result.structuredContent;
+  const { claim } = await worker({ op: 'claim', operation_id: crypto.randomUUID(), worker_id: crypto.randomUUID() });
+  const session_id = crypto.randomUUID();
+  const reported = await worker({ op: 'report', task_id, attempt_id: claim.attempt.id, lease: claim.lease, operation_id: crypto.randomUUID(),
+    report: { type: 'failed', failure: 'Fixture execution stopped', session_id } });
+  assert.equal(reported.status, 200);
+  const at = new Date().toISOString();
+  const receipt = (session, counts) => ({
+    trace_version: 1, event_id: crypto.randomUUID(), trace_id: 'app-server-fixture', span_id: 'run', repository: fixture[0].repository,
+    task_id, attempt_id: claim.attempt.id, revision: claim.attempt.revision, session_id: session,
+    kind: 'measurement', phase: 'implementation', occurred_at: at,
+    measurements: Object.entries(counts).map(([name, value]) => ({
+      name: 'provider_' + name + '_tokens', unit: 'tokens', availability: 'observed', value,
+      source: 'codex_app_server_token_usage_updated', method: 'fresh_thread_total',
+    })),
+  });
+  const matching = receipt(session_id, { total: 90, input: 80, output: 10, cached_input: 60 });
+  const unrelated = receipt(crypto.randomUUID(), { total: 1000, input: 990, output: 10 });
+  const synced = await rpc(0, 'sync_task_telemetry', { application_id: fixture[0].id, task_id,
+    change: { base: null, generated_at: at, records: [registered.body.task], events: [matching, unrelated] } });
+  const syncReceipt = JSON.parse(synced.body.result.content[0].text);
+  assert.match(syncReceipt.digest ?? '', /^[a-f0-9]{64}$/, syncReceipt.error);
+  const detail = await call(0, '/api/projects/' + id);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.telemetry.total_tokens, 90);
+  assert.equal(detail.body.telemetry.input_tokens, 80);
+  assert.equal(detail.body.telemetry.measured_attempts, 1);
+  assert.equal(detail.body.telemetry.recent_attempts[0].observed_tokens, 90);
+  assert.equal(detail.body.telemetry.recent_attempts[0].token_source, 'Codex App Server');
+  assert.equal(detail.body.telemetry.recent_attempts[0].token_coverage, 'observed');
+  assert.equal(detail.body.telemetry.costs, null);
+});
+
 test('Project progress reports actual scoped execution, milestone gates and owner review', async t => {
   const { call, task, one, rpc } = setup(t);
   const project = request => call(0, '/api/projects', request);

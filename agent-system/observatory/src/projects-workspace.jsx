@@ -641,14 +641,16 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
           <dt>Attempts</dt><dd>{telemetry.attempts}</dd>
           <dt>Retries</dt><dd>{telemetry.retries}</dd>
           <dt>Failed or orphaned</dt><dd>{telemetry.failures}</dd>
-          <dt>Attempts with recorded CLI token usage</dt><dd>{telemetry.measured_attempts}</dd>
+          <dt>Attempts with observed token totals</dt><dd>{telemetry.measured_attempts}</dd>
           <dt>Recorded attempt duration</dt><dd>{telemetry.execution_ms === null ? 'Unavailable' : number(Math.round(telemetry.execution_ms / 1000)) + ' s'}</dd>
           <dt>Execution cost</dt><dd>{number(telemetry.costs)}</dd>
           <dt>CI usage</dt><dd>{number(telemetry.ci_usage)}</dd>
+          <dt>Observed total tokens</dt><dd>{number(telemetry.total_tokens)}</dd>
           <dt>Input tokens</dt><dd>{number(telemetry.input_tokens)}</dd>
           <dt>Cached input tokens</dt><dd>{number(telemetry.cached_input_tokens)}</dd>
           <dt>Output tokens</dt><dd>{number(telemetry.output_tokens)}</dd>
         </dl>
+        {telemetry.measured_attempts > 0 && <p>Totals include available observations, including partial or in-progress receipts.</p>}
         {telemetry.recent_attempts?.length > 0 && <details>
           <summary>Recent recorded attempts</summary>
           {telemetry.attempts > telemetry.recent_attempts.length && <p>Showing the latest {telemetry.recent_attempts.length} attempts.</p>}
@@ -662,7 +664,8 @@ export function ProjectsWorkspace({ projectId, headers, Panel, Status, Metric, D
               {attempt.execution_ms !== null && <small>{number(Math.round(attempt.execution_ms / 1000))} s elapsed</small>}
               {attempt.failure_category && <small>{attempt.failure_category.replaceAll('_', ' ')}</small>}
               <small>{attempt.observed_tokens === null ? 'Token total unavailable'
-                : number(attempt.observed_tokens) + (attempt.token_coverage === 'complete' ? ' recorded CLI tokens' : ' observed CLI tokens · partial')}</small>
+                : <>{number(attempt.observed_tokens)} tokens · {attempt.token_source}
+                  {attempt.token_coverage === 'in-progress' ? ' · observed so far' : attempt.token_coverage === 'partial' ? ' · partial' : ''}</>}</small>
             </li>;
           })}</ol>
         </details>}

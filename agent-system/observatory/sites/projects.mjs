@@ -1,4 +1,4 @@
-import { accountEngineeringTokens } from '../src/engineering-token-accounting.mjs';
+import { accountEngineeringTokens, accountLoadedAttemptReceipts } from '../src/engineering-token-accounting.mjs';
 import { readTaskRows, storedTaskDispatch, storedTaskPrerequisites, taskAttemptRecord } from './task-engine.mjs';
 import { combinedTelemetry } from './task-telemetry.mjs';
 import { uuid } from './application-config.mjs';
@@ -330,7 +330,8 @@ export async function projectOperation({ db, owner, namespace, application, body
         if (['failed', 'orphaned'].includes(attempt.state)) telemetry.failures++;
         const elapsed = Date.parse(attempt.finished_at) - Date.parse(attempt.started_at);
         const execution_ms = Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
-        projectAttempts.push({ ...taskAttemptRecord(task, attempt), recorded_state: attempt.state, execution_ms });
+        projectAttempts.push({ ...taskAttemptRecord(task, attempt), recorded_state: attempt.state, execution_ms,
+          session_id: attempt.session_id, resume_session_id: attempt.resume_session_id });
         if (execution_ms !== null) telemetry.execution_ms = (telemetry.execution_ms ?? 0) + execution_ms;
       }
     }
@@ -342,11 +343,13 @@ export async function projectOperation({ db, owner, namespace, application, body
       collectProjectArtifact(artifactSources, application.repository, item.task_id,
         { ...item.artifact, revision: item.revision }, { source: 'reported', kind: item.kind, result: item.result, synthetic: Boolean(item.synthetic) });
     }
-    const measured = accountEngineeringTokens({ tasks: projectTasks, attempts: projectAttempts, events, days: [], cutoff: Date.now(), sourceConflicts: 0 });
-    Object.assign(telemetry, { measured_attempts: measured.byAttempt.filter(attempt => attempt.observed.totalTokens !== null).length,
-      input_tokens: measured.observed.inputTokens, cached_input_tokens: measured.observed.cachedInputTokens,
-      output_tokens: measured.observed.outputTokens });
-    const tokensByAttempt = new Map(measured.byAttempt.map(item => [item.attemptId, item]));
+    const cutoff = Date.now();
+    const turnAccounting = accountEngineeringTokens({ tasks: projectTasks, attempts: projectAttempts, events, days: [], cutoff, sourceConflicts: 0 });
+    const observedUsage = accountLoadedAttemptReceipts({ tasks: projectTasks, attempts: projectAttempts, events, cutoff, turnAccounting });
+    const { tokens, attemptsWithTotals } = observedUsage.observed;
+    Object.assign(telemetry, { measured_attempts: attemptsWithTotals, total_tokens: tokens.totalTokens,
+      input_tokens: tokens.inputTokens, cached_input_tokens: tokens.cachedInputTokens, output_tokens: tokens.outputTokens });
+    const tokensByAttempt = new Map(observedUsage.byTask.flatMap(task => task.observedRows.map(item => [item.attemptId, item])));
     telemetry.recent_attempts = projectAttempts.sort((a, b) => b.started_at.localeCompare(a.started_at) || a.id.localeCompare(b.id))
       .slice(0, 20).map(attempt => {
         const tokens = tokensByAttempt.get(attempt.id);
@@ -355,6 +358,7 @@ export async function projectOperation({ db, owner, namespace, application, body
           state: attempt.recorded_state, started_at: attempt.started_at, execution_ms: attempt.execution_ms,
           provider: attempt.provider, failure_category: attempt.failure_category,
           observed_tokens: tokens?.observed.totalTokens ?? null, token_coverage: tokens?.coverage ?? 'unavailable',
+          token_source: tokens?.observed.totalTokens != null ? tokens.source ?? 'Codex CLI' : null,
         };
       });
     let previousReview = '';
